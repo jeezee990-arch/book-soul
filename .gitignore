@@ -1,0 +1,102 @@
+# ===== 隐私 / Secrets =====
+# 永远不入 git
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+secrets/
+api_keys.txt
+
+# ===== 运行时数据 =====
+data/
+book-soul.db
+book-soul.db-journal
+*.sqlite
+*.sqlite-journal
+chroma/
+chroma_db/
+vector_store/
+logs/
+*.log
+runtime/
+
+# ===== 用户数据 =====
+# 用户的小说、灵感、章节内容
+workspaces/
+my_novels/
+novels/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ===== Node / pnpm =====
+node_modules/
+.pnpm-store/
+dist/
+.vite/
+.turbo
+*.tsbuildinfo
+next-env.d.ts
+
+# ===== Tauri / Rust =====
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/Cargo.lock
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/WixTools/
+
+# ===== IDE =====
+.idea/
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.iml
+
+# ===== 构建产物 =====
+*.exe
+*.dll
+*.dylib
+*.so
+*.dmg
+*.msi
+*.deb
+*.rpm
+*.AppImage
+*.snap
+
+# ===== 测试 / 调试 =====
+*.pid
+*.seed
+*.pid.lock
+coverage/
+.nyc_output/
+
+# ===== 项目特定 =====
+# 用户上传的待扫描小说
+imports/
+uploads/

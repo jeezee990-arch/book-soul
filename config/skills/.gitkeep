@@ -1,0 +1,4 @@
+# Skill 元数据目录
+# builtin/ - 预装 skill 的定义（12 个）
+# user/ - 用户自定义 skill（运行时由用户在 UI 创建）
+# Phase 6.4 起会创建 builtin/word_counter.yaml, builtin/sensitive_word.yaml 等

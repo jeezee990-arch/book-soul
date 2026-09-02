@@ -1,0 +1,5 @@
+# 桌面应用
+# Phase 0.7 起会创建：
+# - desktop/src-tauri/ (Tauri Rust 壳)
+# - desktop/src/ (React 前端)
+# - web/ (未来 web 版预留)

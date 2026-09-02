@@ -1,0 +1,66 @@
+# gitleaks 配置 - 防止密钥泄露
+# 文档：https://github.com/gitleaks/gitleaks
+
+title = "Book Soul gitleaks config"
+
+[extend]
+# 使用内置规则
+useDefault = true
+
+# 自定义规则
+[[rules]]
+id = "minimax-api-key"
+description = "minimax API Key"
+regex = '''sk-api-[A-Za-z0-9_\-]{40,}'''
+keywords = ["sk-api-"]
+tags = ["secret", "api-key", "minimax"]
+
+[[rules]]
+id = "book-soul-api-key"
+description = "Book Soul LLM API Keys"
+regex = '''(?i)(minimax|openai|anthropic|tavily|smith)[_-]?api[_-]?key["\s:=]+['"]?[A-Za-z0-9_\-]{20,}['"]?'''
+keywords = ["minimax_api_key", "openai_api_key", "anthropic_api_key", "tavily_api_key"]
+tags = ["secret", "api-key"]
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API Key (sk-... 格式)"
+regex = '''sk-[A-Za-z0-9]{20,}T3BlbkFJ[A-Za-z0-9]{20,}'''
+keywords = ["sk-"]
+tags = ["secret", "api-key", "openai"]
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API Key"
+regex = '''sk-ant-[A-Za-z0-9_\-]{40,}'''
+keywords = ["sk-ant-"]
+tags = ["secret", "api-key", "anthropic"]
+
+[[rules]]
+id = "private-key"
+description = "Private Key"
+regex = '''-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----'''
+keywords = ["BEGIN PRIVATE KEY"]
+tags = ["private-key"]
+
+[[rules]]
+id = "generic-high-entropy"
+description = "Generic high entropy string"
+regex = '''(?i)(api[_-]?key|secret|token|password|passwd|pwd)["\s:=]+['"]?[A-Za-z0-9_\-]{32,}['"]?'''
+keywords = ["api_key", "secret", "token", "password"]
+tags = ["secret"]
+
+# 允许的误报（用于测试文件）
+[allowlist]
+description = "Allow test fixtures"
+paths = [
+  '''server/tests/fixtures/.*''',
+  '''\.env\.example$''',
+  '''docs/.*\.md$''',
+]
+
+regexes = [
+  '''sk-your-key-here''',
+  '''tvly-your-key-here''',
+  '''lsv2-your-key-here''',
+]

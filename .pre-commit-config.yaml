@@ -1,0 +1,62 @@
+# Pre-commit 配置 - 提交前自动检查
+# 安装：pre-commit install
+# 手动跑：pre-commit run --all-files
+
+default_language_version:
+  python: python3.11
+  node: 20
+
+repos:
+  # ===== Python: ruff（lint + format）=====
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        name: ruff lint
+        args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff format
+        types_or: [python, pyi]
+
+  # ===== 隐私检测：gitleaks =====
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.0
+    hooks:
+      - id: gitleaks
+        name: gitleaks secret scan
+
+  # ===== 通用检查 =====
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: trim trailing whitespace
+      - id: end-of-file-fixer
+        name: fix end of file
+      - id: check-yaml
+        name: check yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+        name: check json
+      - id: check-toml
+        name: check toml
+      - id: check-merge-conflict
+        name: check merge conflict
+      - id: check-added-large-files
+        name: check large files
+        args: [--maxkb=1024]
+      - id: detect-private-key
+        name: detect private key
+
+  # ===== 前端 =====
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.3.3
+    hooks:
+      - id: prettier
+        name: prettier format
+        types_or: [javascript, jsx, ts, tsx, json, css, markdown]
+        files: ^apps/.*\.(ts|tsx|js|jsx|json|css|md)$
+        args: [--single-quote, --trailing-comma=es5]
+        additional_dependencies:
+          - prettier@3.3.3

@@ -1,0 +1,4 @@
+# 提示词目录
+# 所有 prompt 必须在此目录下用 YAML 管理，禁止散落在代码中
+# 每个文件必须带 version 字段
+# Phase 3 起会陆续创建：inspiration_keywords, plot_generation, outline_complete, outline_freedom, character_generation, chapter_generation, chapter_rewrite, quality_*

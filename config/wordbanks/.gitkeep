@@ -1,0 +1,7 @@
+# 词库目录
+# Phase 3.1 会创建 4 个题材的词库：
+# - xiuxian.yaml (P0, 800+ 词)
+# - dushi.yaml (P1, 500+ 词)
+# - xuanyi.yaml (P2, 500+ 词)
+# - yanqing.yaml (P3, 500+ 词)
+# 每个文件按 themes/characters/plots/scenes/items 分类
