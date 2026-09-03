@@ -65,9 +65,7 @@ async def test_create_chapter_with_content_creates_initial_version(db_initialize
     content = "七月的青牛镇，烈日当空。"
     async with get_session() as session:
         svc = ChapterService(session)
-        data = ChapterCreate(
-            novel_id=nid, chapter_number=1, title="第一章", content=content
-        )
+        data = ChapterCreate(novel_id=nid, chapter_number=1, title="第一章", content=content)
         chapter = await svc.create(data)
 
     assert chapter.current_version_id is not None
@@ -201,9 +199,7 @@ async def test_update_chapter_partial(db_initialized):
     nid = await _create_novel(db_initialized)
     async with get_session() as session:
         svc = ChapterService(session)
-        c = await svc.create(
-            ChapterCreate(novel_id=nid, chapter_number=1, title="原")
-        )
+        c = await svc.create(ChapterCreate(novel_id=nid, chapter_number=1, title="原"))
 
     async with get_session() as session:
         svc = ChapterService(session)
@@ -246,9 +242,7 @@ async def test_update_chapter_does_not_create_version(db_initialized):
     nid = await _create_novel(db_initialized)
     async with get_session() as session:
         svc = ChapterService(session)
-        c = await svc.create(
-            ChapterCreate(novel_id=nid, chapter_number=1, content="initial")
-        )
+        c = await svc.create(ChapterCreate(novel_id=nid, chapter_number=1, content="initial"))
 
     async with get_session() as session:
         svc = ChapterService(session)
@@ -278,18 +272,14 @@ async def test_update_content_creates_version_with_parent(db_initialized):
     nid = await _create_novel(db_initialized)
     async with get_session() as session:
         svc = ChapterService(session)
-        c = await svc.create(
-            ChapterCreate(novel_id=nid, chapter_number=1, content="v1")
-        )
+        c = await svc.create(ChapterCreate(novel_id=nid, chapter_number=1, content="v1"))
         original_vid = c.current_version_id
 
     async with get_session() as session:
         svc = ChapterService(session)
         v2 = await svc.update_content(
             c.id,
-            ChapterContentUpdate(
-                content="v2 - new content", trigger="user_edit", prompt=None
-            ),
+            ChapterContentUpdate(content="v2 - new content", trigger="user_edit", prompt=None),
         )
         c2 = await svc.get(c.id)
 
@@ -310,15 +300,11 @@ async def test_update_content_chains_versions(db_initialized):
     nid = await _create_novel(db_initialized)
     async with get_session() as session:
         svc = ChapterService(session)
-        c = await svc.create(
-            ChapterCreate(novel_id=nid, chapter_number=1, content="v1")
-        )
+        c = await svc.create(ChapterCreate(novel_id=nid, chapter_number=1, content="v1"))
 
     async with get_session() as session:
         svc = ChapterService(session)
-        v2 = await svc.update_content(
-            c.id, ChapterContentUpdate(content="v2", trigger="rewrite")
-        )
+        v2 = await svc.update_content(c.id, ChapterContentUpdate(content="v2", trigger="rewrite"))
         v3 = await svc.update_content(
             c.id, ChapterContentUpdate(content="v3 - llm", trigger="llm_generate")
         )
@@ -353,9 +339,7 @@ async def test_update_content_rejects_invalid_trigger(db_initialized):
     async with get_session() as session:
         svc = ChapterService(session)
         with pytest.raises(ChapterValidationError, match="Invalid trigger"):
-            await svc.update_content(
-                c.id, ChapterContentUpdate(content="x", trigger="random")
-            )
+            await svc.update_content(c.id, ChapterContentUpdate(content="x", trigger="random"))
 
 
 @pytest.mark.asyncio
@@ -368,9 +352,7 @@ async def test_update_content_404(db_initialized):
     async with get_session() as session:
         svc = ChapterService(session)
         with pytest.raises(ChapterNotFoundError):
-            await svc.update_content(
-                9999, ChapterContentUpdate(content="x")
-            )
+            await svc.update_content(9999, ChapterContentUpdate(content="x"))
 
 
 @pytest.mark.asyncio
@@ -387,9 +369,7 @@ async def test_delete_chapter_cascades_versions(db_initialized):
     async with get_session() as session:
         svc = ChapterService(session)
         c = await svc.create(ChapterCreate(novel_id=nid, chapter_number=1, content="x"))
-        await svc.update_content(
-            c.id, ChapterContentUpdate(content="y", trigger="user_edit")
-        )
+        await svc.update_content(c.id, ChapterContentUpdate(content="y", trigger="user_edit"))
 
     async with get_session() as session:
         svc = ChapterService(session)
@@ -428,9 +408,7 @@ async def test_api_create_chapter(db_initialized):
     from src.main import app
 
     nid = await _create_novel(db_initialized)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             f"/novels/{nid}/chapters",
             json={"novel_id": nid, "chapter_number": 1, "title": "第一章"},
@@ -449,9 +427,7 @@ async def test_api_create_chapter_path_body_mismatch(db_initialized):
     from src.main import app
 
     nid = await _create_novel(db_initialized)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             f"/novels/{nid}/chapters",
             json={"novel_id": nid + 1, "chapter_number": 1},
@@ -468,9 +444,7 @@ async def test_api_list_chapters_by_novel(db_initialized):
 
     n1 = await _create_novel(db_initialized, name="n1")
     n2 = await _create_novel(db_initialized, name="n2")
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         await client.post(
             f"/novels/{n1}/chapters",
             json={"novel_id": n1, "chapter_number": 1, "title": "A"},
@@ -493,9 +467,7 @@ async def test_api_get_chapter_404(db_initialized):
 
     from src.main import app
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/chapters/9999")
     assert resp.status_code == 404
 
@@ -508,9 +480,7 @@ async def test_api_update_content_creates_version(db_initialized):
     from src.main import app
 
     nid = await _create_novel(db_initialized)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         c = (
             await client.post(
                 f"/novels/{nid}/chapters",
@@ -536,9 +506,7 @@ async def test_api_update_content_creates_version(db_initialized):
     assert v["content"] == "v2 - rewritten"
 
     # 查 chapter 应能看到 word_count 变了
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         c2 = (await client.get(f"/chapters/{cid}")).json()
     assert c2["word_count"] == len("v2 - rewritten")
 
@@ -551,9 +519,7 @@ async def test_api_list_versions(db_initialized):
     from src.main import app
 
     nid = await _create_novel(db_initialized)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         c = (
             await client.post(
                 f"/novels/{nid}/chapters",
@@ -586,9 +552,7 @@ async def test_api_get_version(db_initialized):
     from src.main import app
 
     nid = await _create_novel(db_initialized)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         c = (
             await client.post(
                 f"/novels/{nid}/chapters",
@@ -613,9 +577,7 @@ async def test_api_delete_chapter(db_initialized):
     from src.main import app
 
     nid = await _create_novel(db_initialized)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         c = (
             await client.post(
                 f"/novels/{nid}/chapters",
@@ -627,8 +589,6 @@ async def test_api_delete_chapter(db_initialized):
         del_resp = await client.delete(f"/chapters/{cid}")
     assert del_resp.status_code == 204
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         get_resp = await client.get(f"/chapters/{cid}")
     assert get_resp.status_code == 404

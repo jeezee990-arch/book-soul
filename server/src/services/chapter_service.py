@@ -54,9 +54,7 @@ class ChapterNumberConflictError(ChapterServiceError):
     """作品内 chapter_number 已存在。"""
 
     def __init__(self, novel_id: int, chapter_number: int) -> None:
-        super().__init__(
-            f"Chapter number {chapter_number} already exists in novel {novel_id}"
-        )
+        super().__init__(f"Chapter number {chapter_number} already exists in novel {novel_id}")
         self.novel_id = novel_id
         self.chapter_number = chapter_number
 
@@ -71,9 +69,7 @@ class ChapterService:
     @staticmethod
     def _validate_status(status: str | None) -> None:
         if status is not None and status not in CHAPTER_STATUSES:
-            raise ChapterValidationError(
-                f"Invalid status: {status!r}; allowed: {CHAPTER_STATUSES}"
-            )
+            raise ChapterValidationError(f"Invalid status: {status!r}; allowed: {CHAPTER_STATUSES}")
 
     @staticmethod
     def _validate_trigger(trigger: str) -> None:
@@ -87,9 +83,7 @@ class ChapterService:
         if novel is None:
             raise NovelNotFoundError(novel_id)
 
-    async def _check_chapter_number_unique(
-        self, novel_id: int, chapter_number: int
-    ) -> None:
+    async def _check_chapter_number_unique(self, novel_id: int, chapter_number: int) -> None:
         """作品内 chapter_number 不应重复。"""
         stmt = (
             select(Chapter)
@@ -167,9 +161,7 @@ class ChapterService:
         if status is not None:
             stmt = stmt.where(Chapter.status == status)
         stmt = (
-            stmt.order_by(
-                Chapter.chapter_number.asc(), Chapter.id.asc()
-            )
+            stmt.order_by(Chapter.chapter_number.asc(), Chapter.id.asc())
             .limit(limit)
             .offset(offset)
         )
@@ -183,18 +175,14 @@ class ChapterService:
         if "status" in updates:
             self._validate_status(updates["status"])
         if "chapter_number" in updates and updates["chapter_number"] != chapter.chapter_number:
-            await self._check_chapter_number_unique(
-                chapter.novel_id, updates["chapter_number"]
-            )
+            await self._check_chapter_number_unique(chapter.novel_id, updates["chapter_number"])
         for key, value in updates.items():
             setattr(chapter, key, value)
         await self.session.commit()
         await self.session.refresh(chapter)
         return chapter
 
-    async def update_content(
-        self, chapter_id: int, data: ChapterContentUpdate
-    ) -> ChapterVersion:
+    async def update_content(self, chapter_id: int, data: ChapterContentUpdate) -> ChapterVersion:
         """写新版本（正文更新）。"""
         self._validate_trigger(data.trigger)
         chapter = await self.get(chapter_id)
@@ -234,16 +222,12 @@ class ChapterService:
         stmt = (
             select(ChapterVersion)
             .where(ChapterVersion.chapter_id == chapter_id)
-            .order_by(
-                ChapterVersion.created_at.desc(), ChapterVersion.id.desc()
-            )
+            .order_by(ChapterVersion.created_at.desc(), ChapterVersion.id.desc())
         )
         result = await self.session.execute(stmt)
         return list(result.scalars())
 
-    async def get_version(
-        self, chapter_id: int, version_id: int
-    ) -> ChapterVersion:
+    async def get_version(self, chapter_id: int, version_id: int) -> ChapterVersion:
         """获取单个版本；不属于该 chapter 抛 NotFound。"""
         await self.get(chapter_id)
         version = await self.session.get(ChapterVersion, version_id)

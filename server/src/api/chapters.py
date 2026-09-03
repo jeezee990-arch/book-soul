@@ -56,9 +56,7 @@ async def create_chapter(
     service: ChapterService = Depends(get_service),
 ) -> ChapterRead:
     if payload.novel_id != novel_id:
-        raise HTTPException(
-            status_code=422, detail="novel_id in path and body must match"
-        )
+        raise HTTPException(status_code=422, detail="novel_id in path and body must match")
     try:
         chapter = await service.create(payload)
     except NovelNotFoundError as e:

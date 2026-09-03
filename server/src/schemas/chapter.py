@@ -33,9 +33,7 @@ class ChapterBase(BaseModel):
 
     chapter_number: int = Field(ge=1, le=100_000, description="作品内排序号（从 1 开始）")
     title: str | None = Field(default=None, max_length=_TITLE_MAX, description="章节标题")
-    outline: str | None = Field(
-        default=None, max_length=_OUTLINE_MAX, description="章节大纲/概要"
-    )
+    outline: str | None = Field(default=None, max_length=_OUTLINE_MAX, description="章节大纲/概要")
     status: str = Field(
         default="outline",
         max_length=_STATUS_MAX,

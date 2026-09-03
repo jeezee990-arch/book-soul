@@ -37,11 +37,11 @@ CHAPTER_STATUSES: tuple[str, ...] = (
 
 # ChapterVersion.trigger 的取值
 VERSION_TRIGGERS: tuple[str, ...] = (
-    "user_create",       # 用户创建章节时附 content
-    "user_edit",         # 用户直接改正文
-    "rewrite",           # 选区/全文 AI 重写
-    "llm_generate",      # LLM 生成（章节创作）
-    "imported",          # 扫描接入
+    "user_create",  # 用户创建章节时附 content
+    "user_edit",  # 用户直接改正文
+    "rewrite",  # 选区/全文 AI 重写
+    "llm_generate",  # LLM 生成（章节创作）
+    "imported",  # 扫描接入
 )
 
 
@@ -69,9 +69,7 @@ class Chapter(Base, TimestampMixin):
         ForeignKey("chapter_versions.id", ondelete="SET NULL", use_alter=True),
         nullable=True,
     )
-    word_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
+    word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="outline", server_default="outline"
     )
@@ -114,21 +112,15 @@ class ChapterVersion(Base):
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     diff: Mapped[str | None] = mapped_column(Text, nullable=True)
-    trigger: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="user_create"
-    )
+    trigger: Mapped[str] = mapped_column(String(30), nullable=False, default="user_create")
     prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata",  # 列名仍是 metadata（避免与 SQLAlchemy reserved 冲突）
         JSON,
         nullable=True,
     )
-    word_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow_naive, nullable=False
-    )
+    word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive, nullable=False)
 
     chapter: Mapped[Chapter] = relationship(
         "Chapter",
