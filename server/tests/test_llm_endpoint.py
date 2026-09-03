@@ -67,3 +67,21 @@ async def test_llm_test_uses_specified_provider(stub_env):
         )
     assert resp.status_code == 200
     assert resp.json()["provider"] == "ollama"
+
+
+@pytest.mark.asyncio
+async def test_llm_test_accepts_null_system(stub_env):
+    """system 字段为 null 时不应 422。"""
+    from httpx import ASGITransport, AsyncClient
+
+    from src.main import app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        # 显式发 system=null（模拟 Rust 端未跳过 None 字段的情况）
+        resp = await client.post(
+            "/llm/test", json={"prompt": "test", "system": None}
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["content"].startswith("[stubbed]")

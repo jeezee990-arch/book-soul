@@ -35,11 +35,14 @@ class TestLLMRequest(BaseModel):
         default=None,
         description="provider 名（None 用 default_provider）",
     )
-    system: str = Field(
-        default="You are a concise assistant. Reply in Chinese.",
-        description="系统提示词",
+    system: str | None = Field(
+        default=None,
+        description="系统提示词（None 用默认）",
     )
     max_tokens: int = Field(default=200, ge=1, le=8000)
+
+# 默认系统提示（system 字段为 None 时使用）
+_DEFAULT_SYSTEM = "You are a concise assistant. Reply in Chinese."
 
 
 class TestLLMResponse(BaseModel):
@@ -74,10 +77,11 @@ async def test_llm(req: TestLLMRequest) -> TestLLMResponse:
     except AuthError as e:
         raise HTTPException(status_code=401, detail=str(e)) from e
 
+    system_msg = req.system if req.system else _DEFAULT_SYSTEM
     try:
         resp = await client.chat(
             [
-                ChatMessage(role="system", content=req.system),
+                ChatMessage(role="system", content=system_msg),
                 ChatMessage(role="user", content=req.prompt),
             ],
             max_tokens=req.max_tokens,

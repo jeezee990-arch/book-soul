@@ -15,11 +15,11 @@ fn ping() -> String {
 struct LlmTestRequest {
     #[serde(default)]
     prompt: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     provider: Option<String>,
     #[serde(default = "default_max_tokens")]
     max_tokens: u32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     system: Option<String>,
 }
 
