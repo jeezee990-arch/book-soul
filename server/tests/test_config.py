@@ -93,10 +93,7 @@ def test_yaml_merge_fills_missing(monkeypatch, tmp_path):
     def fake_finder():
         fake = tmp_path / "app.yaml"
         fake.write_text(
-            "version: 1\n"
-            "book_soul_host: 0.0.0.0\n"
-            "book_soul_port: 7777\n"
-            "log_level: WARNING\n",
+            "version: 1\nbook_soul_host: 0.0.0.0\nbook_soul_port: 7777\nlog_level: WARNING\n",
             encoding="utf-8",
         )
         return fake
@@ -125,8 +122,7 @@ def test_yaml_does_not_override_env(monkeypatch, tmp_path):
     def fake_finder():
         fake = tmp_path / "app.yaml"
         fake.write_text(
-            "version: 1\n"
-            "book_soul_port: 7777\n",
+            "version: 1\nbook_soul_port: 7777\n",
             encoding="utf-8",
         )
         return fake

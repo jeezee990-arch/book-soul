@@ -615,30 +615,30 @@ CREATE TABLE versions (
 - **AGENTS.md 关键内容**：
   ```markdown
   # AGENTS.md
-  
+
   ## 项目概述
   Book Soul - 小说 AI 写作桌面应用
-  
+
   ## 技术栈
   - 后端：Python 3.11+ / FastAPI / SQLAlchemy 2 / SQLite / ChromaDB
   - 前端：React 18 / TypeScript / Vite / Tiptap / Tailwind / shadcn/ui
   - 桌面：Tauri 2
   - LLM：自研抽象层（不用 LangChain）
   - 包管理：uv (Python) / pnpm (Node)
-  
+
   ## 目录约定
   - 业务代码在 `server/src/`
   - 配置文件在 `config/`
   - 测试在 `server/tests/`
   - 不在 `server/src/` 直接写文件操作，统一走 services
-  
+
   ## 命名规范
   - 文件名：snake_case (Python) / kebab-case (前端)
   - 类名：PascalCase
   - 函数名：snake_case
   - 常量：UPPER_SNAKE_CASE
   - React 组件：PascalCase
-  
+
   ## 严格禁止
   - ❌ 不用 LangChain
   - ❌ 不用 Flask
@@ -648,12 +648,12 @@ CREATE TABLE versions (
   - ❌ 不用 print 调试（用 loguru）
   - ❌ 单一函数不超 200 行
   - ❌ SQL 不用参数化（必须用 ORM）
-  
+
   ## 提示词管理
   - 所有 prompt 在 `config/prompts/*.yaml`
   - 必带 version 字段
   - 改动更新 changelog
-  
+
   ## 安全规范
   - 所有 SQL 用 ORM（参数化）
   - 所有文件操作检查路径（防越界）
@@ -698,7 +698,7 @@ CREATE TABLE versions (
     "httpx>=0.27",
     "tenacity>=9.0",
   ]
-  
+
   [project.optional-dependencies]
   dev = [
     "pytest>=8.3",
@@ -708,15 +708,15 @@ CREATE TABLE versions (
     "mypy>=1.13",
     "pre-commit>=4.0",
   ]
-  
+
   [tool.ruff]
   line-length = 100
   target-version = "py311"
-  
+
   [tool.ruff.lint]
   select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "DTZ", "T"]
   ignore = ["E501"]
-  
+
   [tool.pytest.ini_options]
   asyncio_mode = "auto"
   testpaths = ["tests"]
@@ -729,17 +729,17 @@ CREATE TABLE versions (
   from .api import router as api_router
   from .core.config import settings
   from .db import init_db
-  
+
   @asynccontextmanager
   async def lifespan(app: FastAPI):
       logger.info("Starting Book Soul server")
       await init_db()
       yield
       logger.info("Shutting down")
-  
+
   app = FastAPI(title="Book Soul", lifespan=lifespan)
   app.include_router(api_router)
-  
+
   if __name__ == "__main__":
       import uvicorn
       uvicorn.run("src.main:app", host="127.0.0.1", port=8765, reload=True)
@@ -770,27 +770,27 @@ CREATE TABLE versions (
   ```python
   from pathlib import Path
   from pydantic_settings import BaseSettings, SettingsConfigDict
-  
+
   class Settings(BaseSettings):
       model_config = SettingsConfigDict(
           env_file=".env",
           env_file_encoding="utf-8",
           extra="ignore",
       )
-      
+
       # 数据目录
       data_dir: Path = Path.home() / "Documents" / "BookSoul"
-      
+
       # 服务
       host: str = "127.0.0.1"
       port: int = 8765
-      
+
       # 日志
       log_level: str = "INFO"
-      
+
       # 加密（可选）
       encryption_enabled: bool = False
-  
+
   settings = Settings()
   ```
 - **验证**：写测试 `test_config.py` 验证配置加载
@@ -810,17 +810,17 @@ CREATE TABLE versions (
   ```python
   from typing import Protocol, AsyncIterator
   from dataclasses import dataclass
-  
+
   @dataclass
   class ChatMessage:
       role: str
       content: str
-  
+
   @dataclass
   class ChatResponse:
       content: str
       usage: dict
-  
+
   class BaseLLMClient(Protocol):
       async def chat(
           self,
@@ -831,7 +831,7 @@ CREATE TABLE versions (
           max_tokens: int | None = None,
           stream: bool = False,
       ) -> ChatResponse | AsyncIterator[str]: ...
-      
+
       def count_tokens(self, text: str) -> int: ...
   ```
 - **关键代码 `factory.py`**：
@@ -841,9 +841,9 @@ CREATE TABLE versions (
   from .base import BaseLLMClient
   from .openai_compat import OpenAICompatClient
   from .ollama import OllamaClient
-  
+
   _config_cache: dict | None = None
-  
+
   def load_llm_config() -> dict:
       global _config_cache
       if _config_cache is None:
@@ -851,7 +851,7 @@ CREATE TABLE versions (
           with open(config_path, encoding="utf-8") as f:
               _config_cache = yaml.safe_load(f)
       return _config_cache
-  
+
   def create_llm_client(provider: str) -> BaseLLMClient:
       config = load_llm_config()
       provider_config = config["providers"][provider]
@@ -878,7 +878,7 @@ CREATE TABLE versions (
           max_output_tokens: 64000
           supports_chapter_range: true
           quality_tier: premium
-    
+
     openai:
       type: openai_compat
       base_url: https://api.openai.com/v1
@@ -893,7 +893,7 @@ CREATE TABLE versions (
           context_window: 128000
           max_output_tokens: 4096
           quality_tier: premium
-    
+
     ollama:
       type: ollama
       base_url: http://localhost:11434/v1
@@ -908,11 +908,11 @@ CREATE TABLE versions (
           context_window: 128000
           max_output_tokens: 8192
           quality_tier: local
-  
+
   chapter_limits:
     min_chars: 1000                   # JEE 决策：下限 1k
     max_chars: 8000                   # JEE 决策：上限 8k
-  
+
   routing:
     inspiration: minimax
     chapter_generation: minimax
@@ -926,12 +926,12 @@ CREATE TABLE versions (
   # server/src/core/llm/model_checker.py
   from dataclasses import dataclass
   from .factory import load_llm_config
-  
+
   @dataclass
   class ModelWarning:
       level: str  # 'error' | 'warning' | 'info'
       message: str
-  
+
   @dataclass
   class ModelCheckResult:
       provider: str
@@ -940,14 +940,14 @@ CREATE TABLE versions (
       max_output_tokens: int
       warnings: list[ModelWarning]
       can_generate_chapter: bool
-  
+
   def check_model_capability(
       provider: str,
       model: str,
       chapter_limits: tuple[int, int] = (1000, 8000),
   ) -> ModelCheckResult:
       """检查模型是否支持 1k-8k 字章节生成
-      
+
       规则：
       - context_window 必须 ≥ 32k（容纳 prompt + 历史 + 8k 字输出）
       - max_output_tokens 必须 ≥ 章节上限的 2x
@@ -955,32 +955,32 @@ CREATE TABLE versions (
       config = load_llm_config()
       provider_cfg = config['providers'][provider]
       model_spec = provider_cfg.get('model_specs', {}).get(model, {})
-      
+
       warnings: list[ModelWarning] = []
       context_window = model_spec.get('context_window', 0)
       max_output = model_spec.get('max_output_tokens', 0)
-      
+
       min_chars, max_chars = chapter_limits
       max_chars_tokens = max_chars * 2      # 中文 1 字 ≈ 1.5-2 tokens
       min_context_needed = 32_000
-      
+
       if context_window < min_context_needed:
           warnings.append(ModelWarning(
               level='error',
               message=f"模型 {model} 上下文仅 {context_window} tokens，无法支持 1k-8k 字生成"
           ))
-      
+
       if max_output < max_chars_tokens:
           warnings.append(ModelWarning(
               level='warning',
               message=f"模型 {model} 最大输出 {max_output} tokens，8k 字章节可能需分多次"
           ))
-      
+
       can_generate = (
           context_window >= min_context_needed
           and max_output >= max_chars_tokens // 2
       )
-      
+
       return ModelCheckResult(
           provider=provider, model=model,
           context_window=context_window,
@@ -1047,17 +1047,17 @@ CREATE TABLE versions (
   from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
   from sqlalchemy.orm import DeclarativeBase
   from .core.config import settings
-  
+
   class Base(DeclarativeBase):
       pass
-  
+
   engine = create_async_engine(
       f"sqlite+aiosqlite:///{settings.data_dir}/book-soul.db",
       echo=False,
   )
-  
+
   async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-  
+
   async def init_db():
       async with engine.begin() as conn:
           await conn.run_sync(Base.metadata.create_all)
@@ -1068,10 +1068,10 @@ CREATE TABLE versions (
   from sqlalchemy import String, Integer, DateTime
   from sqlalchemy.orm import Mapped, mapped_column
   from .base import Base
-  
+
   class Novel(Base):
       __tablename__ = "novels"
-      
+
       id: Mapped[int] = mapped_column(Integer, primary_key=True)
       name: Mapped[str] = mapped_column(String(200), nullable=False)
       genre: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -1115,12 +1115,12 @@ CREATE TABLE versions (
 - **关键代码 `main.rs`**：
   ```rust
   use tauri::Manager;
-  
+
   #[tauri::command]
   async fn ping() -> String {
       "pong".to_string()
   }
-  
+
   fn main() {
       tauri::Builder::default()
           .invoke_handler(tauri::generate_handler![ping])
@@ -1148,12 +1148,12 @@ CREATE TABLE versions (
         - id: ruff
           args: [--fix]
         - id: ruff-format
-    
+
     - repo: https://github.com/gitleaks/gitleaks
       rev: v8.18.0
       hooks:
         - id: gitleaks
-    
+
     - repo: https://github.com/pre-commit/pre-commit-hooks
       rev: v5.0.0
       hooks:
@@ -1176,13 +1176,13 @@ CREATE TABLE versions (
 - **关键代码 `ci.yml`**：
   ```yaml
   name: CI
-  
+
   on:
     push:
       branches: [main]
     pull_request:
       branches: [main]
-  
+
   jobs:
     backend:
       runs-on: windows-latest
@@ -1197,7 +1197,7 @@ CREATE TABLE versions (
         - run: cd server && uv run ruff format --check .
         - run: cd server && uv run pytest --cov
         - run: cd server && uv run mypy src
-  
+
     frontend:
       runs-on: windows-latest
       steps:
@@ -1226,11 +1226,11 @@ CREATE TABLE versions (
   ```tsx
   import { invoke } from "@tauri-apps/api/core";
   import { useState } from "react";
-  
+
   function App() {
     const [response, setResponse] = useState("");
     const [loading, setLoading] = useState(false);
-  
+
     async function testLLM() {
       setLoading(true);
       try {
@@ -1242,7 +1242,7 @@ CREATE TABLE versions (
         setLoading(false);
       }
     }
-  
+
     return (
       <div className="p-8">
         <h1 className="text-2xl font-bold">Book Soul</h1>
@@ -1257,7 +1257,7 @@ CREATE TABLE versions (
       </div>
     );
   }
-  
+
   export default App;
   ```
 - **验证**：点击按钮看到 LLM 真实回复
@@ -1292,25 +1292,25 @@ CREATE TABLE versions (
   from sqlalchemy import select
   from ..models.novel import Novel
   from ..schemas.novel import NovelCreate, NovelUpdate
-  
+
   class NovelService:
       def __init__(self, session: AsyncSession):
           self.session = session
-      
+
       async def create(self, data: NovelCreate) -> Novel:
           novel = Novel(**data.model_dump())
           self.session.add(novel)
           await self.session.commit()
           await self.session.refresh(novel)
           return novel
-      
+
       async def list_all(self) -> list[Novel]:
           result = await self.session.execute(select(Novel))
           return list(result.scalars())
-      
+
       async def get(self, novel_id: int) -> Novel | None:
           return await self.session.get(Novel, novel_id)
-      
+
       async def update(self, novel_id: int, data: NovelUpdate) -> Novel:
           novel = await self.get(novel_id)
           if not novel:
@@ -1319,7 +1319,7 @@ CREATE TABLE versions (
               setattr(novel, k, v)
           await self.session.commit()
           return novel
-      
+
       async def delete(self, novel_id: int) -> None:
           novel = await self.get(novel_id)
           if novel:
@@ -1353,17 +1353,17 @@ CREATE TABLE versions (
   from ..schemas.character import (
       CharacterCreate, CharacterUpdate, CharacterGrowthUpdate
   )
-  
+
   class CharacterService:
       def __init__(self, session: AsyncSession):
           self.session = session
-      
+
       async def create(self, data: CharacterCreate) -> Character:
           """创建人物卡 + 初始版本"""
           character = Character(**data.model_dump(exclude={"initial_data"}))
           self.session.add(character)
           await self.session.flush()
-          
+
           # 创建初始版本
           version = CharacterVersion(
               character_id=character.id,
@@ -1373,11 +1373,11 @@ CREATE TABLE versions (
           )
           self.session.add(version)
           await self.session.flush()
-          
+
           character.current_version_id = version.id
           await self.session.commit()
           return character
-      
+
       async def get_active_characters(self, novel_id: int) -> list[Character]:
           """获取作品所有活跃人物（创作时使用）"""
           result = await self.session.execute(
@@ -1385,7 +1385,7 @@ CREATE TABLE versions (
               .where(Character.novel_id == novel_id, Character.is_active == 1)
           )
           return list(result.scalars())
-      
+
       async def update_growth(
           self,
           character_id: int,
@@ -1393,19 +1393,19 @@ CREATE TABLE versions (
           new_personality: str,
       ) -> CharacterVersion:
           """记录性格变化
-        
+
           触发方式：主角经历某事件后性格改变
           自动追加到 growth_arc
           """
           character = await self.session.get(Character, character_id)
           if not character:
               raise ValueError(f"Character {character_id} not found")
-          
+
           # 追加到 growth_arc
           growth_entry = f"[{datetime.now().strftime('%Y-%m-%d')}] {event}：性格 → {new_personality}"
           character.growth_arc = (character.growth_arc or "") + "\n" + growth_entry
           character.personality = new_personality
-          
+
           # 创建新版本
           new_version = CharacterVersion(
               character_id=character.id,
@@ -1420,11 +1420,11 @@ CREATE TABLE versions (
           )
           self.session.add(new_version)
           await self.session.flush()
-          
+
           character.current_version_id = new_version.id
           await self.session.commit()
           return new_version
-      
+
       async def list_versions(self, character_id: int) -> list[CharacterVersion]:
           """查看人物卡版本历史"""
           result = await self.session.execute(
@@ -1465,7 +1465,7 @@ CREATE TABLE versions (
       )
       self.session.add(chapter)
       await self.session.flush()
-      
+
       if data.content:
           version = ChapterVersion(
               chapter_id=chapter.id,
@@ -1477,7 +1477,7 @@ CREATE TABLE versions (
           self.session.add(version)
           await self.session.flush()
           chapter.current_version_id = version.id
-      
+
       await self.session.commit()
       return chapter
   ```
@@ -1504,35 +1504,35 @@ CREATE TABLE versions (
   # encryption.py
   from cryptography.fernet import Fernet
   from .keyring_manager import KeyManager
-  
+
   class EncryptionService:
       def __init__(self):
           self.key = KeyManager.get_or_create_key()
           self.cipher = Fernet(self.key) if self.key else None
-      
+
       def encrypt(self, plaintext: str) -> str | None:
           if not self.cipher:
               return plaintext
           return self.cipher.encrypt(plaintext.encode()).decode()
-      
+
       def decrypt(self, ciphertext: str | None) -> str | None:
           if not self.cipher or not ciphertext:
               return ciphertext
           return self.cipher.decrypt(ciphertext.encode()).decode()
-  
+
   # keyring_manager.py
   import keyring
   import os
-  
+
   class KeyManager:
       SERVICE = "BookSoul"
-      
+
       @staticmethod
       def get_or_create_key() -> bytes:
           key_str = keyring.get_password(KeyManager.SERVICE, "encryption_key")
           if key_str:
               return key_str.encode()
-          
+
           key = Fernet.generate_key()
           keyring.set_password(KeyManager.SERVICE, "encryption_key", key.decode())
           return key
@@ -1575,7 +1575,7 @@ CREATE TABLE versions (
   import QualityCheck from "./pages/QualityCheck";
   import Library from "./pages/Library";
   import Settings from "./pages/Settings";
-  
+
   export default function App() {
     return (
       <HashRouter>
@@ -1608,7 +1608,7 @@ CREATE TABLE versions (
 - **关键代码 `api/index.ts`**：
   ```typescript
   import { invoke } from "@tauri-apps/api/core";
-  
+
   export async function callApi<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     try {
       return await invoke<T>(command, args);
@@ -1624,7 +1624,7 @@ CREATE TABLE versions (
   from .api import router
   app = FastAPI()
   app.include_router(router)
-  
+
   # Tauri 调用通过 HTTP 访问 FastAPI
   # 不需要单独的 Tauri 命令包装（除非有特殊需求）
   ```
@@ -1718,21 +1718,21 @@ CREATE TABLE versions (
   from pathlib import Path
   import yaml
   import random
-  
+
   class WordbankService:
       def __init__(self, genre: str):
           self.genre = genre
           self._load()
-      
+
       def _load(self):
           path = Path(f"config/wordbanks/{self.genre}.yaml")
           with open(path, encoding="utf-8") as f:
               self.data = yaml.safe_load(f)
-      
+
       def get_random_words(self, category: str, n: int = 10) -> list[str]:
           words = self.data.get(category, [])
           return random.sample(words, min(n, len(words)))
-      
+
       def get_all_categories(self) -> list[str]:
           return list(self.data.keys())
   ```
@@ -1831,14 +1831,14 @@ CREATE TABLE versions (
       extract_prompt = f"""
       从以下大纲中提取所有人物，按角色分类：
       主角 / 主角团 / 反派 / 正派 / 队友 / 其他
-      
+
       大纲：{json.dumps(outline, ensure_ascii=False)}
-      
+
       输出 JSON 列表：[{{"name": "...", "role": "..."}}]
       """
       characters_data = await self.llm.chat(...)
       characters_data = json.loads(characters_data.content)
-      
+
       # Step 2: 为每个人物生成完整卡
       characters = []
       for char in characters_data:
@@ -1848,7 +1848,7 @@ CREATE TABLE versions (
           角色：{char['role']}
           题材：修仙
           大纲上下文：{...}
-          
+
           输出 YAML 格式：
           ```yaml
           basic_info: ...
@@ -1863,7 +1863,7 @@ CREATE TABLE versions (
           # 解析 + 入库
           ...
           characters.append(character)
-      
+
       return characters
   ```
 - **用户人工**：在 UI 看自动生成的人物卡，可接受/编辑/重生
@@ -1893,7 +1893,7 @@ CREATE TABLE versions (
           "generate_outline", "edit_outline", "generate_characters",
           "edit_characters", "save", "done"
       ]
-      
+
       TRANSITIONS = {
           "idle": ["select_genre"],
           "select_genre": ["generate_keywords"],
@@ -1901,12 +1901,12 @@ CREATE TABLE versions (
           "select_keywords": ["generate_plot"],
           # ...
       }
-      
+
       def __init__(self, session_id: str):
           self.session_id = session_id
           self.current_state = "idle"
           self.context: dict = {}
-      
+
       def transition(self, to: str, **context):
           if to not in self.TRANSITIONS.get(self.current_state, []):
               raise ValueError(f"Invalid transition: {self.current_state} -> {to}")
@@ -1953,7 +1953,7 @@ CREATE TABLE versions (
   ```tsx
   import { useEditor, EditorContent } from "@tiptap/react";
   import StarterKit from "@tiptap/starter-kit";
-  
+
   export function NovelEditor({ content, onChange, onSelection }: Props) {
     const editor = useEditor({
       extensions: [StarterKit],
@@ -1964,7 +1964,7 @@ CREATE TABLE versions (
         if (from !== to) onSelection({ from, to, text: editor.state.doc.textBetween(from, to) });
       },
     });
-    
+
     return <EditorContent editor={editor} />;
   }
   ```
@@ -1990,7 +1990,7 @@ CREATE TABLE versions (
       chapter_outline = outline.get_chapter_outline(chapter_number)
       recent_summaries = await self.get_recent_summaries(novel_id, n=3)
       previous_tail = await self.get_chapter_tail(novel_id, chapter_number - 1, chars=1500)
-      
+
       # 2. 拼 prompt
       prompt = self.prompts["chapter_generation"].format(
           novel_name=novel.name,
@@ -2003,7 +2003,7 @@ CREATE TABLE versions (
           previous_tail=previous_tail,
           target_word_count=4000,
       )
-      
+
       # 3. 流式调用
       client = create_llm_client("minimax")
       messages = [ChatMessage("user", prompt)]
@@ -2030,15 +2030,15 @@ CREATE TABLE versions (
   async function rewriteSelection(editor: Editor, prompt: string) {
     const { from, to } = editor.state.selection;
     const original = editor.state.doc.textBetween(from, to);
-    
+
     const newContent = await streamApi("/chapters/rewrite", {
       chapter_id: currentChapterId,
       original_text: original,
       user_prompt: prompt,
     });
-    
+
     editor.chain().focus().setTextSelection({ from, to }).insertContent(newContent).run();
-    
+
     // 自动保存版本
     await saveVersion(currentChapterId, "ai_rewrite", prompt);
   }
@@ -2068,13 +2068,13 @@ CREATE TABLE versions (
   from sqlalchemy.ext.asyncio import AsyncSession
   from sqlalchemy import select
   from ..models.version import Version
-  
+
   class VersionTree:
       def __init__(self, session: AsyncSession, entity_type: str, entity_id: int):
           self.session = session
           self.entity_type = entity_type
           self.entity_id = entity_id
-      
+
       async def save_version(
           self,
           content: str,
@@ -2088,7 +2088,7 @@ CREATE TABLE versions (
               parent = await self.session.get(Version, parent_id)
               parent_content = parent.content
           diff = compute_diff(parent_content, content) if parent_content else None
-          
+
           version = Version(
               entity_type=self.entity_type,
               entity_id=self.entity_id,
@@ -2102,7 +2102,7 @@ CREATE TABLE versions (
           self.session.add(version)
           await self.session.commit()
           return version.id
-      
+
       async def list_versions(self) -> list[Version]:
           result = await self.session.execute(
               select(Version)
@@ -2110,16 +2110,16 @@ CREATE TABLE versions (
               .order_by(Version.created_at.desc())
           )
           return list(result.scalars())
-      
+
       async def rollback(self, version_id: int) -> int:
           """软回滚：把该版本内容设为当前内容，生成新版本"""
           target = await self.session.get(Version, version_id)
           if not target:
               raise ValueError(f"Version {version_id} not found")
-          
+
           # 找到当前最新版本作为 parent
           latest = (await self.list_versions())[0]
-          
+
           return await self.save_version(
               content=target.content,
               trigger="rollback",
@@ -2140,16 +2140,16 @@ CREATE TABLE versions (
   ```python
   from docx import Document
   from docx.shared import Pt
-  
+
   def export_to_word(chapters: list[Chapter], novel: Novel) -> bytes:
       doc = Document()
       doc.add_heading(novel.name, 0)
-      
+
       for chapter in chapters:
           doc.add_heading(chapter.title, level=1)
           for para in chapter.content.split("\n\n"):
               doc.add_paragraph(para)
-      
+
       buffer = io.BytesIO()
       doc.save(buffer)
       return buffer.getvalue()
@@ -2191,7 +2191,7 @@ CREATE TABLE versions (
 - **关键代码（并行调用）**：
   ```python
   import asyncio
-  
+
   async def evaluate_chapter(
       self,
       novel_id: int,
@@ -2200,16 +2200,16 @@ CREATE TABLE versions (
       chapter = await self.chapter_service.get(chapter_id)
       characters = await self.character_service.get_active_characters(novel_id)
       genre_config = load_genre_config(novel.genre)
-      
+
       dimensions = ["writing", "logic", "pacing", "consistency", "genre"]
-      
+
       # 并行调用
       tasks = [
           self._evaluate_dimension(dim, chapter, characters, genre_config)
           for dim in dimensions
       ]
       results = await asyncio.gather(*tasks)
-      
+
       return QualityReport(
           chapter_id=chapter_id,
           total_score=sum(r.score for r in results) / len(results),
@@ -2233,19 +2233,19 @@ CREATE TABLE versions (
   ) -> DimensionResult:
       prompt = f"""
       请检查以下章节中人物行为是否与人物卡一致。
-      
+
       # 人物卡
       {format_characters(characters)}
-      
+
       # 章节内容
       {chapter.content}
-      
+
       # 检查项
       1. 人物决策是否符合其"做事习惯"
       2. 人物对话是否符合其性格
       3. 是否有人物突然转变性格而未交代原因
       4. 人物关系是否前后一致
-      
+
       # 输出 JSON
       ```json
       {{
@@ -2332,12 +2332,12 @@ CREATE TABLE versions (
   import re
   from pathlib import Path
   from dataclasses import dataclass
-  
+
   CHAPTER_PATTERNS = [
       re.compile(r"第[一二三四五六七八九十百千万\d]+章\s*[^\n]*"),
       re.compile(r"Chapter\s*\d+", re.IGNORECASE),
   ]
-  
+
   @dataclass
   class DetectedNovel:
       dir_path: str
@@ -2345,36 +2345,36 @@ CREATE TABLE versions (
       chapter_count: int
       total_words: int
       chapters: list[dict]  # [{"title": ..., "path": ..., "word_count": ...}]
-  
+
   class NovelDetector:
       def is_novel_dir(self, path: str) -> bool:
           p = Path(path)
           if not p.is_dir():
               return False
-          
+
           md_files = list(p.glob("*.md"))
           if len(md_files) < 3:
               return False
-          
+
           # 检查文件命名
           for f in md_files[:5]:
               content = f.read_text(encoding="utf-8", errors="ignore")[:500]
               if any(p.search(content) for p in CHAPTER_PATTERNS):
                   return True
-          
+
           return False
-      
+
       def extract_metadata(self, path: str) -> DetectedNovel:
           p = Path(path)
           md_files = sorted(p.glob("*.md"))
-          
+
           chapters = []
           total_words = 0
           for f in md_files:
               content = f.read_text(encoding="utf-8", errors="ignore")
               words = len(content)
               total_words += words
-              
+
               # 提取章节标题
               title = f.stem
               for pattern in CHAPTER_PATTERNS:
@@ -2382,13 +2382,13 @@ CREATE TABLE versions (
                   if match:
                       title = match.group(0)
                       break
-              
+
               chapters.append({
                   "title": title,
                   "path": str(f.absolute()),
                   "word_count": words,
               })
-          
+
           return DetectedNovel(
               dir_path=str(p.absolute()),
               title=p.name,
@@ -2412,19 +2412,19 @@ CREATE TABLE versions (
   from typing import Protocol
   from dataclasses import dataclass, field
   from abc import abstractmethod
-  
+
   @dataclass
   class SkillResult:
       success: bool
       data: dict = field(default_factory=dict)
       error: str | None = None
-  
+
   class Skill(Protocol):
       name: str
       description: str
       input_schema: dict
       requires_llm: bool
-      
+
       @abstractmethod
       async def execute(self, **kwargs) -> SkillResult:
           ...
@@ -2432,7 +2432,7 @@ CREATE TABLE versions (
 - **关键代码 `word_counter.py`**：
   ```python
   from .base import Skill, SkillResult
-  
+
   class WordCounterSkill:
       name = "word_counter"
       description = "统计文本字数（中英文混合）"
@@ -2444,7 +2444,7 @@ CREATE TABLE versions (
           "required": ["text"]
       }
       requires_llm = False
-      
+
       async def execute(self, text: str) -> SkillResult:
           chinese = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
           english = len([w for w in text.split() if w.isascii()])
@@ -2531,11 +2531,11 @@ CREATE TABLE versions (
 - **关键代码**：
   ```yaml
   name: Release
-  
+
   on:
     push:
       tags: ['v*']
-  
+
   jobs:
     release:
       runs-on: ${{ matrix.os }}

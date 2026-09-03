@@ -77,7 +77,7 @@ git commit -m "Remove .env from tracking"
   │                                    │
   │                                    └─→ 发送：prompt（含小说上下文）
   │                                    └─→ 接收：生成内容
-  │                                    
+  │
   └─→ 数据存储：本地 SQLite + md 文件
 ```
 

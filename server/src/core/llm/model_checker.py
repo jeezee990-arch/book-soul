@@ -89,15 +89,12 @@ def check_model_capability(
             ModelWarning(
                 level="warning",
                 message=(
-                    f"模型 {model} 最大输出 {max_output} tokens，"
-                    f"{max_chars} 字章节可能需分多次生成"
+                    f"模型 {model} 最大输出 {max_output} tokens，{max_chars} 字章节可能需分多次生成"
                 ),
             )
         )
 
-    can_generate = (
-        context_window >= min_context and max_output >= max_chars_tokens // 2
-    )
+    can_generate = context_window >= min_context and max_output >= max_chars_tokens // 2
 
     return ModelCheckResult(
         provider=provider,

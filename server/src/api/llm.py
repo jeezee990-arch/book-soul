@@ -41,6 +41,7 @@ class TestLLMRequest(BaseModel):
     )
     max_tokens: int = Field(default=200, ge=1, le=8000)
 
+
 # 默认系统提示（system 字段为 None 时使用）
 _DEFAULT_SYSTEM = "You are a concise assistant. Reply in Chinese."
 

@@ -95,20 +95,14 @@ class Settings(BaseSettings):
 
     # ===== LLM（minimax 主用）=====
     minimax_api_key: str = Field(default="", alias="MINIMAX_API_KEY")
-    minimax_base_url: str = Field(
-        default="https://api.minimaxi.com/v1", alias="MINIMAX_BASE_URL"
-    )
+    minimax_base_url: str = Field(default="https://api.minimaxi.com/v1", alias="MINIMAX_BASE_URL")
 
     # ===== LLM（OpenAI 备用）=====
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    openai_base_url: str = Field(
-        default="https://api.openai.com/v1", alias="OPENAI_BASE_URL"
-    )
+    openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
 
     # ===== LLM（Ollama 本地）=====
-    ollama_base_url: str = Field(
-        default="http://localhost:11434/v1", alias="OLLAMA_BASE_URL"
-    )
+    ollama_base_url: str = Field(default="http://localhost:11434/v1", alias="OLLAMA_BASE_URL")
 
     def __init__(self, **kwargs: object) -> None:
         """从 ``config/app.yaml`` 注入用户默认值。

@@ -26,7 +26,11 @@ setup_logging()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """应用生命周期：启动时初始化 DB，关闭时记录日志。"""
-    logger.info("Starting Book Soul server (host={}, port={})", settings.book_soul_host, settings.book_soul_port)
+    logger.info(
+        "Starting Book Soul server (host={}, port={})",
+        settings.book_soul_host,
+        settings.book_soul_port,
+    )
     await init_db()
     try:
         yield

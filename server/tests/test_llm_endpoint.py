@@ -24,9 +24,7 @@ async def test_llm_test_stub_returns_prompt(stub_env):
 
     from src.main import app
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/llm/test",
             json={"prompt": "你好世界", "max_tokens": 50},
@@ -45,9 +43,7 @@ async def test_llm_test_default_max_tokens(stub_env):
 
     from src.main import app
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/llm/test", json={"prompt": "test"})
     assert resp.status_code == 200
 
@@ -59,12 +55,8 @@ async def test_llm_test_uses_specified_provider(stub_env):
 
     from src.main import app
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        resp = await client.post(
-            "/llm/test", json={"prompt": "test", "provider": "ollama"}
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/llm/test", json={"prompt": "test", "provider": "ollama"})
     assert resp.status_code == 200
     assert resp.json()["provider"] == "ollama"
 
@@ -76,12 +68,8 @@ async def test_llm_test_accepts_null_system(stub_env):
 
     from src.main import app
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # 显式发 system=null（模拟 Rust 端未跳过 None 字段的情况）
-        resp = await client.post(
-            "/llm/test", json={"prompt": "test", "system": None}
-        )
+        resp = await client.post("/llm/test", json={"prompt": "test", "system": None})
     assert resp.status_code == 200, resp.text
     assert resp.json()["content"].startswith("[stubbed]")
