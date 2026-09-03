@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 from loguru import logger
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -70,6 +70,18 @@ class Settings(BaseSettings):
     # ===== 数据目录 =====
     # 留空时回落到用户文档目录下的 BookSoul/
     book_soul_data_dir: Path | None = Field(default=None, alias="BOOK_SOUL_DATA_DIR")
+
+    @field_validator("book_soul_data_dir", mode="before")
+    @classmethod
+    def _empty_path_to_none(cls, v: object) -> object:
+        """把 .env / yaml 里的空字符串转成 None（让 fallback 生效）。"""
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        if isinstance(v, Path) and str(v) in ("", "."):
+            return None
+        return v
 
     # ===== 服务 =====
     book_soul_host: str = Field(default="127.0.0.1", alias="BOOK_SOUL_HOST")

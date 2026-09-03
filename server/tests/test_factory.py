@@ -80,15 +80,15 @@ def test_create_llm_client_ollama_works_without_key():
     assert client.provider == "ollama"
 
 
-def test_create_llm_client_openai_compat_raises_without_key():
-    """minimax 客户端创建时如果 .env 没 key 应抛 AuthError。"""
+def test_create_llm_client_openai_compat_raises_without_key(monkeypatch):
+    """minimax 客户端创建时如果 settings 没 key 应抛 AuthError。"""
+    from src.core.llm import factory as factory_mod
     from src.core.llm.base import AuthError
-    from src.core.llm.factory import create_llm_client
 
-    # 不设 MINIMAX_API_KEY，应该抛 AuthError
-    os.environ.pop("MINIMAX_API_KEY", None)
+    # 强制 _resolve_api_key_for 返回空
+    monkeypatch.setattr(factory_mod, "_resolve_api_key_for", lambda _: "")
     with pytest.raises(AuthError):
-        create_llm_client("minimax")
+        factory_mod.create_llm_client("minimax")
 
 
 def test_create_llm_client_for_scene_uses_routing():

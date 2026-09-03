@@ -1,11 +1,9 @@
 """数据库初始化与引擎管理。
 
-Phase 0 阶段只做：
-- 解析数据目录
-- 准备 SQLite 数据库文件
-- 暴露 ``engine`` 和 ``SessionLocal`` 工厂
-
-实际的表结构由 Phase 1 的 models/ 提供，Phase 1 会补充 ``Base.metadata.create_all``。
+模块 0.6 起：
+- 暴露 ``engine`` / ``SessionLocal`` / ``Base``
+- ``init_db()`` 创建 ``Base.metadata`` 里的所有表（首次启动）
+- 后续 schema 变更走 alembic（``alembic upgrade head``）
 """
 
 from __future__ import annotations
@@ -21,7 +19,10 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+# 触发模型注册（每个 model 文件 import 后会被挂到 Base.metadata）
+from . import models as _models  # noqa: F401
 from .core.config import settings
+from .models.base import Base
 
 # ===== 引擎与 Session 工厂 =====
 # 路径必须用绝对路径，并把 Windows 反斜杠转成 aiosqlite 能识别的正斜杠
@@ -48,14 +49,20 @@ def _ensure_data_dir() -> Path:
 
 
 async def init_db() -> None:
-    """应用启动时调用：准备数据目录，校验 DB 可达。
+    """应用启动时调用：准备数据目录 + 创建表 + 校验连接。
 
-    Phase 0 阶段不创建表（表模型在 Phase 1 引入）。仅验证目录与连接。
+    Phase 0 阶段用 ``Base.metadata.create_all`` 兜底（首次启动建表）。
+    Phase 1 起改走 alembic migration。
     """
     data_dir = _ensure_data_dir()
     logger.info("DB init: data_dir={}, db_path={}", data_dir, settings.db_path)
 
-    # 试探一次连接（不执行 SQL，只确认引擎可用）
+    # 1) 创建表（仅对未存在的；已存在则忽略）
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("DB tables ready: {}", list(Base.metadata.tables))
+
+    # 2) 校验连接
     try:
         async with engine.connect() as conn:
             await conn.run_sync(lambda _sync_conn: None)
@@ -70,3 +77,4 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     """便捷 session 上下文管理器（业务代码用 with 块即可）。"""
     async with SessionLocal() as session:
         yield session
+

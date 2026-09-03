@@ -19,6 +19,7 @@ from .base import BaseLLMClient
 from .ollama import OllamaClient
 from .openai_compat import OpenAICompatClient
 
+
 def _find_repo_root() -> Path:
     """向上找项目根：包含 ``config/`` 目录且 ``pyproject.toml`` 标志 workspace。"""
     p = Path(__file__).resolve().parent
