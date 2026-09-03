@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from .chapters import combined_router as chapters_router
 from .characters import combined_router as characters_router
 from .llm import router as llm_router
 from .main import router as main_router
@@ -13,3 +14,4 @@ router.include_router(main_router)
 router.include_router(llm_router)
 router.include_router(novels_router)
 router.include_router(characters_router)
+router.include_router(chapters_router)
