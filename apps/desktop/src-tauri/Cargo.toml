@@ -1,0 +1,27 @@
+[package]
+name = "book-soul-desktop"
+version = "0.1.0"
+description = "Book Soul - AI 辅助小说写作桌面应用"
+authors = ["JEE"]
+edition = "2021"
+
+# 库与二进制分离：lib 包含业务代码（移动端复用），main 只是个壳
+[lib]
+name = "book_soul_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 优化：release 编译体积
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

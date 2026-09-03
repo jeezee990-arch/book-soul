@@ -1,0 +1,10 @@
+# Rust 编译产物
+target/
+gen/
+WixTools/
+
+# 平台特定（不应入 git）
+*.pdb
+*.exp
+*.lib
+*.dll
