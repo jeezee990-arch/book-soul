@@ -1,0 +1,39 @@
+version: 1
+
+# LLM Provider 配置
+# 注意：本文件不入 key，api_key_env 指向 .env 里的变量名（实际值由 settings 注入）
+# 切换默认 provider：改 default_provider
+
+providers:
+  minimax:
+    type: openai_compat        # 走 OpenAI 兼容协议
+    base_url: https://api.minimaxi.com/v1
+    api_key_env: MINIMAX_API_KEY
+    default_model: MiniMax-Text-01
+    timeout_seconds: 60
+    max_retries: 3
+
+  openai:
+    type: openai_compat
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    default_model: gpt-4o-mini
+    timeout_seconds: 60
+    max_retries: 3
+
+  ollama:
+    type: ollama               # 走 Ollama 原生 /v1
+    base_url: http://localhost:11434/v1
+    api_key_env: ""            # 本地无需 key
+    default_model: qwen2.5:14b
+    timeout_seconds: 120
+    max_retries: 1
+
+# 默认 provider（业务代码不指定时使用）
+default_provider: minimax
+
+# 章节生成硬限（来自 AGENTS.md 安全规范）
+chapter:
+  min_words: 1000
+  max_words: 8000
+  warn_below_context_window: 32000    # 低于这个 context_window 不允许生成章节

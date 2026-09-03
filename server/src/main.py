@@ -16,7 +16,11 @@ from loguru import logger
 
 from .api import router as api_router
 from .core.config import settings
+from .core.logging import setup_logging
 from .db import init_db
+
+# 应用启动最早阶段初始化日志（必须在任何业务 logger.info 之前调用）
+setup_logging()
 
 
 @asynccontextmanager

@@ -1,0 +1,20 @@
+version: 1
+
+# 用户级应用配置
+# 优先级：.env > 本文件 > 代码默认值
+# 业务代码通过 src.core.config.settings 读取
+# key 命名与 src.core.config.Settings 字段一致
+
+# 数据目录（留空时回落到 ~/Documents/BookSoul/）
+book_soul_data_dir: ""
+
+# 服务端口
+book_soul_host: 127.0.0.1
+book_soul_port: 8765
+
+# 日志
+log_level: INFO          # DEBUG / INFO / WARNING / ERROR
+
+# 加密（开启后所有本地数据用 Fernet 加密；默认关闭）
+# ⚠️ 开启前请确认已经备份数据目录，丢失 key = 数据不可恢复
+encryption_enabled: false
