@@ -1,0 +1,19 @@
+[project]
+name = "book-soul"
+version = "0.1.0"
+description = "Book Soul - AI-assisted novel writing desktop app"
+requires-python = ">=3.11"
+
+# ⚠️ 这个根 pyproject 只是为了把多个子包串起来，不是真正可安装的包
+# 真正的依赖都在 server/ 和未来的 apps/* 下
+
+[tool.uv.workspace]
+members = ["server"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "DTZ", "T"]
+ignore = ["E501"]
