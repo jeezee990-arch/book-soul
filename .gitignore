@@ -103,3 +103,8 @@ uploads/
 
 # ===== 临时 smoke test =====
 server/tests/_smoke_*.py
+
+# ===== 临时调试脚本 =====
+# agent / 开发者调试用的临时脚本（不提交）
+tmp_*.py
+tmp_*.ps1
