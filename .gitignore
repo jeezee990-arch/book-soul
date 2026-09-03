@@ -100,3 +100,6 @@ coverage/
 # 用户上传的待扫描小说
 imports/
 uploads/
+
+# ===== 临时 smoke test =====
+server/tests/_smoke_*.py

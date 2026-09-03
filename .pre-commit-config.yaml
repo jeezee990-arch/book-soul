@@ -3,13 +3,13 @@
 # 手动跑：pre-commit run --all-files
 
 default_language_version:
-  python: python3.11
-  node: 20
+  python: python3
+  node: "20"
 
 repos:
   # ===== Python: ruff（lint + format）=====
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.4
+    rev: v0.16.5
     hooks:
       - id: ruff
         name: ruff lint
@@ -21,7 +21,7 @@ repos:
 
   # ===== 隐私检测：gitleaks =====
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.0
+    rev: v8.30.1
     hooks:
       - id: gitleaks
         name: gitleaks secret scan
@@ -50,13 +50,10 @@ repos:
         name: detect private key
 
   # ===== 前端 =====
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v3.3.3
-    hooks:
-      - id: prettier
-        name: prettier format
-        types_or: [javascript, jsx, ts, tsx, json, css, markdown]
-        files: ^apps/.*\.(ts|tsx|js|jsx|json|css|md)$
-        args: [--single-quote, --trailing-comma=es5]
-        additional_dependencies:
-          - prettier@3.3.3
+  # prettier 暂不在 Phase 0 启用（等 apps/web/ 出现后用项目级 prettier）
+  # 未来添加：
+  # - repo: https://github.com/pre-commit/mirrors-prettier
+  #   rev: v4.0.0  # 实际版本以 https://github.com/pre-commit/mirrors-prettier/tags 为准
+  #   hooks:
+  #     - id: prettier
+  #       files: ^apps/.*\.(ts|tsx|js|jsx|json|css|md)$
