@@ -1,6 +1,13 @@
 # AGENTS.md - Book Soul 项目规范
 
+<!--
+修改记录
+- 2026-09-03：用户授权，添加 [DEVELOPMENT_CONSTRAINTS.md] 链接（顶部 + 参考资料）
+-->
+
 > 这是项目根目录的强制规范文件。所有参与本项目的 agent（minimax code 等）必须遵守。
+>
+> 📌 配套**行为约束**（沟通、流程、决策、agent 工作流）见 [DEVELOPMENT_CONSTRAINTS.md](./DEVELOPMENT_CONSTRAINTS.md)。本文件管"技术规范"，那文件管"行为约束"，**两者互补不替代**。
 
 ## 项目概述
 
@@ -176,3 +183,4 @@ git push origin main
 - 完整开发计划：`PROJECT_PLAN.md`
 - 用户准备清单：`USER_CHECKLIST.md`
 - 安全策略：`SECURITY.md`
+- 开发行为约束：[DEVELOPMENT_CONSTRAINTS.md](./DEVELOPMENT_CONSTRAINTS.md)（沟通、流程、决策）

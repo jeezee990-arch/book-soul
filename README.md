@@ -61,6 +61,7 @@ cd apps/desktop && pnpm tauri dev
 详细开发文档见：
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) - 完整开发计划
 - [USER_CHECKLIST.md](USER_CHECKLIST.md) - 用户准备清单
+- [DEVELOPMENT_CONSTRAINTS.md](DEVELOPMENT_CONSTRAINTS.md) - 开发行为约束（agent 必读）
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md) - 用户手册（开发中）
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - 架构说明（开发中）
 
@@ -90,7 +91,8 @@ book-soul/
 欢迎贡献代码、报告 Bug、提出建议！
 
 开发前请阅读：
-- [AGENTS.md](AGENTS.md) - 项目规范（强制）
+- [AGENTS.md](AGENTS.md) - 项目技术规范（强制）
+- [DEVELOPMENT_CONSTRAINTS.md](DEVELOPMENT_CONSTRAINTS.md) - 开发行为约束（强制）
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) - 开发计划
 - [SECURITY.md](SECURITY.md) - 安全策略
 
