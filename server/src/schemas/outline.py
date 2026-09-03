@@ -1,0 +1,140 @@
+"""Outline Pydantic schemas（输入/输出契约）。
+
+structure 字段是 dict[str, Any]，具体形状由 outline_type 决定；
+service 层用对应 Pydantic model 校验形状（避免 schema 层 discriminated union 复杂性）。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from ..models.outline import OUTLINE_TYPES
+
+_TYPE_MAX = 20
+_SUMMARY_MAX = 10_000
+_BEAT_MAX = 500
+_THEME_MAX = 200
+_VOLUME_NAME_MAX = 100
+_CHAPTER_TITLE_MAX = 200
+_KEY_EVENT_MAX = 500
+
+
+# ===== structure 子模型（complete / freedom 形状）=====
+# 这些不在 OutlineCreate 里直接用（太复杂），由 service 层 validate_structure() 校验
+# 但放在这里作为"structure 形状的参考 + 测试可复用"
+
+
+class ChapterNode(BaseModel):
+    """complete 结构里的章节节点。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=_CHAPTER_TITLE_MAX)
+    summary: str | None = Field(default=None, max_length=_SUMMARY_MAX)
+    key_events: list[str] = Field(default_factory=list)
+
+
+class VolumeNode(BaseModel):
+    """complete 结构里的卷节点。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=_VOLUME_NAME_MAX)
+    summary: str | None = Field(default=None, max_length=_SUMMARY_MAX)
+    chapters: list[ChapterNode] = Field(default_factory=list)
+
+
+class CompleteStructure(BaseModel):
+    """完整版大纲：分卷 > 章 > 关键事件。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    volumes: list[VolumeNode] = Field(default_factory=list, description="分卷列表")
+    overall_theme: str | None = Field(default=None, max_length=_THEME_MAX, description="全篇主题")
+
+
+class FreedomStructure(BaseModel):
+    """创作型大纲：自由文字 + 关键节拍 + 主题。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=1, max_length=_SUMMARY_MAX, description="大纲文字描述")
+    key_beats: list[str] = Field(default_factory=list, description="关键节拍")
+    themes: list[str] = Field(default_factory=list, description="主题列表")
+
+
+# ===== Outline 主 schema =====
+
+
+class OutlineBase(BaseModel):
+    """大纲共有字段。"""
+
+    outline_type: str = Field(
+        default="complete",
+        max_length=_TYPE_MAX,
+        description=f"大纲模式，取值之一：{', '.join(OUTLINE_TYPES)}",
+    )
+
+
+class OutlineCreate(OutlineBase):
+    """创建输入。structure 形状由 outline_type 决定（service 校验）。"""
+
+    novel_id: int = Field(gt=0, description="所属作品 id")
+    structure: dict[str, Any] = Field(
+        description=(
+            "大纲结构（dict）。"
+            "complete: 应含 volumes: [...]；"
+            "freedom: 应含 summary: str + key_beats: [...]。形状错误会被 service 拒。"
+        )
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "novel_id": 1,
+                    "outline_type": "complete",
+                    "structure": {
+                        "volumes": [
+                            {
+                                "name": "第一卷 凡人篇",
+                                "chapters": [{"title": "韩立出生", "key_events": ["测试灵根"]}],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "novel_id": 1,
+                    "outline_type": "freedom",
+                    "structure": {
+                        "summary": "一个凡人修仙的热血故事",
+                        "key_beats": ["灵根测试", "拜入宗门", "修为提升"],
+                    },
+                },
+            ]
+        }
+    )
+
+
+class OutlineUpdate(BaseModel):
+    """部分更新。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    outline_type: str | None = Field(default=None, max_length=_TYPE_MAX)
+    structure: dict[str, Any] | None = Field(default=None)
+
+
+class OutlineRead(OutlineBase):
+    """API 返回。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    novel_id: int
+    structure: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
