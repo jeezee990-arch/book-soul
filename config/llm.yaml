@@ -1,17 +1,25 @@
 version: 1
 
 # LLM Provider 配置
-# 注意：本文件不入 key，api_key_env 指向 .env 里的变量名（实际值由 settings 注入）
+# 注意：本文件不含真 key；api_key_env 指向 .env 里的变量名
 # 切换默认 provider：改 default_provider
+# 切换场景默认：改 routing.<场景>
 
 providers:
   minimax:
     type: openai_compat        # 走 OpenAI 兼容协议
     base_url: https://api.minimaxi.com/v1
     api_key_env: MINIMAX_API_KEY
-    default_model: MiniMax-Text-01
+    default_model: MiniMax-M3
     timeout_seconds: 60
     max_retries: 3
+    models: [MiniMax-M3]
+    model_specs:
+      MiniMax-M3:
+        context_window: 1000000      # 1M tokens（开发期辅助模型）
+        max_output_tokens: 64000
+        supports_chapter_range: true
+        quality_tier: premium
 
   openai:
     type: openai_compat
@@ -20,20 +28,66 @@ providers:
     default_model: gpt-4o-mini
     timeout_seconds: 60
     max_retries: 3
+    models: [gpt-4o-mini, gpt-4o]
+    model_specs:
+      gpt-4o-mini:
+        context_window: 128000
+        max_output_tokens: 16384
+        supports_chapter_range: true
+        quality_tier: standard
+      gpt-4o:
+        context_window: 128000
+        max_output_tokens: 4096
+        supports_chapter_range: true
+        quality_tier: premium
 
   ollama:
-    type: ollama               # 走 Ollama 原生 /v1
+    type: ollama               # 走 Ollama /v1 兼容协议
     base_url: http://localhost:11434/v1
     api_key_env: ""            # 本地无需 key
     default_model: qwen2.5:14b
     timeout_seconds: 120
     max_retries: 1
+    models: [qwen2.5:14b, qwen2.5:7b, llama3.1:8b]
+    model_specs:
+      qwen2.5:14b:
+        context_window: 128000
+        max_output_tokens: 8192
+        supports_chapter_range: true
+        quality_tier: local
+      qwen2.5:7b:
+        context_window: 32768
+        max_output_tokens: 8192
+        supports_chapter_range: true
+        quality_tier: local
+      llama3.1:8b:
+        context_window: 128000
+        max_output_tokens: 8192
+        supports_chapter_range: true
+        quality_tier: local
 
-# 默认 provider（业务代码不指定时使用）
+# 默认 provider
 default_provider: minimax
 
-# 章节生成硬限（来自 AGENTS.md 安全规范）
-chapter:
-  min_words: 1000
-  max_words: 8000
-  warn_below_context_window: 32000    # 低于这个 context_window 不允许生成章节
+# 章节硬限（来自 AGENTS.md 安全规范 + JEE 决策）
+chapter_limits:
+  min_chars: 1000
+  max_chars: 8000
+  min_context_needed: 32000       # 低于此 context_window 不允许生成章节
+
+# 场景路由：每个业务场景用哪个 provider
+routing:
+  inspiration: minimax
+  plot_generation: minimax
+  outline_complete: minimax
+  outline_freedom: minimax
+  character_generation: minimax
+  chapter_generation: minimax
+  chapter_rewrite: minimax
+  quality_check: ollama
+  summarize: ollama
+  quality_writing: ollama
+  quality_logic: ollama
+  quality_pacing: ollama
+  quality_consistency: ollama
+  quality_genre: ollama

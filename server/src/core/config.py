@@ -19,16 +19,25 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _find_app_yaml() -> Path | None:
-    """定位 ``config/app.yaml``。
+def _find_repo_root() -> Path:
+    """向上找项目根：包含 ``config/`` 目录 + ``pyproject.toml``。"""
+    p = Path(__file__).resolve().parent
+    for _ in range(8):
+        if (p / "config").is_dir() and (p / "pyproject.toml").is_file():
+            return p
+        p = p.parent
+    # fallback：硬编码（server/src/core/config.py → 根）
+    return Path(__file__).resolve().parents[3]
 
-    顺序：
-    1. ``<repo_root>/config/app.yaml``（项目内）
-    2. ``<data_dir>/app.yaml``（用户级覆盖，未来支持）
-    """
-    repo_root = Path(__file__).resolve().parents[3]  # server/src/core/config.py → 根
-    candidate = repo_root / "config" / "app.yaml"
-    return candidate if candidate.is_file() else None
+
+_REPO_ROOT = _find_repo_root()
+_ENV_FILE = _REPO_ROOT / ".env"
+_APP_YAML = _REPO_ROOT / "config" / "app.yaml"
+
+
+def _find_app_yaml() -> Path | None:
+    """定位 ``config/app.yaml``。"""
+    return _APP_YAML if _APP_YAML.is_file() else None
 
 
 def _load_yaml_defaults() -> dict:
@@ -52,7 +61,7 @@ class Settings(BaseSettings):
     """应用全局配置。"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

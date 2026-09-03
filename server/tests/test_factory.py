@@ -1,0 +1,118 @@
+"""测试 llm factory：配置加载 + 客户端创建 + routing 解析。"""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env(monkeypatch, tmp_path):
+    """每个测试清掉 keyring/真实 env，制造干净环境。"""
+    for key in (
+        "MINIMAX_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    yield
+
+
+def test_load_llm_config_has_providers():
+    """llm.yaml 应至少包含 minimax / openai / ollama 三个 provider。"""
+    from src.core.llm.factory import load_llm_config
+
+    cfg = load_llm_config()
+    assert "providers" in cfg
+    providers = cfg["providers"]
+    assert "minimax" in providers
+    assert "openai" in providers
+    assert "ollama" in providers
+
+
+def test_get_default_provider_is_minimax():
+    """default_provider 应为 minimax。"""
+    from src.core.llm.factory import get_default_provider
+
+    assert get_default_provider() == "minimax"
+
+
+def test_get_provider_config_minimax():
+    """minimax provider config 应包含必要字段。"""
+    from src.core.llm.factory import get_provider_config
+
+    pc = get_provider_config("minimax")
+    assert pc["type"] == "openai_compat"
+    assert pc["api_key_env"] == "MINIMAX_API_KEY"
+    assert "MiniMax-M3" in pc["model_specs"]
+    spec = pc["model_specs"]["MiniMax-M3"]
+    assert spec["context_window"] >= 32000  # 必须支持章节生成
+    assert pc["provider_name"] == "minimax"
+
+
+def test_resolve_provider_for_scene_chapter():
+    """routing.chapter_generation 应映射到 minimax。"""
+    from src.core.llm.factory import resolve_provider_for_scene
+
+    assert resolve_provider_for_scene("chapter_generation") == "minimax"
+
+
+def test_resolve_provider_for_scene_quality_check():
+    """routing.quality_check 应映射到 ollama。"""
+    from src.core.llm.factory import resolve_provider_for_scene
+
+    assert resolve_provider_for_scene("quality_check") == "ollama"
+
+
+def test_resolve_provider_for_scene_unknown_falls_back():
+    """未知 scene 应回落到 default_provider。"""
+    from src.core.llm.factory import resolve_provider_for_scene
+
+    assert resolve_provider_for_scene("totally_made_up_scene") == "minimax"
+
+
+def test_create_llm_client_ollama_works_without_key():
+    """Ollama 客户端创建时不应要求 key。"""
+    from src.core.llm.factory import create_llm_client
+
+    client = create_llm_client("ollama")
+    assert client.provider == "ollama"
+
+
+def test_create_llm_client_openai_compat_raises_without_key():
+    """minimax 客户端创建时如果 .env 没 key 应抛 AuthError。"""
+    from src.core.llm.base import AuthError
+    from src.core.llm.factory import create_llm_client
+
+    # 不设 MINIMAX_API_KEY，应该抛 AuthError
+    os.environ.pop("MINIMAX_API_KEY", None)
+    with pytest.raises(AuthError):
+        create_llm_client("minimax")
+
+
+def test_create_llm_client_for_scene_uses_routing():
+    """create_llm_client_for_scene 应按 routing 选择 provider。"""
+    from src.core.llm.factory import create_llm_client_for_scene
+
+    client = create_llm_client_for_scene("quality_check")
+    # quality_check 路由到 ollama
+    assert client.provider == "ollama"
+
+
+def test_get_provider_config_unknown_raises():
+    """未知 provider 名应抛 KeyError。"""
+    from src.core.llm.factory import get_provider_config
+
+    with pytest.raises(KeyError):
+        get_provider_config("totally_made_up")
+
+
+def test_load_llm_config_caches():
+    """load_llm_config 应被 lru_cache 缓存。"""
+    from src.core.llm import factory
+
+    factory.clear_cache()
+    cfg1 = factory.load_llm_config()
+    cfg2 = factory.load_llm_config()
+    assert cfg1 is cfg2  # 同一对象
