@@ -74,7 +74,19 @@ async def init_db() -> None:
 
 @asynccontextmanager
 async def get_session() -> AsyncIterator[AsyncSession]:
-    """便捷 session 上下文管理器（业务代码用 with 块即可）。"""
+    """便捷 session 上下文管理器（业务/测试代码用 ``async with`` 块即可）。"""
     async with SessionLocal() as session:
         yield session
 
+
+async def get_db() -> AsyncIterator[AsyncSession]:
+    """FastAPI yield-based dependency。
+
+    不用 ``@asynccontextmanager``：包装后的 ``_AsyncGeneratorContextManager`` 类型
+    不支持 FastAPI 依赖注入系统的迭代协议。改成普通 async generator，
+    FastAPI 的 ``Depends(get_db)`` 会自动按 generator-based dependency 处理。
+
+    调用方仍用 ``async with SessionLocal()`` 模式；``Depends(get_db)`` 自动关闭。
+    """
+    async with SessionLocal() as session:
+        yield session

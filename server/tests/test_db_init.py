@@ -1,44 +1,12 @@
-"""测试 db.py：init_db 建表 + get_session 上下文 + Novel 增删改查。"""
+"""测试 db.py：init_db 建表 + get_session 上下文 + Novel 增删改查。
+
+temp_db fixture 见 tests/conftest.py。
+"""
 
 from __future__ import annotations
 
 import pytest
 from sqlalchemy import inspect
-
-
-@pytest.fixture
-def temp_db(monkeypatch, tmp_path):
-    """把数据目录切到 tmp_path，强制重建 src.* 模块（让 engine 用新路径）。
-
-    注意：src.db 的 engine 是模块级常量，必须卸载整个 src.* 子树重建。
-    """
-    import sys
-
-    data_dir = tmp_path / "data"
-    monkeypatch.setenv("BOOK_SOUL_DATA_DIR", str(data_dir))
-
-    # 卸载 src.* 全部子模块，让下次 import 时按新 env 重新构造
-    to_remove = [name for name in sys.modules if name == "src" or name.startswith("src.")]
-    for name in to_remove:
-        del sys.modules[name]
-
-    yield data_dir / "book-soul.db"
-
-    # teardown：清理临时 engine
-    try:
-        import asyncio
-
-        from src import db as db_mod  # noqa: PLC0415
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                return  # 测试期间 loop 在跑，跳过
-            loop.run_until_complete(db_mod.engine.dispose())
-        except RuntimeError:
-            pass
-    except Exception:  # noqa: BLE001
-        pass
 
 
 @pytest.mark.asyncio
