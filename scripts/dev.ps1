@@ -15,7 +15,8 @@
 $ErrorActionPreference = 'Stop'
 
 # Resolve paths (script lives in scripts/, repo root is its parent)
-$RepoRoot   = Split-Path -Parent $PSScriptRoot
+$ScriptDir  = Split-Path -Parent $PSCommandPath
+$RepoRoot   = Split-Path -Parent $ScriptDir
 $ServerDir  = Join-Path $RepoRoot 'server'
 $DesktopDir = Join-Path $RepoRoot 'apps\desktop'
 $PythonExe  = Join-Path $RepoRoot '.venv\Scripts\python.exe'
@@ -24,26 +25,25 @@ $LogDir     = $env:TEMP
 
 # Pre-flight checks
 if (-not (Test-Path $PythonExe)) {
-    Write-Error "[X] Python not found: $PythonExe`n    Run 'uv pip install -e .[dev]' in server/ first."
+    Write-Error "[X] Python not found: $PythonExe. Run 'uv pip install -e .[dev]' in server/ first."
 }
 if (-not (Test-Path (Join-Path $DesktopDir 'node_modules'))) {
-    Write-Error "[X] node_modules missing: $DesktopDir\node_modules`n    Run 'pnpm install' in apps/desktop/ first."
+    Write-Error "[X] node_modules missing: $DesktopDir\node_modules. Run 'pnpm install' in apps/desktop/ first."
 }
 
-# Ensure rustup-managed cargo is on PATH (Tauri needs it).
-# PowerShell launched from a non-interactive context may not inherit it.
+# Ensure rustup-managed cargo is on PATH (Tauri needs it)
 $CargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
 if (Test-Path (Join-Path $CargoBin 'cargo.exe')) {
     $env:PATH = "$CargoBin;$env:PATH"
     Write-Host "       cargo PATH: $CargoBin" -ForegroundColor DarkGray
 } else {
-    Write-Error "[X] cargo not found at $CargoBin`n    Install Rust: https://rustup.rs/"
+    Write-Error "[X] cargo not found at $CargoBin. Install Rust: https://rustup.rs/"
 }
 
 # ===== Step 1: Start Python backend =====
 Write-Host "[1/3] Starting Python backend ($BackendUrl)..." -ForegroundColor Cyan
 
-# 隔离 dev 数据目录：避免污染 ~/Documents/BookSoul（Phase 1 加的列 vs Phase 0 老 DB）
+# 隔离 dev 数据目录：避免污染 ~/Documents/BookSoul
 $DevDataDir = Join-Path $RepoRoot 'data\dev'
 if (-not (Test-Path $DevDataDir)) {
     New-Item -ItemType Directory -Path $DevDataDir | Out-Null
@@ -97,8 +97,7 @@ Write-Host "  Tauri starting ... Ctrl+C stops both" -ForegroundColor Yellow
 Write-Host "============================================" -ForegroundColor Magenta
 Write-Host ""
 
-# Use & (call operator) so PowerShell resolves pnpm.cmd / pnpm.ps1 on PATH.
-# Start-Process fails with "%1 is not a valid Win32 application" for .cmd shims.
+# Use & (call operator) so PowerShell resolves pnpm.cmd / pnpm.ps1 on PATH
 $DesktopExitCode = 0
 Push-Location -LiteralPath $DesktopDir
 try {
