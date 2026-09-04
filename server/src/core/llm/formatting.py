@@ -50,3 +50,62 @@ def extract_json_object(text: str) -> dict:
     if not isinstance(obj, dict):
         raise ValueError(f"LLM output is not a JSON object: {type(obj).__name__}")
     return obj
+
+
+def extract_json_array(text: str) -> list:
+    """从 LLM 输出里提取 JSON 数组（Phase 3.5 人物抽取用）。
+
+    策略与 :func:`extract_json_object` 类似，但目标是 ``[...]`` 数组。
+    """
+    import json
+
+    cleaned = strip_thinking(text)
+    start = cleaned.find("[")
+    end = cleaned.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError(f"No JSON array found in LLM output: {cleaned[:200]!r}")
+    candidate = cleaned[start : end + 1]
+    try:
+        arr = json.loads(candidate)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Failed to parse JSON array from LLM output: {e}; raw: {candidate[:300]!r}"
+        ) from e
+    if not isinstance(arr, list):
+        raise ValueError(f"LLM output is not a JSON array: {type(arr).__name__}")
+    return arr
+
+
+def extract_yaml_block(text: str) -> dict:
+    """从 LLM 输出里提取 YAML 块并解析为 dict（Phase 3.5 人物卡用）。
+
+    策略：
+    1. 剥掉 ``<think>...</think>`` 块
+    2. 找 ``\\`\\`\\`yaml`` 到下一个 ``\\`\\`\\``` 的范围；找不到就全文试解析
+    3. ``yaml.safe_load`` 解析
+    4. 解析失败或非 dict → 抛 :class:`ValueError`
+    """
+    import yaml
+
+    cleaned = strip_thinking(text)
+    # 尝试提取 ```yaml ... ``` 块
+    fence_start = cleaned.find("```yaml")
+    if fence_start != -1:
+        body_start = fence_start + len("```yaml")
+        fence_end = cleaned.find("```", body_start)
+        if fence_end != -1:
+            candidate = cleaned[body_start:fence_end]
+        else:
+            candidate = cleaned[body_start:]
+    else:
+        # 没围栏：直接试全文
+        candidate = cleaned
+    try:
+        obj = yaml.safe_load(candidate)
+    except yaml.YAMLError as e:
+        raise ValueError(
+            f"Failed to parse YAML from LLM output: {e}; raw: {candidate[:300]!r}"
+        ) from e
+    if not isinstance(obj, dict):
+        raise ValueError(f"LLM output is not a YAML mapping: {type(obj).__name__}")
+    return obj

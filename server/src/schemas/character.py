@@ -124,3 +124,78 @@ class CharacterVersionRead(BaseModel):
     change_reason: str
     trigger_event: str | None
     created_at: datetime
+
+
+# =====================================================================
+# Phase 3.5：人物卡自动生成 schemas
+# =====================================================================
+
+
+class ExtractedCharacter(BaseModel):
+    """LLM 第一阶段抽取的人物条目（name + role）。"""
+
+    name: str = Field(min_length=1, max_length=_NAME_MAX, description="人物名")
+    role: str = Field(
+        max_length=_ROLE_MAX,
+        description=f"角色定位，取值之一：{', '.join(CHARACTER_ROLES)}",
+    )
+
+
+class CharacterGenerationRequest(BaseModel):
+    """人物卡自动生成请求（从大纲生成）。"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "outline": {
+                    "outline_type": "complete",
+                    "volumes": [
+                        {
+                            "name": "第一卷 觉醒",
+                            "summary": "主角觉醒血脉、拜入宗门。",
+                            "chapters": [],
+                        }
+                    ],
+                },
+                "genre": "修仙",
+            }
+        }
+    )
+
+    outline: dict[str, Any] = Field(
+        description="大纲 JSON 结构（来自大纲生成端点或手动构造）",
+    )
+    genre: str = Field(
+        default="通用",
+        min_length=1,
+        max_length=20,
+        description="题材（如'修仙'/'都市'/'悬疑'/'言情'）",
+    )
+
+
+class CharacterGenerationItem(BaseModel):
+    """单张生成卡返回（数据库 Character + 关键字段）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    role: str
+    basic_info: str | None
+    personality: str | None
+    habits: str | None
+    thinking: str | None
+    relationships: str | None
+    growth_arc: str | None
+    is_active: bool
+
+
+class CharacterGenerationResponse(BaseModel):
+    """人物卡自动生成响应。"""
+
+    novel_id: int = Field(description="所属作品 id")
+    characters: list[CharacterGenerationItem] = Field(
+        description="生成的人物卡列表（已入库 + 初始版本）",
+    )
+    provider: str = Field(description="LLM provider（用于前端展示）")
+    model: str = Field(description="LLM 模型名（用于前端展示）")

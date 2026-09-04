@@ -1,18 +1,20 @@
-"""人物卡 REST 端点（Phase 1.2）。
+"""人物卡 REST 端点（Phase 1.2 + Phase 3.5 人物卡自动生成）。
 
 端点：
-- POST   /novels/{novel_id}/characters                  创建
-- GET    /novels/{novel_id}/characters                  列表（filter: role, is_active）
-- GET    /characters/{character_id}                     详情
-- PATCH  /characters/{character_id}                     部分更新
-- DELETE /characters/{character_id}                     删除（幂等）
-- POST   /characters/{character_id}/growth              记录性格变化
-- GET    /characters/{character_id}/versions            版本历史
-- GET    /characters/{character_id}/versions/{vid}      单个版本
+- POST   /novels/{novel_id}/characters                       创建
+- GET    /novels/{novel_id}/characters                       列表（filter: role, is_active）
+- POST   /novels/{novel_id}/characters/generate-from-outline  Phase 3.5 从大纲自动生成
+- GET    /characters/{character_id}                          详情
+- PATCH  /characters/{character_id}                          部分更新
+- DELETE /characters/{character_id}                          删除（幂等）
+- POST   /characters/{character_id}/growth                   记录性格变化
+- GET    /characters/{character_id}/versions                 版本历史
+- GET    /characters/{character_id}/versions/{vid}           单个版本
 
 错误映射：
 - CharacterNotFoundError / NovelNotFoundError -> 404
 - CharacterValidationError -> 422
+- CharacterGenerationError -> 500
 """
 
 from __future__ import annotations
@@ -23,10 +25,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..schemas.character import (
     CharacterCreate,
+    CharacterGenerationItem,
+    CharacterGenerationRequest,
+    CharacterGenerationResponse,
     CharacterGrowthUpdate,
     CharacterRead,
     CharacterUpdate,
     CharacterVersionRead,
+)
+from ..services.character_generator import (
+    CharacterGenerationError,
+    CharacterGenerator,
 )
 from ..services.character_service import (
     CharacterNotFoundError,
@@ -90,6 +99,48 @@ async def list_characters(
     except CharacterValidationError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return [CharacterRead.model_validate(c) for c in characters]
+
+
+@router.post(
+    "/novels/{novel_id}/characters/generate-from-outline",
+    response_model=CharacterGenerationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Phase 3.5：从大纲自动生成人物卡（两阶段 LLM：抽取 + 生成卡）",
+)
+async def generate_characters_from_outline(
+    novel_id: int,
+    payload: CharacterGenerationRequest,
+    session: AsyncSession = Depends(get_db),
+) -> CharacterGenerationResponse:
+    """从大纲生成人物卡并入库。
+
+    流程：
+    1. 调 LLM 抽取大纲中所有人物（name + role）
+    2. 并行为每个人物生成完整卡（YAML 6 字段）
+    3. 全部入库（每张自动建初始版本）
+
+    失败映射：
+    - NovelNotFoundError -> 404
+    - CharacterGenerationError -> 500
+    """
+    generator = CharacterGenerator(session)
+    try:
+        result = await generator.generate_from_outline(
+            novel_id=novel_id,
+            outline=payload.outline,
+            genre=payload.genre,
+        )
+    except NovelNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except CharacterGenerationError as e:
+        raise HTTPException(status_code=500, detail=f"Character generation failed: {e}") from e
+
+    return CharacterGenerationResponse(
+        novel_id=result["novel_id"],
+        characters=[CharacterGenerationItem.model_validate(c) for c in result["characters"]],
+        provider=result["provider"],
+        model=result["model"],
+    )
 
 
 # ===== 顶层 character 端点 =====
