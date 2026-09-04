@@ -138,3 +138,49 @@ class OutlineRead(OutlineBase):
     structure: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+
+
+# ===== Phase 3.4：基于剧情生成大纲（自动建 novel）=====
+
+
+class OutlineGenerationRequest(BaseModel):
+    """大纲生成请求。
+
+    - 必传 ``plot_summary``（来自 3.3 PlotGenerator 保存的 PLOT 卡 content.summary）
+    - ``genre`` 用于 prompt 注入；``keywords`` 可选（让 LLM 知道强调什么）
+    - ``novel_name`` 可选（缺省用 "{genre}新作"）
+    - ``outline_type`` 取值 ``complete``（分卷/章）或 ``freedom``（散文+节拍）
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "genre": "修仙",
+                "plot_summary": "主角是灵根被夺的废材...",
+                "keywords": ["废柴逆袭", "秘境"],
+                "novel_name": "灵根重塑",
+                "outline_type": "complete",
+            }
+        }
+    )
+
+    genre: str = Field(min_length=1, max_length=50)
+    plot_summary: str = Field(min_length=10, max_length=5000)
+    keywords: list[str] = Field(default_factory=list, max_length=50)
+    novel_name: str | None = Field(default=None, max_length=200)
+    outline_type: str = Field(
+        default="complete",
+        description="complete（分卷/章）or freedom（散文+节拍）",
+    )
+
+
+class OutlineGenerationResponse(BaseModel):
+    """大纲生成响应（含自动建的 novel 信息）。"""
+
+    novel_id: int
+    novel_name: str
+    outline_id: int
+    outline_type: str
+    structure: dict[str, Any]
+    provider: str
+    model: str = ""

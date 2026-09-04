@@ -1,4 +1,4 @@
-"""大纲 REST 端点（Phase 1.4）。
+"""大纲 REST 端点（Phase 1.4 + Phase 3.4 生成）。
 
 端点（全部嵌套在 novel 下，outline 强绑定 novel）：
 - POST   /novels/{novel_id}/outlines              创建
@@ -7,9 +7,13 @@
 - PATCH  /novels/{novel_id}/outlines/{oid}        部分更新
 - DELETE /novels/{novel_id}/outlines/{oid}        删除（幂等）
 
+Phase 3.4：基于剧情生成大纲（自动建 novel + 生成 + 入库）
+- POST   /novels/outlines/generate                生成大纲（不入参 novel_id）
+
 错误映射：
 - OutlineNotFoundError / NovelNotFoundError -> 404
 - OutlineValidationError / OutlineTypeConflictError -> 422
+- OutlineGenerationError -> 500（LLM 失败）/ 422（结构错）
 """
 
 from __future__ import annotations
@@ -18,7 +22,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..schemas.outline import OutlineCreate, OutlineRead, OutlineUpdate
+from ..schemas.outline import (
+    OutlineCreate,
+    OutlineGenerationRequest,
+    OutlineGenerationResponse,
+    OutlineRead,
+    OutlineUpdate,
+)
+from ..services.outline_generator import (
+    OutlineGenerationError,
+    OutlineGenerator,
+)
 from ..services.outline_service import (
     NovelNotFoundError,
     OutlineNotFoundError,
@@ -143,3 +157,36 @@ async def delete_outline(
     if outline.novel_id != novel_id:
         return  # 不属于该作品 → 幂等 204
     await service.delete(outline_id)
+
+
+# ===== Phase 3.4：基于剧情生成大纲（自动建 novel）=====
+
+# 独立 router（不嵌在 novel_id 路径下，因为 novel 是自动建的）
+generation_router = APIRouter(prefix="/novels/outlines", tags=["outlines"])
+
+
+def get_generator(session: AsyncSession = Depends(get_db)) -> OutlineGenerator:
+    return OutlineGenerator(session)
+
+
+@generation_router.post(
+    "/generate",
+    response_model=OutlineGenerationResponse,
+    summary="基于剧情生成大纲（自动建 novel + 调 LLM + 入库）",
+)
+async def generate_outline(
+    payload: OutlineGenerationRequest,
+    generator: OutlineGenerator = Depends(get_generator),
+) -> OutlineGenerationResponse:
+    try:
+        result = await generator.generate(
+            genre=payload.genre,
+            plot_summary=payload.plot_summary,
+            keywords=payload.keywords or [],
+            novel_name=payload.novel_name,
+            outline_type=payload.outline_type,
+        )
+    except OutlineGenerationError as e:
+        # LLM 失败 / 结构错 → 500（业务可重试）；参数错由 Pydantic 422 拦
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return OutlineGenerationResponse(**result)

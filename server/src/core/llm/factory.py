@@ -88,6 +88,7 @@ def resolve_provider_for_scene(scene: str, fallback: str | None = None) -> str:
 
 # 哪些 provider 需要从 settings 拿 key（其余的走 os.environ / 自处理）
 _API_KEY_FROM_SETTINGS = {
+    "mimo": "mimo_api_key",
     "minimax": "minimax_api_key",
     "openai": "openai_api_key",
 }

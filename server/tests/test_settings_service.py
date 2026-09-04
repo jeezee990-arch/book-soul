@@ -65,9 +65,7 @@ def test_get_default_no_yaml(svc: SettingsService) -> None:
 def test_get_reads_yaml(svc: SettingsService, settings_file) -> None:
     """已有 yaml 时读它。"""
     settings_file.write_text(
-        "version: 1\n"
-        "llm:\n  provider: openai\n  model: gpt-4\n"
-        "ui:\n  theme: light\n",
+        "version: 1\nllm:\n  provider: openai\n  model: gpt-4\nui:\n  theme: light\n",
         encoding="utf-8",
     )
     s = svc.get()

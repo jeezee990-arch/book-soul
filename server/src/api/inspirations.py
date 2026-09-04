@@ -1,15 +1,17 @@
-"""灵感 REST 端点（Phase 1.5）。
+"""灵感 REST 端点（Phase 1.5 + Phase 3.3）。
 
 端点：
-- POST   /inspirations              创建（novel_id 可空）
-- GET    /inspirations              列表（filter: novel_id, type, tag）
-- GET    /inspirations/{id}         详情
-- PATCH  /inspirations/{id}         部分更新
-- DELETE /inspirations/{id}         删除（幂等）
+- POST   /inspirations                  创建（novel_id 可空）
+- GET    /inspirations                  列表（filter: novel_id, type, tag）
+- GET    /inspirations/{id}             详情
+- PATCH  /inspirations/{id}             部分更新
+- DELETE /inspirations/{id}             删除（幂等）
+- POST   /inspirations/generate-plot    Phase 3.3 剧情生成（不入库）
 
 错误映射：
 - InspirationNotFoundError / NovelNotFoundError -> 404
 - InspirationValidationError -> 422
+- PlotGenerationError -> 500（LLM 失败）/ 422（参数错）
 """
 
 from __future__ import annotations
@@ -22,12 +24,17 @@ from ..schemas.inspiration import (
     InspirationCreate,
     InspirationRead,
     InspirationUpdate,
+    PlotGenerationRequest,
+    PlotGenerationResponse,
+    PlotVersion,
 )
 from ..services.inspiration_service import (
     InspirationNotFoundError,
     InspirationService,
     InspirationValidationError,
     NovelNotFoundError,
+    PlotGenerationError,
+    PlotService,
 )
 
 router = APIRouter(prefix="/inspirations", tags=["inspirations"])
@@ -132,3 +139,38 @@ async def delete_inspiration(
         await service.delete(inspiration_id)
     except InspirationNotFoundError:
         return  # 幂等
+
+
+# ===== Phase 3.3：剧情生成（不入库）=====
+
+
+# 注意：路径在 ``/{inspiration_id}`` 之前注册，避免被 path param 吞掉
+@router.post(
+    "/generate-plot",
+    response_model=PlotGenerationResponse,
+    summary="生成简要剧情（不入库；调 LLM 抽象）",
+)
+async def generate_plot(
+    payload: PlotGenerationRequest,
+) -> PlotGenerationResponse:
+    """生成 n 个简要剧情版本，供前端选一个后保存到 inspirations。"""
+    svc = PlotService()
+    try:
+        summaries = await svc.generate(
+            genre=payload.genre,
+            keywords=payload.keywords,
+            n_versions=payload.n_versions,
+        )
+    except PlotGenerationError as e:
+        # LLM 失败 → 500；参数错（Pydantic 已经 422 拦了大部分）
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    versions = [PlotVersion(index=i + 1, summary=s) for i, s in enumerate(summaries)]
+    # 取 provider / model 信息（用 _get_llm 不重新创建）
+    try:
+        llm = svc._get_llm()  # noqa: SLF001
+        provider = getattr(llm, "provider", "unknown")
+        model = getattr(llm, "model", "")
+    except Exception:  # noqa: BLE001
+        provider = "unknown"
+        model = ""
+    return PlotGenerationResponse(versions=versions, provider=provider, model=model)

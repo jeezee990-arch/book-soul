@@ -10,8 +10,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "backend:dev": "powershell -ExecutionPolicy Bypass -File ../../scripts/start_backend.ps1"
   },
+  "//": "tauri.dev.beforeDevCommand: 启动 Python 后端（如果端口已被占就跳过），等 /ping ready，然后启 Vite。这样 pnpm tauri dev 一个命令完成所有启动。",
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-dropdown-menu": "^2.1.24",

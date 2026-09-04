@@ -66,3 +66,22 @@ export interface Inspiration {
   content: Record<string, unknown>;
   created_at: string;
 }
+
+// ===== 词库（Phase 3.1）=====
+
+export interface WordbankListEntry {
+  id: string;
+  name: string;
+  total: number;
+}
+
+export interface WordbankList {
+  genres: WordbankListEntry[];
+}
+
+export interface WordbankMeta {
+  id: string;
+  name: string;
+  categories: string[];
+  counts: Record<string, number>;
+}

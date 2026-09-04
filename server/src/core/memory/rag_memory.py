@@ -77,6 +77,4 @@ class RagMemory:
 
     async def clear(self) -> None:
         """清空 collection。Phase 1 no-op；Phase 4 用 chromadb 删 collection。"""
-        logger.debug(
-            f"RagMemory.clear stub: collection={self.collection_name}"
-        )
+        logger.debug(f"RagMemory.clear stub: collection={self.collection_name}")

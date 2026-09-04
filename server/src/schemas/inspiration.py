@@ -131,3 +131,42 @@ class InspirationRead(InspirationBase):
     novel_id: int | None
     content: dict[str, Any]
     created_at: datetime
+
+
+# ===== Phase 3.3：剧情生成（不入库，仅生成） =====
+
+
+class PlotGenerationRequest(BaseModel):
+    """剧情生成请求。
+
+    注意：本请求**不**持久化到 inspirations 表，结果由调用方决定是否保存。
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "genre": "修仙",
+                "keywords": ["废柴逆袭", "退婚打脸", "秘境"],
+                "n_versions": 3,
+            }
+        }
+    )
+
+    genre: str = Field(min_length=1, max_length=50, description="题材中文名（如 修仙/都市）")
+    keywords: list[str] = Field(min_length=1, max_length=50, description="灵感词列表（≥1）")
+    n_versions: int = Field(default=3, ge=1, le=10, description="生成版本数（1-10）")
+
+
+class PlotVersion(BaseModel):
+    """单个生成版本。"""
+
+    index: int = Field(description="版本序号（从 1 开始）")
+    summary: str = Field(description="剧情概述")
+
+
+class PlotGenerationResponse(BaseModel):
+    """剧情生成响应。"""
+
+    versions: list[PlotVersion]
+    provider: str = Field(description="实际使用的 LLM provider")
+    model: str = Field(default="", description="实际使用的模型名（可能为空）")

@@ -93,7 +93,11 @@ class Settings(BaseSettings):
     # ===== 加密（可选）=====
     encryption_enabled: bool = Field(default=False, alias="ENCRYPTION_ENABLED")
 
-    # ===== LLM（minimax 主用）=====
+    # ===== LLM（mimo 主用，国内 Xiaomi 节点）=====
+    mimo_api_key: str = Field(default="", alias="MIMO_API_KEY")
+    mimo_base_url: str = Field(default="https://api.xiaomimimo.com/v1", alias="MIMO_BASE_URL")
+
+    # ===== LLM（minimax 备用，海外节点，需 VPN）=====
     minimax_api_key: str = Field(default="", alias="MINIMAX_API_KEY")
     minimax_base_url: str = Field(default="https://api.minimaxi.com/v1", alias="MINIMAX_BASE_URL")
 

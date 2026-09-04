@@ -6,13 +6,32 @@ version: 1
 # 切换场景默认：改 routing.<场景>
 
 providers:
+  # MiMo (Xiaomi 国内节点，默认) - 兼容 OpenAI Chat Completions
+  mimo:
+    type: openai_compat
+    base_url: https://api.xiaomimimo.com/v1
+    api_key_env: MIMO_API_KEY
+    default_model: mimo-v2.5-pro
+    # 国内节点响应快（< 5s），30s timeout + 2 retry 足够
+    timeout_seconds: 30
+    max_retries: 2
+    models: [mimo-v2.5-pro]
+    model_specs:
+      mimo-v2.5-pro:
+        context_window: 128000
+        max_output_tokens: 8192
+        supports_chapter_range: true
+        quality_tier: standard
+
   minimax:
-    type: openai_compat        # 走 OpenAI 兼容协议
+    type: openai_compat        # 走 OpenAI 兼容协议（海外节点，需 VPN）
     base_url: https://api.minimaxi.com/v1
     api_key_env: MINIMAX_API_KEY
     default_model: MiniMax-M3
-    timeout_seconds: 60
-    max_retries: 3
+    # Phase 3.4 修：60s × 3 retry = 180s 远超 Rust 120s timeout
+    # 30s 足够海外节点正常响应（5-15s），2 retry 总等待 ≤ 60s
+    timeout_seconds: 30
+    max_retries: 2
     models: [MiniMax-M3]
     model_specs:
       MiniMax-M3:
@@ -26,8 +45,8 @@ providers:
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
     default_model: gpt-4o-mini
-    timeout_seconds: 60
-    max_retries: 3
+    timeout_seconds: 30
+    max_retries: 2
     models: [gpt-4o-mini, gpt-4o]
     model_specs:
       gpt-4o-mini:
@@ -66,8 +85,8 @@ providers:
         supports_chapter_range: true
         quality_tier: local
 
-# 默认 provider
-default_provider: minimax
+# 默认 provider（国内 MiMo，免 VPN）
+default_provider: mimo
 
 # 章节硬限（来自 AGENTS.md 安全规范 + JEE 决策）
 chapter_limits:
@@ -76,14 +95,15 @@ chapter_limits:
   min_context_needed: 32000       # 低于此 context_window 不允许生成章节
 
 # 场景路由：每个业务场景用哪个 provider
+# Phase 3.4+ 改：默认全部走 mimo（国内快），quality_* 仍走 ollama（本地，不依赖网络）
 routing:
-  inspiration: minimax
-  plot_generation: minimax
-  outline_complete: minimax
-  outline_freedom: minimax
-  character_generation: minimax
-  chapter_generation: minimax
-  chapter_rewrite: minimax
+  inspiration: mimo
+  plot_generation: mimo
+  outline_complete: mimo
+  outline_freedom: mimo
+  character_generation: mimo
+  chapter_generation: mimo
+  chapter_rewrite: mimo
   quality_check: ollama
   summarize: ollama
   quality_writing: ollama

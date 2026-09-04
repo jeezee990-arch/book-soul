@@ -34,9 +34,7 @@ class ProjectMemory:
 
         Phase 1 no-op；Phase 4 存到项目笔记表（v1.7 没建表）。
         """
-        logger.debug(
-            f"ProjectMemory.add_note stub: novel={self.novel_id}, key={key}"
-        )
+        logger.debug(f"ProjectMemory.add_note stub: novel={self.novel_id}, key={key}")
 
     async def get_notes(self) -> dict[str, str]:
         """获取所有项目笔记。

@@ -8,6 +8,25 @@ export type InspirationCreate = Omit<
 
 export type InspirationUpdate = Partial<Omit<InspirationCreate, "novel_id">>;
 
+// ===== Phase 3.3：剧情生成 =====
+
+export interface PlotVersion {
+  index: number;
+  summary: string;
+}
+
+export interface PlotGenerationResponse {
+  versions: PlotVersion[];
+  provider: string;
+  model: string;
+}
+
+export interface PlotGenerationRequest {
+  genre: string;
+  keywords: string[];
+  n_versions?: number;
+}
+
 export const inspirationsApi = {
   list: (params?: { novel_id?: number; type?: string; tag?: string }) => {
     const q = new URLSearchParams();
@@ -24,4 +43,8 @@ export const inspirationsApi = {
   update: (id: number, data: InspirationUpdate) =>
     callApi<Inspiration>("PATCH", `/inspirations/${id}`, data),
   remove: (id: number) => callApi<null>("DELETE", `/inspirations/${id}`),
+
+  /** 调 LLM 生成 n 个简要剧情版本（不入库，由前端决定是否保存）。 */
+  generatePlot: (data: PlotGenerationRequest) =>
+    callApi<PlotGenerationResponse>("POST", "/inspirations/generate-plot", data),
 };

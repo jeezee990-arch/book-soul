@@ -50,8 +50,10 @@ class OpenAICompatClient:
         self._base_url = config["base_url"].rstrip("/")
         self._api_key = api_key or self._resolve_api_key(config)
         self._default_model: str = config.get("default_model", "")
-        self._timeout_s: float = float(config.get("timeout_seconds", 60))
-        self._max_retries: int = int(config.get("max_retries", 3))
+        # Phase 3.4 修：默认 60s 太长。海外节点正常 5-15s，30s 够。
+        # 60s × 3 retry = 180s 远超 Rust 120s timeout，导致前端报 network error。
+        self._timeout_s: float = float(config.get("timeout_seconds", 30))
+        self._max_retries: int = int(config.get("max_retries", 2))
         self._provider_name: str = config.get("provider_name", "openai_compat")
 
         if not self._api_key:
@@ -122,7 +124,11 @@ class OpenAICompatClient:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(self._max_retries),
             wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
-            retry=retry_if_exception_type((RateLimitError, httpx.TransportError)),
+            # Phase 3.4 修：加 httpx.TimeoutException 到 retry 列表
+            # （原代码只 retry TransportError，timeout 不重试——和"minimax 慢"场景冲突）
+            retry=retry_if_exception_type(
+                (RateLimitError, httpx.TransportError, httpx.TimeoutException)
+            ),
             reraise=True,
         ):
             with attempt:
@@ -176,16 +182,24 @@ class OpenAICompatClient:
         except Exception:  # noqa: BLE001
             err_body = {"raw": resp.text[:500]}
 
-        msg = (err_body.get("error") or {}).get("message") or resp.text[:200] or ""
+        # Phase 3.4 修：minimax 偶尔返回空 body（status 4xx/5xx + 空 text），
+        # 导致 `msg` 为空 → 后续 service 包成 "LLM call failed: " 没任何细节。
+        # 修法：始终在 message 里包含 status code + body（哪怕空也标记 "(empty body)"）。
+        body_msg = (
+            (err_body.get("error") or {}).get("message")
+            or err_body.get("raw", "")
+            or "(empty body)"
+        )
+        msg = f"[HTTP {resp.status_code}] {body_msg[:300]}"
         if resp.status_code in (401, 403):
-            raise AuthError(f"Auth failed [{resp.status_code}]: {msg}")
+            raise AuthError(f"Auth failed {msg}")
         if resp.status_code == 404:
             raise ModelNotFoundError(f"Model not found: {msg}")
         if resp.status_code == 429:
             raise RateLimitError(f"Rate limited: {msg}")
         if resp.status_code == 413 or "context_length" in msg.lower():
             raise ContextOverflowError(f"Context overflow: {msg}")
-        raise LLMError(f"LLM HTTP {resp.status_code}: {msg}")
+        raise LLMError(f"LLM HTTP {msg}")
 
 
 # 帮助在 except 链中临时 sleep（不直接 await asyncio.sleep 防止锁死）
