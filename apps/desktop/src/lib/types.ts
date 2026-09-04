@@ -35,6 +35,24 @@ export interface Character {
   updated_at: string;
 }
 
+export interface CharacterVersion {
+  id: number;
+  character_id: number;
+  parent_version_id: number | null;
+  snapshot: Record<string, unknown>;
+  change_reason: string;
+  trigger_event: string | null;
+  created_at: string;
+}
+
+export interface CharacterGrowthEvent {
+  event: string;
+  new_personality?: string | null;
+  new_habits?: string | null;
+  new_thinking?: string | null;
+  new_relationships?: string | null;
+}
+
 export interface Chapter {
   id: number;
   novel_id: number;

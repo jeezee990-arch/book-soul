@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { inspirationsApi } from "@/api/inspirations";
+import type { OutlineGenerationResponse } from "@/api/outlines";
 import { ApiError } from "@/api";
 import type { Inspiration } from "@/lib/types";
 import { getGenreDef, type GenreDef } from "@/config/genres";
@@ -16,6 +17,7 @@ import GenreSelect from "./GenreSelect";
 import KeywordBoard from "./KeywordBoard";
 import PlotGenerator from "./PlotGenerator";
 import OutlineGenerator from "./OutlineGenerator";
+import CharacterManager from "./CharacterManager";
 
 /** 灵感园 —— 列出已有灵感（Phase 3 扩展：词库 / 剧情生成 / 人物卡） */
 export default function Inspiration() {
@@ -32,6 +34,11 @@ export default function Inspiration() {
   const [currentPlot, setCurrentPlot] = useState<{
     id: number;
     summary: string;
+  } | null>(null);
+  // Phase 3.6: 大纲生成成功后保存 (novelId, structure)，供 CharacterManager 使用
+  const [latestOutline, setLatestOutline] = useState<{
+    novelId: number;
+    structure: Record<string, unknown>;
   } | null>(null);
 
   const handleGenreChange = useCallback((g: GenreDef | null) => {
@@ -148,7 +155,25 @@ export default function Inspiration() {
 
       {/* Phase 3.4：大纲生成（仅在选了题材后展示） */}
       {selectedGenre && (
-        <OutlineGenerator genre={selectedGenre} currentPlot={currentPlot} />
+        <OutlineGenerator
+          genre={selectedGenre}
+          currentPlot={currentPlot}
+          onGenerated={(resp: OutlineGenerationResponse) => {
+            setLatestOutline({
+              novelId: resp.novel_id,
+              structure: resp.structure,
+            });
+          }}
+        />
+      )}
+
+      {/* Phase 3.6：人物卡管理（仅在大纲生成后展示） */}
+      {selectedGenre && latestOutline && (
+        <CharacterManager
+          novelId={latestOutline.novelId}
+          outline={latestOutline.structure}
+          genre={selectedGenre.name}
+        />
       )}
 
       {/* 已有灵感列表（保留） */}

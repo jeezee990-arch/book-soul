@@ -17,6 +17,8 @@ interface Props {
   genre: GenreDef;
   /** Phase 3.4：用作大纲种子的 PLOT（来自父组件 state）。null = 不可生成。 */
   currentPlot: { id: number; summary: string } | null;
+  /** Phase 3.6：生成成功后回调（让父组件能挂 CharacterManager 等后续步骤） */
+  onGenerated?: (resp: OutlineGenerationResponse) => void;
 }
 
 type OutlineType = "complete" | "freedom";
@@ -45,7 +47,7 @@ interface FreedomStructure {
  * - 显示结果：complete 模式 → 分卷/章节树；freedom 模式 → 散文+节拍
  * - 不持久化到前端：后端已入库到 outline 表
  */
-export default function OutlineGenerator({ genre, currentPlot }: Props) {
+export default function OutlineGenerator({ genre, currentPlot, onGenerated }: Props) {
   const [novelName, setNovelName] = useState("");
   const [outlineType, setOutlineType] = useState<OutlineType>("complete");
   const [loading, setLoading] = useState(false);
@@ -69,6 +71,7 @@ export default function OutlineGenerator({ genre, currentPlot }: Props) {
       });
       setResult(resp);
       toast.success(`已生成大纲：${resp.novel_name} / ${resp.outline_type}`);
+      onGenerated?.(resp);
     } catch (e: unknown) {
       const msg = e instanceof ApiError ? e.message : String(e);
       setError(msg);
@@ -76,7 +79,7 @@ export default function OutlineGenerator({ genre, currentPlot }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [genre.name, currentPlot, novelName, outlineType]);
+  }, [genre.name, currentPlot, novelName, outlineType, onGenerated]);
 
   const disabled = loading || !currentPlot;
 
