@@ -42,6 +42,16 @@ if (Test-Path (Join-Path $CargoBin 'cargo.exe')) {
 
 # ===== Step 1: Start Python backend =====
 Write-Host "[1/3] Starting Python backend ($BackendUrl)..." -ForegroundColor Cyan
+
+# 隔离 dev 数据目录：避免污染 ~/Documents/BookSoul（Phase 1 加的列 vs Phase 0 老 DB）
+$DevDataDir = Join-Path $RepoRoot 'data\dev'
+if (-not (Test-Path $DevDataDir)) {
+    New-Item -ItemType Directory -Path $DevDataDir | Out-Null
+    Write-Host "       Created data dir: $DevDataDir" -ForegroundColor DarkGray
+}
+$env:BOOK_SOUL_DATA_DIR = $DevDataDir
+Write-Host "       BOOK_SOUL_DATA_DIR=$DevDataDir" -ForegroundColor DarkGray
+
 $PythonLog = Join-Path $LogDir 'book-soul-backend.out.log'
 $PythonErr = Join-Path $LogDir 'book-soul-backend.err.log'
 $PythonProc = Start-Process `
