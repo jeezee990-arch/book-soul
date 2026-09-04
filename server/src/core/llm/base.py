@@ -78,6 +78,26 @@ class ContextOverflowError(LLMError):
     """上下文超出模型窗口。"""
 
 
+def describe_llm_error(e: BaseException) -> str:
+    """把 LLM 调用异常转成一句话（异常类型 + 消息 + 响应 body 片段）。
+
+    httpx 超时/网络异常的 ``str(e)`` 经常是空字符串，直接 ``f"{e}"``
+    会得到 ``"LLM call failed: "`` 这种没有任何细节的信息（用户无法排查）。
+    """
+    err_type = type(e).__name__
+    extra = ""
+    resp_obj = getattr(e, "response", None)
+    if resp_obj is not None:
+        try:
+            body = (resp_obj.text or "")[:200]
+            if body:
+                extra = f" body={body!r}"
+        except Exception:  # noqa: BLE001
+            pass
+    detail = str(e) or "(no message)"
+    return f"LLM call failed: {err_type}: {detail}{extra}"
+
+
 # ===================== Protocol =====================
 
 

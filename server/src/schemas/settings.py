@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-LLM_PROVIDERS = ("minimax", "openai", "ollama")
+# 与 config/llm.yaml providers 保持一致（mimo 为实际主用 provider）
+LLM_PROVIDERS = ("mimo", "minimax", "openai", "ollama")
 UI_THEMES = ("dark", "light")
 
 
@@ -23,11 +24,11 @@ class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(
-        default="minimax",
+        default="mimo",
         description=f"LLM provider，取值之一：{', '.join(LLM_PROVIDERS)}",
     )
     model: str = Field(
-        default="MiniMax-Text-01",
+        default="mimo-v2.5-pro",
         max_length=100,
         description="当前 provider 的模型名",
     )

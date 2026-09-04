@@ -63,7 +63,7 @@ async def test_llm(req: TestLLMRequest) -> TestLLMResponse:
     # 允许在测试环境跳过真实调用（CI 用）
     if os.environ.get("BOOK_SOUL_SKIP_LLM") == "1":
         return TestLLMResponse(
-            provider=req.provider or "minimax",
+            provider=req.provider or "mimo",
             model="stub-model",
             content=f"[stubbed] echo: {req.prompt}",
             prompt_tokens=len(req.prompt),

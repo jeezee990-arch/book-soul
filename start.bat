@@ -13,8 +13,9 @@ rem  appears you can ignore it.  To debug, keep this window open
 rem  by removing the 'exit' line below.
 rem ============================================================
 
-rem Switch to repo root (script lives in repo root)
-cd /d "%~dp0"
+rem pnpm must run from apps/desktop (where package.json lives);
+rem running it from repo root fails with ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND.
+cd /d "%~dp0apps\desktop"
 
 rem Launch via pnpm tauri dev (handles Python + Vite + Tauri)
 start "" "pnpm.cmd" tauri dev

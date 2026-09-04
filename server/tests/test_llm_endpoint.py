@@ -33,7 +33,7 @@ async def test_llm_test_stub_returns_prompt(stub_env):
     data = resp.json()
     assert data["content"] == "[stubbed] echo: 你好世界"
     assert data["total_tokens"] > 0
-    assert data["provider"] == "minimax"  # default
+    assert data["provider"] == "mimo"  # default
 
 
 @pytest.mark.asyncio

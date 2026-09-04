@@ -20,7 +20,8 @@ import {
 } from "@/components/ui/select";
 
 const PROVIDERS: { value: LLMProvider; label: string }[] = [
-  { value: "minimax", label: "minimax（主用）" },
+  { value: "mimo", label: "mimo（主用，国内快）" },
+  { value: "minimax", label: "minimax（备用，需 VPN）" },
   { value: "openai", label: "OpenAI（备用）" },
   { value: "ollama", label: "Ollama（本地）" },
 ];
@@ -38,8 +39,8 @@ export default function Settings() {
   const [error, setError] = useState<string | null>(null);
 
   // LLM 字段临时值
-  const [llmProvider, setLlmProvider] = useState<LLMProvider>("minimax");
-  const [llmModel, setLlmModel] = useState("MiniMax-Text-01");
+  const [llmProvider, setLlmProvider] = useState<LLMProvider>("mimo");
+  const [llmModel, setLlmModel] = useState("mimo-v2.5-pro");
   // API Key 临时值（每次保存后清空）
   const [apiKey, setApiKey] = useState("");
   // 主题
@@ -231,7 +232,7 @@ export default function Settings() {
               onChange={(e) => setLlmModel(e.target.value)}
               disabled={saving}
               className="w-64"
-              placeholder="MiniMax-Text-01"
+              placeholder="mimo-v2.5-pro"
             />
           </div>
           <Button onClick={handleSaveLLM} disabled={saving} size="sm">

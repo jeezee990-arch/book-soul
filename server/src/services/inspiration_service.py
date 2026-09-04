@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -21,7 +22,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.llm.base import ChatMessage, ChatResponse
+from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
 from ..models.inspiration import INSPIRATION_TYPES, Inspiration
 from ..models.novel import Novel
 from ..schemas.inspiration import (
@@ -289,7 +290,7 @@ class PlotService:
         keywords: list[str],
         n_versions: int = DEFAULT_N_VERSIONS,
     ) -> list[str]:
-        """生成 n 个简要剧情版本。
+        """生成 n 个简要剧情版本（并行调用，总耗时 ≈ 单次）。
 
         :raises PlotGenerationError: LLM 调用失败 / prompt 缺失 / 返回为空
         """
@@ -301,36 +302,39 @@ class PlotService:
         template = _load_prompt("plot_generation")
         prompt = template.format(genre=genre, keywords=", ".join(keywords))
         llm = self._get_llm()
+        # 注入的客户端（测试 mock）不由本方法关闭；懒加载的用完即关
+        owns_client = self._llm_override is None
+        try:
+            # 各版本相互独立，并行调用（原串行 3 次 × ~30s 是"生成慢"主因）
+            raws = await asyncio.gather(*(self._chat_once(llm, prompt) for _ in range(n_versions)))
+        except Exception as e:  # noqa: BLE001
+            logger.error(describe_llm_error(e))
+            raise PlotGenerationError(describe_llm_error(e)) from e
+        finally:
+            await self._release_llm(llm, owns_client)
+
         results: list[str] = []
-        for _ in range(n_versions):
-            try:
-                resp = await llm.chat(
-                    [ChatMessage("user", prompt)],
-                    temperature=0.8,
-                )
-            except Exception as e:  # noqa: BLE001
-                # Phase 3.4 修：minimax 偶尔抛 httpx.TimeoutException / TransportError，
-                # str(e) 可能是空字符串，导致上层看到的 message 是 "LLM call failed: "。
-                # 修法：把异常类型 + response body 拼进去，至少能看到是哪种错误。
-                err_type = type(e).__name__
-                extra = ""
-                resp_obj = getattr(e, "response", None)
-                if resp_obj is not None:
-                    try:
-                        body = (resp_obj.text or "")[:200]
-                        extra = f" body={body!r}"
-                    except Exception:  # noqa: BLE001
-                        pass
-                logger.error(f"LLM call failed: {err_type}: {e}{extra}")
-                raise PlotGenerationError(f"LLM call failed: {err_type}: {e}{extra}") from e
-            raw = resp.content.strip() if isinstance(resp.content, str) else ""
-            if not raw:
-                raise PlotGenerationError("LLM returned empty content")
-            content = _strip_thinking(raw)
+        for raw in raws:
+            content = _strip_thinking(raw.strip())
             if not content:
-                raise PlotGenerationError("LLM output empty after stripping thinking")
+                raise PlotGenerationError("LLM returned empty content")
             results.append(content)
         return results
+
+    @staticmethod
+    async def _chat_once(llm: _LLMClientLike, prompt: str) -> str:
+        """单次 LLM 调用，返回原始文本（空 content 返回空串，由调用方判定）。"""
+        resp = await llm.chat([ChatMessage("user", prompt)], temperature=0.8)
+        return resp.content if isinstance(resp.content, str) else ""
+
+    async def _release_llm(self, llm: _LLMClientLike, owns: bool) -> None:
+        """懒加载的客户端用完关闭（防连接泄漏），并清缓存让下次重建。"""
+        aclose = getattr(llm, "aclose", None)
+        if owns and aclose is not None:
+            try:
+                await aclose()
+            finally:
+                self._llm = None
 
     @staticmethod
     def clear_prompt_cache() -> None:

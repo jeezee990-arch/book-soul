@@ -24,7 +24,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.llm.base import ChatMessage, ChatResponse
+from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
 from ..core.llm.formatting import extract_json_object
 from ..models.novel import Novel
 from ..models.outline import OUTLINE_TYPES
@@ -97,12 +97,24 @@ class OutlineGenerator:
         self._llm_override = llm_client
         self._llm: _LLMClientLike | None = llm_client
 
-    def _get_llm(self) -> _LLMClientLike:
+    def _get_llm(self, outline_type: str = "complete") -> _LLMClientLike:
         if self._llm is None:
             from ..core.llm import create_llm_client_for_scene
 
-            self._llm = create_llm_client_for_scene("outline_generation")
+            # 按 outline_type 精确路由（llm.yaml routing.outline_complete /
+            # outline_freedom）。原 scene 名 "outline_generation" 在 routing 里
+            # 不存在，一直静默回落 default_provider。
+            self._llm = create_llm_client_for_scene(f"outline_{outline_type}")
         return self._llm
+
+    async def _release_llm(self, llm: _LLMClientLike, owns: bool) -> None:
+        """懒加载的客户端用完关闭（防连接泄漏），并清缓存让下次重建。"""
+        aclose = getattr(llm, "aclose", None)
+        if owns and aclose is not None:
+            try:
+                await aclose()
+            finally:
+                self._llm = None
 
     # ===== 主入口 =====
 
@@ -132,7 +144,9 @@ class OutlineGenerator:
         if not plot_summary or len(plot_summary) < 10:
             raise OutlineGenerationError("plot_summary too short (>= 10 chars)")
 
-        structure = await self._call_llm(genre, plot_summary, keywords or [], outline_type)
+        structure, llm_provider, llm_model = await self._call_llm(
+            genre, plot_summary, keywords or [], outline_type
+        )
 
         # 校验 structure（复用 OutlineService 的校验逻辑）
         outline_service = OutlineService(self.session)
@@ -163,23 +177,14 @@ class OutlineGenerator:
                 await outline_service.delete(o.id)
             outline = await outline_service.create(outline_payload)
 
-        # 取 provider 信息（用于响应）
-        try:
-            llm = self._get_llm()
-            provider = getattr(llm, "provider", "unknown")
-            model = getattr(llm, "model", "")
-        except Exception:  # noqa: BLE001
-            provider = "unknown"
-            model = ""
-
         return {
             "novel_id": novel.id,
             "novel_name": novel.name,
             "outline_id": outline.id,
             "outline_type": outline_type,
             "structure": structure,
-            "provider": provider,
-            "model": model,
+            "provider": llm_provider,
+            "model": llm_model,
         }
 
     # ===== 内部 =====
@@ -190,35 +195,30 @@ class OutlineGenerator:
         plot_summary: str,
         keywords: list[str],
         outline_type: str,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], str, str]:
+        """调 LLM 并解析 structure，返回 ``(structure, provider, model)``。"""
         prompt = _load_outline_prompt(outline_type)
         kw_str = ", ".join(keywords) if keywords else "（无）"
         full_prompt = prompt.format(genre=genre, plot=plot_summary, keywords=kw_str)
-        llm = self._get_llm()
+        llm = self._get_llm(outline_type)
+        owns_client = self._llm_override is None
+        provider = str(getattr(llm, "provider", "unknown") or "unknown")
+        model = str(getattr(llm, "model", "") or "")
         try:
             resp = await llm.chat(
                 [ChatMessage("user", full_prompt)],
                 temperature=0.7,
             )
         except Exception as e:  # noqa: BLE001
-            # Phase 3.4 修：与 inspiration_service 同步：暴露异常类型 + body
-            # （minimax 海外节点抛 httpx.TimeoutException 时 str(e) 可能是空）
-            err_type = type(e).__name__
-            extra = ""
-            resp_obj = getattr(e, "response", None)
-            if resp_obj is not None:
-                try:
-                    body = (resp_obj.text or "")[:200]
-                    extra = f" body={body!r}"
-                except Exception:  # noqa: BLE001
-                    pass
-            logger.error(f"LLM call failed (outline): {err_type}: {e}{extra}")
-            raise OutlineGenerationError(f"LLM call failed: {err_type}: {e}{extra}") from e
+            logger.error("LLM call failed (outline): {}", describe_llm_error(e))
+            raise OutlineGenerationError(describe_llm_error(e)) from e
+        finally:
+            await self._release_llm(llm, owns_client)
         raw = resp.content if isinstance(resp.content, str) else ""
         if not raw.strip():
             raise OutlineGenerationError("LLM returned empty content")
         try:
-            return extract_json_object(raw)
+            return extract_json_object(raw), provider, model
         except ValueError as e:
             raise OutlineGenerationError(str(e)) from e
 

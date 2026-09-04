@@ -35,9 +35,9 @@ async fn api_request(
     let url = format!("{}{}", base.trim_end_matches('/'), path);
 
     let client = reqwest::Client::builder()
-        // Phase 3.3: 30s 太短，generate-plot 串行 3 次 LLM 容易超时
-        // （minimax 海外 5-15s/次）。提到 120s 覆盖最坏情况。
-        .timeout(std::time::Duration::from_secs(120))
+        // 大纲生成（单次 LLM 长调用）实测 mimo 需 ~110s，120s 余量不足；
+        // 180s 覆盖最坏情况（剧情生成已并行化，约 40s）。
+        .timeout(std::time::Duration::from_secs(180))
         .build()
         .map_err(|e| format!("client: {e}"))?;
 

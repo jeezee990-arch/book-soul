@@ -54,12 +54,17 @@ def svc(fake_keyring: FakeKeyring, settings_file) -> SettingsService:
 def test_get_default_no_yaml(svc: SettingsService) -> None:
     """无 yaml 时返默认。"""
     s = svc.get()
-    assert s.llm.provider == "minimax"
-    assert s.llm.model == "MiniMax-Text-01"
+    assert s.llm.provider == "mimo"
+    assert s.llm.model == "mimo-v2.5-pro"
     assert s.ui.theme == "dark"
     assert s.security.encryption_enabled is False
     # 没有 key 时全部 False
-    assert s.api_key_configured == {"minimax": False, "openai": False, "ollama": False}
+    assert s.api_key_configured == {
+        "mimo": False,
+        "minimax": False,
+        "openai": False,
+        "ollama": False,
+    }
 
 
 def test_get_reads_yaml(svc: SettingsService, settings_file) -> None:
@@ -131,6 +136,7 @@ def test_api_key_status_in_get(svc: SettingsService) -> None:
     svc.set_api_key("minimax", "k1")
     s = svc.get()
     assert s.api_key_configured == {
+        "mimo": False,
         "minimax": True,
         "openai": False,
         "ollama": False,

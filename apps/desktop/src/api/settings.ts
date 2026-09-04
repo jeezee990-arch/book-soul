@@ -1,6 +1,6 @@
 import { callApi } from "./index";
 
-export type LLMProvider = "minimax" | "openai" | "ollama";
+export type LLMProvider = "mimo" | "minimax" | "openai" | "ollama";
 export type UITheme = "dark" | "light";
 
 export interface LLMConfig {

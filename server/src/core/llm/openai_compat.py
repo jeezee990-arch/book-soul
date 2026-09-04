@@ -62,6 +62,11 @@ class OpenAICompatClient:
                 f"(set env var '{config.get('api_key_env', '')}' or pass api_key=)"
             )
 
+        # 实例属性覆盖类属性：让业务层读到真实 provider 名（如 "mimo"）
+        # 和默认模型名，而不是笼统的 "openai_compat" / 空
+        self.provider = self._provider_name
+        self.model = self._default_model
+
         # 复用 httpx.AsyncClient（连接池）
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
@@ -135,12 +140,13 @@ class OpenAICompatClient:
                 try:
                     return await _do_request()
                 except (RateLimitError, httpx.TransportError) as e:
-                    if attempt.retry_state.next_action is None:
-                        logger.error(
-                            "LLM request failed after {} attempts: {}",
-                            attempt.retry_state.attempt_number,
-                            e,
-                        )
+                    # 每次失败都记（str(e) 可能为空，至少留异常类型）
+                    logger.warning(
+                        "LLM request attempt {}/{} failed: {}",
+                        attempt.retry_state.attempt_number,
+                        self._max_retries,
+                        str(e) or type(e).__name__,
+                    )
                     raise
 
         # AsyncRetrying 不会走到这里，加个保险
