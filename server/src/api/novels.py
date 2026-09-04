@@ -1,11 +1,12 @@
-"""作品 REST 端点（Phase 1.1）。
+"""作品 REST 端点（Phase 1.1 + Phase 3.8 导出 md）。
 
 端点：
-- POST   /novels           创建
-- GET    /novels           列表（支持 ?genre= &status= 过滤）
-- GET    /novels/{id}      详情
-- PATCH  /novels/{id}      部分更新
-- DELETE /novels/{id}      删除（幂等）
+- POST   /novels                          创建
+- GET    /novels                          列表（支持 ?genre= &status= 过滤）
+- GET    /novels/{id}                     详情
+- PATCH  /novels/{id}                     部分更新
+- DELETE /novels/{id}                     删除（幂等）
+- GET    /novels/{id}/export-md           导出完整 markdown（Phase 3.8）
 
 错误映射：
 - NovelNotFoundError -> 404
@@ -15,15 +16,25 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
+from ..models.novel import Novel
 from ..schemas.novel import NovelCreate, NovelRead, NovelUpdate
+from ..services.export_service import NovelExportService
 from ..services.novel_service import (
     NovelNotFoundError,
     NovelService,
     NovelValidationError,
 )
+
+
+class ExportMdResponse(BaseModel):
+    """导出 markdown 响应（JSON 形式便于 Tauri 序列化；前端再转 Blob 下载）。"""
+
+    filename: str
+    content: str
 
 router = APIRouter(prefix="/novels", tags=["novels"])
 
@@ -116,3 +127,33 @@ async def delete_novel(
     service: NovelService = Depends(get_service),
 ) -> None:
     await service.delete(novel_id)
+
+
+@router.get(
+    "/{novel_id}/export-md",
+    response_model=ExportMdResponse,
+    summary="Phase 3.8：导出作品为 markdown（作品名 + 大纲 + 人物卡）",
+)
+async def export_novel_markdown(
+    novel_id: int,
+    session: AsyncSession = Depends(get_db),
+) -> ExportMdResponse:
+    try:
+        exporter = NovelExportService(session)
+        md = await exporter.export_markdown(novel_id)
+    except NovelNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    # 文件名用作品名（去非法字符）
+    novel = await session.get(Novel, novel_id)
+    safe_name = _safe_filename(novel.name) if novel else f"novel-{novel_id}"
+    return ExportMdResponse(filename=f"{safe_name}.md", content=md)
+
+
+def _safe_filename(name: str) -> str:
+    """去文件名非法字符（Windows 友好）。"""
+    import re
+
+    # Windows 不允许: \ / : * ? " < > |
+    cleaned = re.sub(r'[\\/:*?"<>|]', "_", name)
+    return cleaned.strip() or "untitled"

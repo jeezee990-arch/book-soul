@@ -18,6 +18,7 @@ import KeywordBoard from "./KeywordBoard";
 import PlotGenerator from "./PlotGenerator";
 import OutlineGenerator from "./OutlineGenerator";
 import CharacterManager from "./CharacterManager";
+import SavePanel from "./SavePanel";
 
 /** 灵感园 —— 列出已有灵感（Phase 3 扩展：词库 / 剧情生成 / 人物卡） */
 export default function Inspiration() {
@@ -35,9 +36,10 @@ export default function Inspiration() {
     id: number;
     summary: string;
   } | null>(null);
-  // Phase 3.6: 大纲生成成功后保存 (novelId, structure)，供 CharacterManager 使用
+  // Phase 3.6: 大纲生成成功后保存 (novelId, novelName, structure)，供 CharacterManager / SavePanel 使用
   const [latestOutline, setLatestOutline] = useState<{
     novelId: number;
+    novelName: string;
     structure: Record<string, unknown>;
   } | null>(null);
 
@@ -161,6 +163,7 @@ export default function Inspiration() {
           onGenerated={(resp: OutlineGenerationResponse) => {
             setLatestOutline({
               novelId: resp.novel_id,
+              novelName: resp.novel_name,
               structure: resp.structure,
             });
           }}
@@ -173,6 +176,14 @@ export default function Inspiration() {
           novelId={latestOutline.novelId}
           outline={latestOutline.structure}
           genre={selectedGenre.name}
+        />
+      )}
+
+      {/* Phase 3.8：保存 / 导出（仅在大纲生成后展示） */}
+      {latestOutline && (
+        <SavePanel
+          novelId={latestOutline.novelId}
+          novelName={latestOutline.novelName}
         />
       )}
 

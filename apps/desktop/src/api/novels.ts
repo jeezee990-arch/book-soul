@@ -10,6 +10,11 @@ export type NovelCreate = Omit<
 
 export type NovelUpdate = Partial<NovelCreate>;
 
+export interface ExportMdResponse {
+  filename: string;
+  content: string;
+}
+
 export const novelsApi = {
   list: (params?: { genre?: string; status?: string }) => {
     const q = new URLSearchParams();
@@ -23,4 +28,23 @@ export const novelsApi = {
   update: (id: number, data: NovelUpdate) =>
     callApi<Novel>("PATCH", `/novels/${id}`, data),
   remove: (id: number) => callApi<null>("DELETE", `/novels/${id}`),
+  /** Phase 3.8：导出作品为 markdown 文件，触发浏览器下载 */
+  exportMarkdown: async (id: number, _novelName: string): Promise<void> => {
+    const resp = await callApi<ExportMdResponse>(
+      "GET",
+      `/novels/${id}/export-md`,
+    );
+    // 构造 Blob 触发下载
+    const blob = new Blob([resp.content], {
+      type: "text/markdown;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = resp.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };
