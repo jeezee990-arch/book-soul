@@ -3,6 +3,9 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+# tsc 误 emit 的 vite.config 产物（已用 tsconfig.node.json 的 noEmit:true 防再生成）
+vite.config.js
+vite.config.d.ts
 
 # Tauri
 src-tauri/target/

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { Toaster } from "@/components/ui/sonner";
 
 interface NavItem {
   to: string;
@@ -69,6 +70,8 @@ export default function Layout() {
           </div>
         </main>
       </div>
+
+      <Toaster position="bottom-right" theme="dark" richColors closeButton />
     </div>
   );
 }

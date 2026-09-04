@@ -4,11 +4,55 @@
 //! 后续模块会加入：调用 Python 后端的 HTTP 客户端、文件系统操作等。
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// 健康检查命令（被前端 invoke("ping") 调用）。
 #[tauri::command]
 fn ping() -> String {
     "pong from Book Soul desktop".to_string()
+}
+
+/// 通用 HTTP 代理命令（被前端 invoke("api_request") 调用）。
+///
+/// 任何方法 × 任意路径 → 透传到 Python FastAPI 后端。
+/// 避免每个实体在 Rust 端写一个 command。
+#[tauri::command]
+async fn api_request(
+    method: String,
+    path: String,
+    body: Option<Value>,
+) -> Result<Value, String> {
+    let base = std::env::var("BOOK_SOUL_BACKEND_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8765".to_string());
+    let url = format!("{}{}", base.trim_end_matches('/'), path);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("client: {e}"))?;
+
+    let mut req = match method.to_uppercase().as_str() {
+        "GET" => client.get(&url),
+        "POST" => client.post(&url),
+        "PUT" => client.put(&url),
+        "PATCH" => client.patch(&url),
+        "DELETE" => client.delete(&url),
+        m => return Err(format!("unsupported method: {m}")),
+    };
+    if let Some(b) = body {
+        req = req.json(&b);
+    }
+
+    let resp = req.send().await.map_err(|e| format!("network: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", status, text));
+    }
+    if status == reqwest::StatusCode::NO_CONTENT {
+        return Ok(Value::Null);
+    }
+    resp.json().await.map_err(|e| format!("parse: {e}"))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,7 +135,7 @@ async fn test_llm(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![ping, test_llm])
+        .invoke_handler(tauri::generate_handler![ping, test_llm, api_request])
         .run(tauri::generate_context!())
         .expect("error while running Book Soul desktop application");
 }
