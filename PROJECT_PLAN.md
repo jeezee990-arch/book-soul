@@ -1,8 +1,16 @@
 # Book Soul · 项目开发完整计划书
 
-> 文档版本 v1.1 · 2026-09-02
+> 文档版本 v1.2 · 2026-09-04
 > 项目代号：Book Soul
 > 工作目录：`C:\Users\JZ\Desktop\Book Soul`
+>
+> **修订记录**：
+> - **v1.2（2026-09-04）灵感园三步流程重构**（提议来源：用户主动）。原因：原 Phase 3
+>   把所有步骤与可选卡片挤在同一页，操作混乱；目标：简化页面、分割步骤、操作简洁舒适。
+>   影响范围：Phase 3 模块 3.1-3.4 重新定义（原 3.1+3.2 合并为新 3.1，原 3.3 → 新 3.2，
+>   原 3.4 → 新 3.3，新增 3.4 流程骨架），模块 3.7 状态机与 Part G 进度清单同步；
+>   后端 API / 词库 / prompt / service 全部复用。详见 Phase 3 节首的修订说明。
+> - v1.1（2026-09-02）：初始确认版（题材优先级、辅助模型 1M 上下文、模型警告机制）。
 >
 > **配套文档**：
 > - [USER_CHECKLIST.md](./USER_CHECKLIST.md) - 用户人工要做的事（环境、Key、验证）
@@ -115,7 +123,7 @@
 
 | 功能 | 用户能做什么 |
 |------|-------------|
-| **灵感园** | 选题材 → 抽灵感词 → 生成剧情 → 生成大纲 → 生成人物卡 → 保存 |
+| **灵感园** | 三步流程：灵感词选择（题材+词）→ 剧情生成 → 大纲生成；每步可保存卡片复用 |
 | **创作** | 选作品 → 流式生成章节 → 选段 AI 重写 → 版本对比 → 导出 |
 | **质量检测** | 选章节 → 自动评分（文笔/逻辑/节奏/人设/题材）→ 看报告 |
 | **仓库** | 看灵感库（含人物卡/大纲）→ 看藏书馆 → 扫描本地小说接入 |
@@ -195,7 +203,7 @@
 
 | 模块 | 简述 |
 |------|------|
-| **灵感园** | 开新书（题材→灵感词→剧情→大纲→人物卡）+ 续写 |
+| **灵感园** | 开新书（三步流程：灵感词→剧情→大纲→人物卡）+ 续写 |
 | **创作** | 章节生成 + 选区 AI 重写 + 版本控制 + 提示词框 |
 | **质量检测** | 多维度评分（文笔/逻辑/节奏/人设/题材合规）+ 报告 |
 | **仓库** | 灵感库（带人物卡/大纲查看）+ 藏书馆 + 本地扫描接入 |
@@ -1671,28 +1679,47 @@ CREATE TABLE versions (
 
 ### Phase 3：灵感园 - 开新书（2 周）
 
-#### 模块 3.1：题材选择 + 词库系统
+> 🔄 **v1.2 修订（2026-09-04，提议来源：用户主动）——灵感园三步流程重构**
+> - **原因**：原设计把所有步骤与可选卡片挤在同一页（题材、灵感词、剧情、大纲纵向堆叠），视觉混乱、操作不舒适。
+> - **新设计**：点开灵感园先看到**三个步骤入口**（灵感词选择 / 简要剧情生成 / 大纲生成），每步单独一页，**只显示本步相关的可选卡片**；每步结果保存为卡片后，用户自选"留在本步重选重生成"或"进入下一步"。
+> - **影响范围**：模块 3.1-3.4 重新定义（原 3.1+3.2 合并为新 3.1；原 3.3 → 新 3.2；原 3.4 → 新 3.3；新增 3.4 流程骨架），模块 3.7 状态机同步更新，Part G 进度清单同步。**后端 API / 词库 / prompt / service 全部复用，不受影响**；生成仍为阻塞式（本次不改，流式留待 Phase 4 统一考虑）。
+> - **已完成部分**：原 3.1-3.4 的后端 + 配置已在 commit `e14981a` 落地（该 commit 消息为 "Phase 2.6: 灵感园 + 词库 + 题材（部分）"，编号与计划书错位，以此说明为准）。剩余工作以前端三步拆分为主。
 
-- **JEE 决策的题材优先级**（v1.1 更新）：
-  | 优先级 | 题材 | 文件名 | 备注 |
-  |--------|------|--------|------|
-  | P0（必做）| 修仙 | `xiuxian.yaml` | 网文大头，词库 800+ |
-  | P1（必做）| 都市 | `dushi.yaml` | 词库 500+ |
-  | P2（必做）| 悬疑 | `xuanyi.yaml` | 词库 500+ |
-  | P3（必做）| 言情 | `yanqing.yaml` | 词库 500+ |
+#### 新交互流程总览
+
+```
+灵感园首页（三个步骤入口卡片）
+├─ 第一步 灵感词选择（题材 + 词库合并）
+│    选题材 → 抽灵感词 → 刷新/锁定/多选/手动添加
+│    → 【保存关键词卡片】
+│    → 保存后二选一：① 留在本步，刷新重选创建新卡片
+│                     ② 进入第二步
+├─ 第二步 简要剧情生成（只显示【关键词卡片】可选）
+│    选关键词卡片 → 生成 3 个剧情 → 【保存剧情卡片】
+│    → 保存后二选一：① 返回重选关键词卡片重新生成
+│                     ② 进入第三步
+└─ 第三步 大纲生成（只显示【剧情卡片】可选）
+     选剧情卡片（种子）→ 生成大纲（complete / freedom 保留）
+     → 自动建作品 + 大纲入库；可返回第二步换剧情卡片
+```
+
+**流程原则**：
+1. 每一步只展示本步的可选卡片：第一步 = 题材 + 词库；第二步 = 关键词卡片；第三步 = 剧情卡片。
+2. 三个步骤**保留原有全部自定义功能**（刷新/锁定/多选/全选/反选/手动添加/提示词框/作品名/大纲 mode 等）。
+3. 步骤间数据流统一走灵感库卡片（`/inspirations`，type=keyword / plot），刷新应用不丢。
+4. 前置不足时入口置灰 + 空状态提示（如第二步无关键词卡片 → 引导回第一步）。
+
+#### 模块 3.1：灵感词选择步（题材 + 词库 + 保存关键词卡片）
+
+> 由原 3.1（题材选择 + 词库系统）与原 3.2（灵感词生成/刷新/锁定）合并而成。
 
 - **文件**：
-  - `config/genres/xiuxian.yaml` ⭐ P0
-  - `config/genres/dushi.yaml` ⭐ P1
-  - `config/genres/xuanyi.yaml` ⭐ P2
-  - `config/genres/yanqing.yaml` ⭐ P3
-  - `config/wordbanks/xiuxian.yaml`
-  - `config/wordbanks/dushi.yaml`
-  - `config/wordbanks/xuanyi.yaml`
-  - `config/wordbanks/yanqing.yaml`
-  - `server/src/services/wordbank_service.py`
-  - `apps/desktop/src/pages/Inspiration/GenreSelect.tsx`
-
+  - `config/genres/{xiuxian,dushi,xuanyi,yanqing}.yaml` ✅ 已完成
+  - `config/wordbanks/{xiuxian,dushi,xuanyi,yanqing}.yaml` ✅ 已完成
+  - `server/src/services/wordbank_service.py` ✅ 已完成
+  - `apps/desktop/src/pages/Inspiration/GenreSelect.tsx` ✅ 已完成（待并入步骤页）
+  - `apps/desktop/src/pages/Inspiration/KeywordBoard.tsx` ✅ 已完成（待并入步骤页）
+- **题材优先级**（JEE 决策，v1.1 确认）：修仙 P0 → 都市 P1 → 悬疑 P2 → 言情 P3（4 题材词库均已落地）
 - **词库 YAML 结构**（以修仙 P0 为例）：
   ```yaml
   name: 修仙
@@ -1702,7 +1729,6 @@ CREATE TABLE versions (
   scenes: [宗门, 拍卖会, 战斗, 遗迹, 秘境, 洞府, ...]
   items: [飞剑, 玉佩, 灵草, 秘籍, 灵兽, 储物袋, ...]
   ```
-
 - **题材顺序配置**（前端用，控制选择顺序）：
   ```typescript
   // apps/desktop/src/config/genres.ts
@@ -1713,106 +1739,70 @@ CREATE TABLE versions (
     { id: 'yanqing', name: '言情', tier: 'P3', emoji: '💕' },
   ] as const;
   ```
-- **关键代码 `wordbank_service.py`**：
-  ```python
-  from pathlib import Path
-  import yaml
-  import random
+- **本步交互**：
+  - 选题材 → 抽灵感词；刷新 / 锁定 / 多选 / 全选 / 反选 / 手动添加 / 提示词框（全部保留）
+  - 确定词语 → **保存为关键词卡片**（`POST /inspirations`，type=keyword）
+  - 保存后：① 留在本步刷新重选、创建新卡片；② 进入第二步
+- **用户人工**：第一步选"修仙" → 选词 → 保存卡片 → 卡片出现在"我的灵感"
 
-  class WordbankService:
-      def __init__(self, genre: str):
-          self.genre = genre
-          self._load()
+#### 模块 3.2：简要剧情生成步（输入 = 关键词卡片）
 
-      def _load(self):
-          path = Path(f"config/wordbanks/{self.genre}.yaml")
-          with open(path, encoding="utf-8") as f:
-              self.data = yaml.safe_load(f)
-
-      def get_random_words(self, category: str, n: int = 10) -> list[str]:
-          words = self.data.get(category, [])
-          return random.sample(words, min(n, len(words)))
-
-      def get_all_categories(self) -> list[str]:
-          return list(self.data.keys())
-  ```
-- **用户人工**：在 UI 选"修仙"（P0 优先级最高），看到灵感词
-
-#### 模块 3.2：灵感词生成/刷新/锁定
+> 原 3.3；页面改为只显示关键词卡片可选。
 
 - **文件**：
-  - `apps/desktop/src/pages/Inspiration/KeywordBoard.tsx`
-  - `server/src/api/inspirations.py`
-- **功能**：
-  - 刷新按钮（生成新词）
-  - 锁定按钮（已选不参与刷新）
-  - 多选 / 全选 / 反选
-  - 手动添加输入框
-  - 提示词框（始终显示）
+  - `config/prompts/plot_generation.yaml` ✅ 已完成
+  - `server/src/services/inspiration_service.py`（PlotService）✅ 已完成
+  - `apps/desktop/src/pages/Inspiration/PlotGenerator.tsx`（待改造为步骤页）
+- **生成逻辑**（已实现；v1.2 备注已并行化，3 版本约 96s → 34s）：
+  ```python
+  async def generate(self, genre: str, keywords: list[str], n_versions: int = 3) -> list[str]:
+      """并行生成 n 个简要剧情版本"""
+  ```
+- **本步交互**：
+  - 只显示已保存的【关键词卡片】（多选）作为输入
+  - 生成 3 个剧情 → 逐个保存为剧情卡片（type=plot）
+  - 保存后：① 返回重选关键词卡片、重新生成；② 进入第三步
+- **用户人工**：选关键词卡片 → 生成 3 剧情 → 保存 → 进入下一步
 
-#### 模块 3.3：简要剧情生成
+#### 模块 3.3：大纲生成步（输入 = 剧情卡片）
+
+> 原 3.4；页面改为只显示剧情卡片可选。
 
 - **文件**：
-  - `config/prompts/plot_generation.yaml`
-  - `server/src/services/inspiration_service.py`
-  - `apps/desktop/src/pages/Inspiration/PlotGenerator.tsx`
-- **关键代码**：
-  ```python
-  async def generate_plot(
-      self,
-      genre: str,
-      keywords: list[str],
-      n_versions: int = 3,
-  ) -> list[str]:
-      """批量生成简要剧情"""
-      prompt_template = self.prompts["plot_generation"]
-      results = []
-      for _ in range(n_versions):
-          prompt = prompt_template.format(
-              genre=genre,
-              keywords=", ".join(keywords),
-          )
-          response = await self.llm.chat([ChatMessage("user", prompt)])
-          results.append(response.content)
-      return results
-  ```
-- **用户人工**：选词 → 生成 3 个剧情 → 看到结果
-
-#### 模块 3.4：完整版大纲生成
-
-- **文件**：
-  - `config/prompts/outline_complete.yaml`
-  - `config/prompts/outline_freedom.yaml`
-  - `server/src/services/outline_service.py`
-- **关键代码**：
-  ```python
-  async def generate_complete_outline(
-      self,
-      novel_id: int,
-      plot: str,
-  ) -> dict:
-      """生成完整版大纲（分卷 + 章节）"""
-      # 加载 LLM 抽象
-      # 构造 prompt（含题材常识）
-      # 调用 LLM
-      # 解析 JSON 输出
-      # 存入数据库
-  ```
-- **输出结构**（LLM 需输出 JSON）：
+  - `config/prompts/outline_complete.yaml` / `outline_freedom.yaml` ✅ 已完成
+  - `server/src/services/outline_generator.py` ✅ 已完成
+  - `apps/desktop/src/pages/Inspiration/OutlineGenerator.tsx`（待改造为步骤页）
+- **输出结构**（LLM 输出 JSON，schema 已落地）：
   ```json
   {
     "volumes": [
       {
-        "title": "第一卷 初入修仙",
+        "name": "第一卷 初入修仙",
         "summary": "...",
         "chapters": [
-          {"title": "第一章 偶得传承", "summary": "..."},
-          ...
+          {"title": "第一章 偶得传承", "summary": "...", "key_events": ["..."]}
         ]
       }
     ]
   }
   ```
+- **本步交互**：
+  - 只显示已保存的【剧情卡片】（单选，作为大纲种子）
+  - complete（分卷/章）/ freedom（散文+节拍）两种 mode 保留；作品名自定义保留（留空用"{genre}新作"）
+  - 生成后自动建作品 + 大纲入库；可返回第二步换剧情卡片重生成
+- **用户人工**：选剧情卡片 → 选 mode → 生成大纲 → "我的灵感"查看
+
+#### 模块 3.4：三步流程骨架与导航（v1.2 新增）
+
+- **文件**：
+  - `apps/desktop/src/pages/Inspiration/index.tsx`（重构：单页堆叠 → 步骤容器）
+  - `apps/desktop/src/pages/Inspiration/StepNav.tsx`（新增：三步入口/导航组件）
+- **功能**：
+  - 灵感园首页显示三个步骤入口卡片；点击进入对应步骤页
+  - 步骤间切换用子路由或视图状态；跨步选中状态由 Zustand store（或步骤容器）持有
+  - 前置校验：无关键词卡片 → 第二步置灰；无剧情卡片 → 第三步置灰（空状态引导回上一步）
+  - "我的灵感"卡片点开可"用作输入"直达对应步骤
+- **验收**：任一时刻页面只出现一个步骤的可选卡片；三步来回切换不丢已选内容
 
 #### 模块 3.5：人物卡自动生成 ⭐ 核心
 
@@ -1887,19 +1877,21 @@ CREATE TABLE versions (
 - **关键代码**：
   ```python
   class NewBookStateMachine:
+      # v1.2：状态与"三步分页流程"对齐（原 select_genre / generate_keywords 等
+      # 细粒度状态改为按步骤页组织）
       STATES = [
-          "idle", "select_genre", "generate_keywords", "select_keywords",
-          "generate_plot", "edit_plot", "select_outline_mode",
-          "generate_outline", "edit_outline", "generate_characters",
-          "edit_characters", "save", "done"
+          "idle", "keyword_step", "plot_step", "outline_step",
+          "character_step", "edit_characters", "save", "done",
       ]
 
       TRANSITIONS = {
-          "idle": ["select_genre"],
-          "select_genre": ["generate_keywords"],
-          "generate_keywords": ["select_keywords"],
-          "select_keywords": ["generate_plot"],
-          # ...
+          "idle": ["keyword_step"],
+          "keyword_step": ["plot_step"],                  # 保存关键词卡片后
+          "plot_step": ["keyword_step", "outline_step"],  # 可回上步重选 / 进入大纲
+          "outline_step": ["plot_step", "character_step"],
+          "character_step": ["edit_characters", "save"],
+          "edit_characters": ["character_step", "save"],
+          "save": ["done", "keyword_step"],               # 结束或再开一本
       }
 
       def __init__(self, session_id: str):
@@ -1925,13 +1917,52 @@ CREATE TABLE versions (
 
 #### 阶段 3 产出物
 
-- [ ] 可在 UI 完成"开新书"全流程
-- [ ] 灵感词可刷新/锁定
-- [ ] 剧情批量生成
-- [ ] 大纲生成（两种 mode）
+- [ ] 灵感园首页三步入口清晰，单页不再堆叠所有步骤与卡片
+- [ ] 第一步：题材 + 词库合并，关键词可保存为卡片
+- [ ] 第二步：仅关键词卡片可选，剧情可保存为卡片
+- [ ] 第三步：仅剧情卡片可选，大纲两种 mode 可用
+- [ ] 三步均保留自定义功能（刷新/锁定/多选/手动添加/提示词框）
 - [ ] 人物卡自动生成 + 人工调整
 - [ ] 保存到灵感库
 - [ ] 导出 md
+
+#### 模块 3.9：全局 UI 设计 + 静态框架（v1.2 新增 · 阶段 3 最后一步）
+
+- **目的**：先把整套 UI 界面统一设计 + 用 Tauri + shadcn/ui + Tailwind 做出**纯静态框架**（所有页面、所有按钮、所有状态都有），业务逻辑**暂缺**。后续每个模块开发时，直接在框架上"填肉"，不用边做 UI 边做逻辑。
+- **范围**（先做整体设计稿，再编码）：
+  - 5 个主页面：灵感园 / 创作 / 质检 / 作品库 / 设置
+  - 灵感园三步流程的所有子页面与对话框
+  - 创作页 Tiptap 编辑器布局
+  - 质检结果展示
+  - 作品库列表 / 详情
+  - 设置页所有 section
+- **三种状态全覆盖**：
+  - **空状态**：刚打开 / 没数据时的占位（图标 + 引导文案 + 主操作按钮）
+  - **加载状态**：骨架屏 / spinner / 进度条
+  - **有数据状态**：列表 / 卡片 / 详情完整渲染
+- **设计原则**：
+  - 视觉统一：颜色 / 字号 / 间距 / 圆角 / 阴影走 Tailwind tokens（已在 `tailwind.config.js` + `globals.css`）
+  - 交互统一：所有按钮走 shadcn Button variants（`default` / `outline` / `ghost` / `destructive`），不用散落的 `<button className="...">`
+  - 可达性：键盘 Tab 顺序 + 焦点环 + `aria-*` 标签
+  - 响应式：宽屏（1400px 默认）+ 中屏（1024px）+ 窄屏（768px 可读）三档
+- **文件**（先建空架子，每个组件标 `TODO: business logic`）：
+  - `apps/desktop/src/components/ui/` — 已有，继续补 Dialog / Tabs / Tooltip 等
+  - `apps/desktop/src/components/layout/` — `AppShell.tsx`（侧栏 + 顶栏 + 主区域）、`EmptyState.tsx`、`LoadingSkeleton.tsx`、`ErrorState.tsx`
+  - `apps/desktop/src/pages/<Page>/` — 每个页面新建 1 个静态版本（如 `Inspiration/Step1Keywords.tsx` 静态版）
+  - 状态用本地 `useState` 写死数据，不接 API（标注 `// MOCK: replace with API in <module>`）
+- **不做**：
+  - 不接 API / 不调 LLM / 不写业务逻辑
+  - 不做动效细节（hover/transition 可以有，但不要 polish）
+  - 不做暗色模式调优（基本切换功能在 3.9 之后单独做）
+- **验收**：
+  - [ ] 5 个主页面都能跳转、布局统一
+  - [ ] 灵感园三步流程子页面都有空 / 加载 / 有数据三状态
+  - [ ] 创作页 Tiptap 区域占位（真实编辑器 4.2 再填）
+  - [ ] 质检页结果展示占位
+  - [ ] 作品库列表 + 详情占位
+  - [ ] 设置页所有 section 占位
+  - [ ] 端到端 30 分钟过完所有页面，无白屏/无控制台错误
+- **预估工时**：2-3 天（设计稿 1 天 + 编码 1-2 天）
 
 ---
 
@@ -3073,11 +3104,11 @@ pre-commit run --all-files
 - [ ] 2.4 设置页基础
 - [ ] 2.5 Zustand 状态管理
 
-### Phase 3：灵感园 - 开新书
-- [ ] 3.1 题材选择 + 词库
-- [ ] 3.2 灵感词操作
-- [ ] 3.3 简要剧情生成
-- [ ] 3.4 完整版大纲生成
+### Phase 3：灵感园 - 开新书（v1.2 三步流程）
+- [ ] 3.1 灵感词选择步（题材+词库+保存关键词卡片）
+- [ ] 3.2 简要剧情生成步（关键词卡片输入）
+- [ ] 3.3 大纲生成步（剧情卡片输入）
+- [ ] 3.4 三步流程骨架与导航
 - [ ] 3.5 人物卡自动生成 ⭐
 - [ ] 3.6 人物卡管理 UI
 - [ ] 3.7 状态机实现
