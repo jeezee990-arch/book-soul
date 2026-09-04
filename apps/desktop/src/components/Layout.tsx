@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
+import { useUIStore } from "@/stores/uiStore";
 
 interface NavItem {
   to: string;
@@ -18,14 +19,20 @@ const NAV_ITEMS: NavItem[] = [
 
 /**
  * 顶栏 + 左侧细边栏 + 主区
- * - dark 主题（启动时给 <html> 加 .dark）
+ * - 主题由 uiStore.theme 决定（默认 dark）
  * - 灰阶 + indigo 单一强调色
  * - 当前路由用浅灰底 + 细左侧边线
  */
 export default function Layout() {
+  const theme = useUIStore((s) => s.theme);
+
   useEffect(() => {
-    document.documentElement.classList.add("dark");
-  }, []);
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, [theme]);
 
   return (
     <div className="h-screen flex flex-col bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 antialiased">
