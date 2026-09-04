@@ -18,6 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import LoadingSkeleton from "@/components/layout/LoadingSkeleton";
+import ErrorState from "@/components/layout/ErrorState";
 
 const PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: "mimo", label: "mimo（主用，国内快）" },
@@ -176,18 +178,11 @@ export default function Settings() {
   };
 
   if (loading) {
-    return <p className="text-sm text-neutral-400">加载中...</p>;
+    return <LoadingSkeleton rows={3} height={120} />;
   }
 
   if (error) {
-    return (
-      <Card className="border-destructive/50">
-        <CardHeader>
-          <CardTitle className="text-base text-destructive">加载失败</CardTitle>
-          <CardDescription className="font-mono text-xs">{error}</CardDescription>
-        </CardHeader>
-      </Card>
-    );
+    return <ErrorState message={error} />;
   }
 
   return (

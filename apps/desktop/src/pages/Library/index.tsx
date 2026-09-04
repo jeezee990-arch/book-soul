@@ -11,14 +11,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import EmptyState from "@/components/layout/EmptyState";
+import LoadingSkeleton from "@/components/layout/LoadingSkeleton";
+import ErrorState from "@/components/layout/ErrorState";
 
-/** 作品库 —— 列出所有作品 */
+/** 作品库 —— 列出所有作品（Phase 3.9：复用共用 layout 组件） */
 export default function Library() {
   const [items, setItems] = useState<Novel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = () => {
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -40,6 +43,10 @@ export default function Library() {
     return () => {
       cancelled = true;
     };
+  };
+
+  useEffect(() => {
+    return load();
   }, []);
 
   return (
@@ -54,60 +61,55 @@ export default function Library() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => toast.info("敬请期待", { description: "Phase 3 接入" })}
+          onClick={() =>
+            toast.info("敬请期待", { description: "Phase 4 接入" })
+          }
         >
           新建作品
         </Button>
       </header>
 
-      {loading && <p className="text-sm text-neutral-400">加载中...</p>}
+      {loading && <LoadingSkeleton rows={4} height={100} />}
 
-      {error && !loading && (
-        <Card className="border-destructive/50">
-          <CardHeader>
-            <CardTitle className="text-base text-destructive">
-              加载失败
-            </CardTitle>
-            <CardDescription className="font-mono text-xs">
-              {error}
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
+      {error && !loading && <ErrorState message={error} onRetry={load} />}
 
       {!loading && !error && items.length === 0 && (
-        <div className="border border-dashed border-neutral-300 dark:border-neutral-800 rounded-lg p-12 text-center">
-          <p className="text-sm text-neutral-400 dark:text-neutral-500">
-            暂无作品
-          </p>
-        </div>
+        <EmptyState
+          icon="📚"
+          title="还没有作品"
+          description="去灵感园完成三步流程（关键词 → 剧情 → 大纲），自动创建作品并入库到这里。"
+        />
       )}
 
-      <div className="space-y-3">
-        {items.map((n) => (
-          <Card key={n.id}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">{n.name}</CardTitle>
-                <span className="text-[10px] uppercase tracking-wider text-neutral-400 border border-neutral-200 dark:border-neutral-800 rounded px-1.5 py-0.5">
-                  {n.genre}
-                </span>
-              </div>
-              {n.description && (
-                <CardDescription className="line-clamp-2">
-                  {n.description}
-                </CardDescription>
-              )}
-            </CardHeader>
-            <CardContent className="text-xs text-neutral-500 dark:text-neutral-400 flex gap-4 flex-wrap">
-              <span>状态：{n.status}</span>
-              <span>文风：{n.style ?? "—"}</span>
-              <span>大纲：{n.outline_mode ?? "—"}</span>
-              {n.read_only && <span className="text-amber-500">只读</span>}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {!loading && !error && items.length > 0 && (
+        <div className="space-y-3">
+          {items.map((n) => (
+            <Card key={n.id}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">{n.name}</CardTitle>
+                  <span className="text-[10px] uppercase tracking-wider text-neutral-400 border border-neutral-200 dark:border-neutral-800 rounded px-1.5 py-0.5">
+                    {n.genre}
+                  </span>
+                </div>
+                {n.description && (
+                  <CardDescription className="line-clamp-2">
+                    {n.description}
+                  </CardDescription>
+                )}
+              </CardHeader>
+              <CardContent className="text-xs text-neutral-500 dark:text-neutral-400 flex gap-4 flex-wrap">
+                <span>状态：{n.status}</span>
+                <span>文风：{n.style ?? "—"}</span>
+                <span>大纲：{n.outline_mode ?? "—"}</span>
+                {n.read_only && (
+                  <span className="text-amber-500">只读</span>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
