@@ -52,11 +52,25 @@ if (-not (Test-Path $DevDataDir)) {
 $env:BOOK_SOUL_DATA_DIR = $DevDataDir
 Write-Host "       BOOK_SOUL_DATA_DIR=$DevDataDir" -ForegroundColor DarkGray
 
+# 启动前先杀端口 8765 上的 Python 进程（避免老进程占着端口导致新进程启动失败）
+$PortOwners = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
+foreach ($Conn in $PortOwners) {
+    $OldProc = Get-Process -Id $Conn.OwningProcess -ErrorAction SilentlyContinue
+    if ($OldProc -and $OldProc.ProcessName -eq "python") {
+        Write-Host "       Killing stale Python PID $($OldProc.Id) on port 8765" -ForegroundColor Yellow
+        Stop-Process -Id $OldProc.Id -Force
+    }
+}
+Start-Sleep -Seconds 1
+
 $PythonLog = Join-Path $LogDir 'book-soul-backend.out.log'
 $PythonErr = Join-Path $LogDir 'book-soul-backend.err.log'
+# PowerShell 5.1 Start-Process doesn't reliably inherit $env: vars.
+# Use cmd.exe /c "set X=Y && program" to guarantee env is set for child.
+$CmdArgs = '/c', "set `"BOOK_SOUL_DATA_DIR=$DevDataDir`" && `"$PythonExe`" -m src.main"
 $PythonProc = Start-Process `
-    -FilePath $PythonExe `
-    -ArgumentList '-m', 'src.main' `
+    -FilePath "cmd.exe" `
+    -ArgumentList $CmdArgs `
     -WorkingDirectory $ServerDir `
     -PassThru `
     -WindowStyle Hidden `
