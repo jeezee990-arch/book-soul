@@ -1,0 +1,31 @@
+# Book Soul 用户运行时设置（示例 / 默认值）
+#
+# 实际文件路径：<data_dir>/.book-soul-settings.yaml
+#   data_dir 默认 = ~/Documents/BookSoul
+#   可用环境变量 BOOK_SOUL_DATA_DIR 覆盖
+#
+# 修改后部分设置需要重启服务生效（见各字段注释）。
+
+version: 1
+
+# ===== LLM =====
+llm:
+  # 当前 provider：minimax | openai | ollama
+  provider: minimax
+  # 当前 provider 的默认模型
+  model: MiniMax-Text-01
+
+# ===== UI =====
+ui:
+  # dark | light（立即生效）
+  theme: dark
+
+# ===== 存储 =====
+# 数据目录：默认 ~/Documents/BookSoul
+# 改这里不生效（启动时由 BOOK_SOUL_DATA_DIR 决定）。
+# data_dir: ~/BookSoul
+
+# ===== 安全 =====
+security:
+  # 启用 Fernet 加密敏感字段（需重启服务生效）
+  # encryption_enabled: false
