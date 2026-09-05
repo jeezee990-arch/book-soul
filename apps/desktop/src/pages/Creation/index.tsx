@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { novelsApi } from "@/api/novels";
 import { chaptersApi } from "@/api/chapters";
 import { ApiError } from "@/api";
-import type { Novel, Chapter } from "@/lib/types";
+import type { Chapter, Novel } from "@/lib/types";
 import {
   Card,
   CardContent,
@@ -11,30 +11,25 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import EmptyState from "@/components/layout/EmptyState";
 import LoadingSkeleton from "@/components/layout/LoadingSkeleton";
 import ErrorState from "@/components/layout/ErrorState";
+import NovelSelector from "./NovelSelector";
+import ChapterList from "./ChapterList";
+import CreateChapterDialog from "./CreateChapterDialog";
 
-/** 创作 —— 选作品 → 章节列表 → 编辑器（Phase 3.9：Tiptap 占位） */
+/** 创作 —— 选作品 → 章节列表 → 编辑器（Phase 4.1：组件化 + 新建章节） */
 export default function Creation() {
   const [novels, setNovels] = useState<Novel[]>([]);
   const [novelId, setNovelId] = useState<number | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
-    null,
-  );
+  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null);
   const [loadingNovels, setLoadingNovels] = useState(true);
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   // 加载作品列表
   useEffect(() => {
@@ -66,7 +61,11 @@ export default function Creation() {
 
   // 选定作品后加载章节
   useEffect(() => {
-    if (novelId === null) return;
+    if (novelId === null) {
+      setChapters([]);
+      setSelectedChapterId(null);
+      return;
+    }
     let cancelled = false;
     setLoadingChapters(true);
     chaptersApi
@@ -74,7 +73,7 @@ export default function Creation() {
       .then((data) => {
         if (!cancelled) {
           setChapters(data);
-          if (data.length > 0) setSelectedChapterId(data[0].id);
+          setSelectedChapterId(data.length > 0 ? data[0].id : null);
         }
       })
       .catch((e: unknown) => {
@@ -91,6 +90,11 @@ export default function Creation() {
 
   const selectedChapter = chapters.find((c) => c.id === selectedChapterId);
 
+  function handleChapterCreated(chapter: Chapter) {
+    setChapters((prev) => [...prev, chapter].sort((a, b) => a.chapter_number - b.chapter_number));
+    setSelectedChapterId(chapter.id);
+  }
+
   return (
     <section className="space-y-6">
       <header className="space-y-1.5">
@@ -102,25 +106,15 @@ export default function Creation() {
 
       {error && <ErrorState message={error} />}
 
-      {!error && (
+      {!error && novels.length > 0 && (
         <div className="flex items-center gap-3">
           <span className="text-sm text-neutral-500">作品：</span>
-          <Select
-            value={novelId ? String(novelId) : undefined}
-            onValueChange={(v) => setNovelId(Number(v))}
-            disabled={loadingNovels || novels.length === 0}
-          >
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="选择作品" />
-            </SelectTrigger>
-            <SelectContent>
-              {novels.map((n) => (
-                <SelectItem key={n.id} value={String(n.id)}>
-                  {n.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <NovelSelector
+            novels={novels}
+            value={novelId}
+            onChange={setNovelId}
+            loading={loadingNovels}
+          />
         </div>
       )}
 
@@ -128,37 +122,16 @@ export default function Creation() {
       {loadingChapters && <LoadingSkeleton rows={3} height={64} />}
 
       {/* 章节列表 + 编辑器 */}
-      {!loadingChapters && chapters.length > 0 && (
-        <div className="grid grid-cols-[260px_1fr] gap-4">
-          {/* 左：章节列表 */}
-          <div className="space-y-1.5 max-h-[600px] overflow-y-auto">
-            {chapters.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedChapterId(c.id)}
-                className={[
-                  "w-full text-left rounded-md border px-3 py-2 text-sm transition-colors",
-                  c.id === selectedChapterId
-                    ? "border-neutral-900 dark:border-neutral-100 bg-neutral-50 dark:bg-neutral-900"
-                    : "border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-900/50",
-                ].join(" ")}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">
-                    第 {c.chapter_number} 章 · {c.title ?? "（未命名）"}
-                  </span>
-                  <span className="text-[10px] text-neutral-400">
-                    {c.status}
-                  </span>
-                </div>
-                <div className="mt-0.5 text-[10px] text-neutral-500">
-                  {c.word_count.toLocaleString()} 字
-                </div>
-              </button>
-            ))}
-          </div>
+      {!loadingChapters && novelId !== null && (
+        <div className="grid grid-cols-[280px_1fr] gap-4">
+          <ChapterList
+            chapters={chapters}
+            selectedId={selectedChapterId}
+            onSelect={setSelectedChapterId}
+            onCreate={() => setCreateOpen(true)}
+            loading={loadingChapters}
+          />
 
-          {/* 右：Tiptap 编辑器占位 */}
           <div className="space-y-3">
             {selectedChapter ? (
               <Card>
@@ -183,19 +156,19 @@ export default function Creation() {
                       disabled
                     />
                     <div className="mt-3 flex items-center gap-2">
-                      <Button size="sm" disabled title="Phase 4.2 接入">
+                      <Button size="sm" disabled title="Phase 4.3 接入">
                         流式生成
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
                         disabled
-                        title="Phase 4.2 接入"
+                        title="Phase 4.4 接入"
                       >
                         选段重写
                       </Button>
                       <span className="ml-auto text-[10px] text-neutral-400">
-                        字数：0
+                        当前字数：{selectedChapter.word_count.toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -205,21 +178,20 @@ export default function Creation() {
               <EmptyState
                 icon="📝"
                 title="选一章节开始编辑"
-                description="左边点章节，或新建一个。"
+                description="左边点章节，或点「新建章节」开始。"
               />
             )}
           </div>
         </div>
       )}
 
-      {/* 无章节空状态 */}
-      {!loadingChapters && novelId !== null && chapters.length === 0 && (
-        <EmptyState
-          icon="📖"
-          title="该作品暂无章节"
-          description="Phase 4 接入章节生成后，这里会出现自动生成的章节列表。"
-        />
-      )}
+      <CreateChapterDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        novelId={novelId}
+        existing={chapters}
+        onCreated={handleChapterCreated}
+      />
     </section>
   );
 }
