@@ -191,6 +191,8 @@ export default function Creation() {
         accumulated += ev.text;
         editorRef.current?.appendText(ev.text);
       }
+      // 流式完成：立即 flush 缓冲区
+      editorRef.current?.flush();
       // 写一条新版本
       const finalText = accumulated.trim();
       if (finalText) {
@@ -248,6 +250,8 @@ export default function Creation() {
         // 用增量方式：每次 yield 后用整个 accumulated 替换选区
         editorRef.current?.replaceRange(from, from + accumulated.length, accumulated);
       }
+      // 流式完成：立即 flush 缓冲区
+      editorRef.current?.flush();
       const finalText = accumulated.trim();
       if (finalText) {
         await saveContent(
