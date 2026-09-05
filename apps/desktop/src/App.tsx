@@ -1,5 +1,6 @@
 import { HashRouter, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Inspiration from "./pages/Inspiration";
 import Creation from "./pages/Creation";
 import QualityCheck from "./pages/QualityCheck";
@@ -13,17 +14,19 @@ import Skills from "./pages/Skills";
  */
 export default function App() {
   return (
-    <HashRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route path="/" element={<Inspiration />} />
-          <Route path="/creation" element={<Creation />} />
-          <Route path="/quality" element={<QualityCheck />} />
-          <Route path="/library" element={<Library />} />
-          <Route path="/skills" element={<Skills />} />
-          <Route path="/settings" element={<Settings />} />
-        </Route>
-      </Routes>
-    </HashRouter>
+    <ErrorBoundary>
+      <HashRouter>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Inspiration />} />
+            <Route path="/creation" element={<Creation />} />
+            <Route path="/quality" element={<QualityCheck />} />
+            <Route path="/library" element={<Library />} />
+            <Route path="/skills" element={<Skills />} />
+            <Route path="/settings" element={<Settings />} />
+          </Route>
+        </Routes>
+      </HashRouter>
+    </ErrorBoundary>
   );
 }
