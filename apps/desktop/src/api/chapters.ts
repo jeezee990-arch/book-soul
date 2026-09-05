@@ -1,5 +1,5 @@
 import { callApi } from "./index";
-import type { Chapter } from "@/lib/types";
+import type { Chapter, ChapterVersion } from "@/lib/types";
 
 export type ChapterCreate = Omit<
   Chapter,
@@ -28,4 +28,8 @@ export const chaptersApi = {
   update: (id: number, data: ChapterUpdate) =>
     callApi<Chapter>("PATCH", `/chapters/${id}`, data),
   remove: (id: number) => callApi<null>("DELETE", `/chapters/${id}`),
+  listVersions: (id: number) =>
+    callApi<ChapterVersion[]>("GET", `/chapters/${id}/versions`),
+  getVersion: (id: number, versionId: number) =>
+    callApi<ChapterVersion>("GET", `/chapters/${id}/versions/${versionId}`),
 };

@@ -16,6 +16,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.versioning.diff import compute_unified_diff
 from ..models.chapter import CHAPTER_STATUSES, VERSION_TRIGGERS, Chapter, ChapterVersion
 from ..models.novel import Novel
 from ..schemas.chapter import (
@@ -186,12 +187,25 @@ class ChapterService:
         """写新版本（正文更新）。"""
         self._validate_trigger(data.trigger)
         chapter = await self.get(chapter_id)
+        # Phase 4.6：自动算与 parent 的 unified diff（标准库 difflib 实现）
+        parent_content: str | None = None
+        parent_id: int | None = chapter.current_version_id
+        if parent_id is not None:
+            parent_version = await self.session.get(ChapterVersion, parent_id)
+            if parent_version is not None and parent_version.chapter_id == chapter.id:
+                parent_content = parent_version.content
+        diff = compute_unified_diff(
+            parent_content,
+            data.content,
+            fromfile=f"v{parent_id or 0}",
+            tofile="new",
+        )
         wc = _word_count(data.content)
         version = ChapterVersion(
             chapter_id=chapter.id,
             parent_version_id=chapter.current_version_id,
             content=data.content,
-            diff=None,  # diff 计算留给 Phase 4
+            diff=diff or None,
             trigger=data.trigger,
             prompt=data.prompt,
             metadata_=data.metadata,

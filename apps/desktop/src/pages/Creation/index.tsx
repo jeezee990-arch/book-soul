@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { History } from "lucide-react";
 import { toast } from "sonner";
 import { novelsApi } from "@/api/novels";
 import { chaptersApi } from "@/api/chapters";
 import { ApiError } from "@/api";
-import type { Chapter, Novel } from "@/lib/types";
+import type { Chapter, ChapterVersion, Novel } from "@/lib/types";
 import {
   Card,
   CardContent,
@@ -19,6 +20,7 @@ import ErrorState from "@/components/layout/ErrorState";
 import NovelSelector from "./NovelSelector";
 import ChapterList from "./ChapterList";
 import CreateChapterDialog from "./CreateChapterDialog";
+import VersionPanel from "./VersionPanel";
 
 /** 创作 —— 选作品 → 章节列表 → 编辑器（Phase 4.1：组件化 + 新建章节） */
 export default function Creation() {
@@ -30,6 +32,7 @@ export default function Creation() {
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [versionOpen, setVersionOpen] = useState(false);
 
   // 加载作品列表
   useEffect(() => {
@@ -95,6 +98,19 @@ export default function Creation() {
     setSelectedChapterId(chapter.id);
   }
 
+  function handleRollback(newVersion: ChapterVersion) {
+    // 刷新当前章节的字数 / 状态
+    if (!selectedChapter) return;
+    setChapters((prev) =>
+      prev.map((c) =>
+        c.id === selectedChapter.id
+          ? { ...c, current_version_id: newVersion.id, word_count: newVersion.word_count }
+          : c,
+      ),
+    );
+    toast.success("已生成回滚版本", { description: `v${newVersion.id}` });
+  }
+
   return (
     <section className="space-y-6">
       <header className="space-y-1.5">
@@ -136,13 +152,26 @@ export default function Creation() {
             {selectedChapter ? (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">
-                    第 {selectedChapter.chapter_number} 章 ·{" "}
-                    {selectedChapter.title ?? "（未命名）"}
-                  </CardTitle>
-                  {selectedChapter.outline && (
-                    <CardDescription>{selectedChapter.outline}</CardDescription>
-                  )}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1.5">
+                      <CardTitle className="text-base">
+                        第 {selectedChapter.chapter_number} 章 ·{" "}
+                        {selectedChapter.title ?? "（未命名）"}
+                      </CardTitle>
+                      {selectedChapter.outline && (
+                        <CardDescription>{selectedChapter.outline}</CardDescription>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setVersionOpen(true)}
+                      className="shrink-0"
+                    >
+                      <History className="mr-1.5 h-3.5 w-3.5" />
+                      版本历史
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {/* MOCK: Tiptap 编辑器占位（Phase 4.2 真实接入 Tiptap） */}
@@ -191,6 +220,13 @@ export default function Creation() {
         novelId={novelId}
         existing={chapters}
         onCreated={handleChapterCreated}
+      />
+
+      <VersionPanel
+        open={versionOpen}
+        onOpenChange={setVersionOpen}
+        chapter={selectedChapter ?? null}
+        onRollback={handleRollback}
       />
     </section>
   );

@@ -42,6 +42,7 @@ VERSION_TRIGGERS: tuple[str, ...] = (
     "rewrite",  # 选区/全文 AI 重写
     "llm_generate",  # LLM 生成（章节创作）
     "imported",  # 扫描接入
+    "rollback",  # Phase 4.6 软回滚（内容来自历史版本）
 )
 
 

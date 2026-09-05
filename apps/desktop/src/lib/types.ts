@@ -66,6 +66,19 @@ export interface Chapter {
   updated_at: string;
 }
 
+export interface ChapterVersion {
+  id: number;
+  chapter_id: number;
+  parent_version_id: number | null;
+  content: string;
+  diff: string | null;
+  trigger: string;
+  prompt: string | null;
+  metadata: Record<string, unknown> | null;
+  word_count: number;
+  created_at: string;
+}
+
 export interface Outline {
   id: number;
   novel_id: number;
