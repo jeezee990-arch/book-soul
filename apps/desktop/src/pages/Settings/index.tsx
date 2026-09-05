@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import LoadingSkeleton from "@/components/layout/LoadingSkeleton";
 import ErrorState from "@/components/layout/ErrorState";
+import BackupPanel from "@/components/BackupPanel";
 
 const PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: "mimo", label: "mimo（主用，国内快）" },
@@ -305,6 +306,9 @@ export default function Settings() {
           </p>
         </CardContent>
       </Card>
+
+      {/* 备份 / 恢复（Phase 7.4） */}
+      <BackupPanel />
 
       {/* 主题 */}
       <Card>

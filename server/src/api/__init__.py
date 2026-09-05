@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from .backup import router as backup_router
 from .chapter_generation import router as chapter_generation_router
 from .chapter_versioning import router as chapter_versioning_router
 from .chapters import combined_router as chapters_router
@@ -36,4 +37,5 @@ router.include_router(export_router)
 router.include_router(quality_router)
 router.include_router(scanner_router)
 router.include_router(skills_router)
+router.include_router(backup_router)
 router.include_router(generation_router)
