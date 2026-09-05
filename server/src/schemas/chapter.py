@@ -129,3 +129,44 @@ class ChapterVersionRead(BaseModel):
     )
     word_count: int
     created_at: datetime
+
+
+# ===== Phase 4.3/4.4：生成 / 重写请求 =====
+
+_MIN_TARGET_WORDS = 1000
+_MAX_TARGET_WORDS = 8000
+
+
+class ChapterGenerateRequest(BaseModel):
+    """章节生成请求（流式触发）。
+
+    - ``user_prompt`` 可选：用户附加要求
+    - ``target_word_count`` 默认 4000；硬限 1k-8k（AGENTS.md 安全规范）
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_prompt: str | None = Field(default=None, max_length=_PROMPT_MAX)
+    target_word_count: int = Field(
+        default=4000,
+        ge=_MIN_TARGET_WORDS,
+        le=_MAX_TARGET_WORDS,
+        description="目标字数（1k-8k）",
+    )
+
+
+class ChapterRewriteRequest(BaseModel):
+    """选区 / 全文重写请求（流式触发）。
+
+    - ``original_text`` 选中的原文
+    - ``user_prompt`` 用户的重写要求（"更紧凑" / "换对话风格" 等）
+    - ``from_pos`` / ``to_pos`` 在 chapter 全文中的字符偏移（用于前端还原位置）
+    - 触发后由 API 层流式返回新文本，客户端再 PATCH /chapters/{id}/content 写版本
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    original_text: str = Field(min_length=1, max_length=_CONTENT_MAX)
+    user_prompt: str = Field(min_length=1, max_length=_PROMPT_MAX)
+    from_pos: int | None = Field(default=None, ge=0)
+    to_pos: int | None = Field(default=None, ge=0)

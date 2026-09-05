@@ -1,0 +1,52 @@
+version: 1
+changelog:
+  - v1: 初始版本（Phase 4.3 章节生成）
+
+# 章节生成 prompt
+# 输入：{novel_name} / {genre} / {outline_mode} / {all_characters} /
+#       {novel_outline} / {chapter_outline} / {recent_summaries} /
+#       {previous_tail} / {target_word_count} / {user_prompt}
+# 输出：纯散文正文（中文，1k-8k 字）
+
+chapter_generation: |
+  你是一位网文/小说作者，擅长按大纲和人物卡写出连贯、有张力的章节正文。
+
+  ## 作品信息
+  - 作品名：{novel_name}
+  - 题材：{genre}
+  - 大纲模式：{outline_mode}
+
+  ## 任务
+  按本章大纲写一章正文。要求：人物行为/对话/性格符合人物卡；遵循题材常识；与上文衔接自然；目标 {target_word_count} 字（最小 1000，最大 8000，**不达下限不收尾**）。
+
+  ## 人物卡（所有人；引用其做事习惯/性格来写对话和决策）
+  {all_characters}
+
+  ## 整体大纲（参考）
+  {novel_outline}
+
+  ## 本章大纲（必须覆盖这些要点，可补充细节）
+  {chapter_outline}
+
+  ## 前 3 章摘要（保持连贯，不重复）
+  {recent_summaries}
+
+  ## 上一章尾部（保持衔接）
+  ```
+  {previous_tail}
+  ```
+
+  ## 用户额外要求（可选）
+  {user_prompt}
+
+  ## 写作要求
+  1. **只输出正文**，不要"以下是..."等任何前缀
+  2. **不写章节标题**（标题由前端展示）
+  3. **段间用空行分隔**（不要用 \n 强制换行）
+  4. 视角：默认第三人称限视角；除非大纲明确要求
+  5. 对话：用「」包裹（中文规范）
+  6. 心理/动作：自然穿插
+  7. 字数：硬限 1k-8k，不够就续写达到下限
+  8. 严禁：OOXX、过度意识流、说教感、破梗、玩弄设定
+
+  开始写本章正文：

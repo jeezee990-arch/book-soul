@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from .chapter_generation import router as chapter_generation_router
 from .chapters import combined_router as chapters_router
 from .characters import combined_router as characters_router
 from .inspirations import router as inspirations_router
@@ -20,6 +21,7 @@ router.include_router(llm_router)
 router.include_router(novels_router)
 router.include_router(characters_router)
 router.include_router(chapters_router)
+router.include_router(chapter_generation_router)
 router.include_router(outlines_router)
 router.include_router(inspirations_router)
 router.include_router(settings_router)
