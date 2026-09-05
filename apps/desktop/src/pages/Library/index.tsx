@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { Download, FileDown } from "lucide-react";
 import { toast } from "sonner";
-import { novelsApi } from "@/api/novels";
+import { downloadExportFile, novelsApi } from "@/api/novels";
 import { ApiError } from "@/api";
 import type { Novel } from "@/lib/types";
 import {
@@ -11,6 +12,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import EmptyState from "@/components/layout/EmptyState";
 import LoadingSkeleton from "@/components/layout/LoadingSkeleton";
 import ErrorState from "@/components/layout/ErrorState";
@@ -44,6 +51,22 @@ export default function Library() {
       cancelled = true;
     };
   };
+
+  async function handleExport(novel: Novel, format: "md" | "html" | "docx") {
+    try {
+      const file = await novelsApi.export(novel.id, format);
+      if (format === "docx") {
+        toast.info("Word 导出提示", {
+          description: "docx 需后端安装 python-docx；当前返回 501。",
+        });
+      }
+      downloadExportFile(file);
+      toast.success("已开始下载", { description: file.filename });
+    } catch (e: unknown) {
+      const msg = e instanceof ApiError ? e.message : String(e);
+      toast.error("导出失败", { description: msg });
+    }
+  }
 
   useEffect(() => {
     return load();
@@ -88,9 +111,36 @@ export default function Library() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">{n.name}</CardTitle>
-                  <span className="text-[10px] uppercase tracking-wider text-neutral-400 border border-neutral-200 dark:border-neutral-800 rounded px-1.5 py-0.5">
-                    {n.genre}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-wider text-neutral-400 border border-neutral-200 dark:border-neutral-800 rounded px-1.5 py-0.5">
+                      {n.genre}
+                    </span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs">
+                          <Download className="mr-1 h-3 w-3" />
+                          导出
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleExport(n, "md")}>
+                          <FileDown className="mr-2 h-3.5 w-3.5" />
+                          Markdown
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleExport(n, "html")}>
+                          <FileDown className="mr-2 h-3.5 w-3.5" />
+                          HTML
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleExport(n, "docx")}
+                          disabled
+                        >
+                          <FileDown className="mr-2 h-3.5 w-3.5" />
+                          Word (待装包)
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </div>
                 {n.description && (
                   <CardDescription className="line-clamp-2">

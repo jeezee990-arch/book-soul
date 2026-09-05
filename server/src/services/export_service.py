@@ -1,9 +1,9 @@
-"""导出服务（Phase 3.8）：把 novel + outline + characters 拼成 markdown 文本。
+"""导出服务（Phase 3.8 + 4.7）：把 novel + outline + characters 拼成 markdown / HTML 文本。
 
 不做的事：
 - 不直接写文件（让调用方决定写哪：HTTP response / 本地文件 / 落库）
 - 不调用 LLM（纯模板拼装）
-- 不做格式转换（md → pdf / docx 是后续 Phase 4+ 考虑）
+- Word（docx）导出见 :mod:`src.services.export_docx`（需要 python-docx，未装时 501）
 """
 
 from __future__ import annotations
@@ -48,6 +48,12 @@ class NovelExportService:
 
         # 5) 拼装 markdown
         return self._render_markdown(novel, outline_section, characters_section)
+
+    async def export_html(self, novel_id: int) -> str:
+        """导出指定 novel 为 HTML 文本（Phase 4.7，0 依赖）。"""
+        # 复用 markdown 拼装
+        md = await self.export_markdown(novel_id)
+        return self._markdown_to_html(md)
 
     # ===== 内部 =====
 
@@ -194,6 +200,135 @@ class NovelExportService:
                 lines.append(f"**{label}**：{value}")
                 lines.append("")
         return "\n".join(lines).rstrip()
+
+    # ===== Phase 4.7: 简易 markdown → HTML（0 依赖）=====
+
+    @staticmethod
+    def _escape_html(text: str) -> str:
+        return (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+
+    @classmethod
+    def _markdown_to_html(cls, md: str) -> str:
+        """把 export_markdown 的输出转成 HTML（仅支持导出模板里用到的语法）。
+
+        支持：# / ## / ### / **粗体** / 普通段落 / > 引用 / --- 分隔 / - 列表 / ``n. 列表``。
+        不支持：链接、图片、代码块、表格（导出模板本身也不用）。
+        """
+        import re
+
+        lines = md.split("\n")
+        out: list[str] = [
+            "<!DOCTYPE html>",
+            '<html lang="zh-CN">',
+            "<head>",
+            '<meta charset="utf-8">',
+            "<title>导出</title>",
+            "<style>",
+            "  body{font-family:system-ui,-apple-system,sans-serif;max-width:780px;margin:2rem auto;padding:0 1.5rem;line-height:1.7;color:#1f2937;}",
+            "  h1{margin:0 0 .5em;border-bottom:2px solid #1f2937;padding-bottom:.3em;}",
+            "  h2{margin:1.5em 0 .5em;border-bottom:1px solid #d1d5db;padding-bottom:.2em;}",
+            "  h3{margin:1.2em 0 .4em;color:#374151;}",
+            "  blockquote{margin:.8em 0;padding:.5em 1em;border-left:3px solid #d1d5db;color:#6b7280;background:#f9fafb;}",
+            "  hr{border:0;border-top:1px solid #e5e7eb;margin:1.5em 0;}",
+            "  ul,ol{margin:.5em 0 .8em 1.5em;}",
+            "  li{margin:.2em 0;}",
+            "  strong{color:#111827;}",
+            "</style>",
+            "</head>",
+            "<body>",
+        ]
+
+        in_list: str | None = None  # "ul" | "ol" | None
+        in_quote = False
+
+        def close_list() -> None:
+            nonlocal in_list
+            if in_list:
+                out.append(f"</{in_list}>")
+                in_list = None
+
+        def close_quote() -> None:
+            nonlocal in_quote
+            if in_quote:
+                out.append("</blockquote>")
+                in_quote = False
+
+        for raw in lines:
+            line = raw.rstrip()
+            if not line:
+                close_list()
+                close_quote()
+                continue
+
+            # 分隔线
+            if line.strip() == "---":
+                close_list()
+                close_quote()
+                out.append("<hr>")
+                continue
+
+            # 引用
+            if line.startswith(">"):
+                close_list()
+                if not in_quote:
+                    out.append("<blockquote>")
+                    in_quote = True
+                content = line[1:].strip()
+                out.append(f"<p>{cls._inline_format(content)}</p>")
+                continue
+            else:
+                close_quote()
+
+            # 标题
+            m = re.match(r"^(#{1,6})\s+(.*)$", line)
+            if m:
+                close_list()
+                level = len(m.group(1))
+                content = cls._inline_format(m.group(2))
+                out.append(f"<h{level}>{content}</h{level}>")
+                continue
+
+            # 有序列表
+            m_ol = re.match(r"^(\d+)\.\s+(.*)$", line)
+            if m_ol:
+                if in_list != "ol":
+                    close_list()
+                    out.append("<ol>")
+                    in_list = "ol"
+                out.append(f"<li>{cls._inline_format(m_ol.group(2))}</li>")
+                continue
+
+            # 无序列表（缩进的 - 开头）
+            m_ul = re.match(r"^\s*-\s+(.*)$", line)
+            if m_ul:
+                if in_list != "ul":
+                    close_list()
+                    out.append("<ul>")
+                    in_list = "ul"
+                out.append(f"<li>{cls._inline_format(m_ul.group(1))}</li>")
+                continue
+
+            # 普通段落
+            close_list()
+            out.append(f"<p>{cls._inline_format(line)}</p>")
+
+        close_list()
+        close_quote()
+        out.append("</body></html>")
+        return "\n".join(out)
+
+    @classmethod
+    def _inline_format(cls, text: str) -> str:
+        """行内格式：仅处理 **粗体** 和 HTML 转义。"""
+        text = cls._escape_html(text)
+        # **xxx** → <strong>xxx</strong>（非贪婪）
+        import re
+
+        return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
 
 
 __all__ = ["NovelExportService", "ExportError"]

@@ -6,6 +6,7 @@ from .chapter_generation import router as chapter_generation_router
 from .chapter_versioning import router as chapter_versioning_router
 from .chapters import combined_router as chapters_router
 from .characters import combined_router as characters_router
+from .export import router as export_router
 from .inspirations import router as inspirations_router
 from .llm import router as llm_router
 from .main import router as main_router
@@ -28,4 +29,5 @@ router.include_router(outlines_router)
 router.include_router(inspirations_router)
 router.include_router(settings_router)
 router.include_router(wordbanks_router)
+router.include_router(export_router)
 router.include_router(generation_router)

@@ -15,6 +15,12 @@ export interface ExportMdResponse {
   content: string;
 }
 
+export interface ExportFileResponse {
+  filename: string;
+  mime: string;
+  content_b64: string;
+}
+
 export const novelsApi = {
   list: (params?: { genre?: string; status?: string }) => {
     const q = new URLSearchParams();
@@ -47,4 +53,25 @@ export const novelsApi = {
     a.remove();
     URL.revokeObjectURL(url);
   },
+  /** Phase 4.7：多格式导出（md / html / docx）。 */
+  export: (id: number, format: "md" | "html" | "docx") =>
+    callApi<ExportFileResponse>("GET", `/novels/${id}/export?format=${format}`),
 };
+
+/** Phase 4.7：把后端 ExportFileResponse 解码成 Blob 触发浏览器下载。 */
+export function downloadExportFile(file: ExportFileResponse): void {
+  const binary = atob(file.content_b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const blob = new Blob([bytes], { type: file.mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
