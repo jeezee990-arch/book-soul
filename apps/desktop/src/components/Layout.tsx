@@ -14,6 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/creation", label: "创作" },
   { to: "/quality", label: "质检" },
   { to: "/library", label: "作品库" },
+  { to: "/skills", label: "Skills" },
   { to: "/settings", label: "设置" },
 ];
 

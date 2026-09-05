@@ -5,6 +5,7 @@ import Creation from "./pages/Creation";
 import QualityCheck from "./pages/QualityCheck";
 import Library from "./pages/Library";
 import Settings from "./pages/Settings";
+import Skills from "./pages/Skills";
 
 /**
  * Phase 2 模块 2.1：路由与基础布局
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="/creation" element={<Creation />} />
           <Route path="/quality" element={<QualityCheck />} />
           <Route path="/library" element={<Library />} />
+          <Route path="/skills" element={<Skills />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

@@ -16,6 +16,7 @@ from .outlines import router as outlines_router
 from .quality import router as quality_router
 from .scanner import router as scanner_router
 from .settings import router as settings_router
+from .skills import router as skills_router
 from .wordbanks import router as wordbanks_router
 
 # 顶层聚合 router
@@ -34,4 +35,5 @@ router.include_router(wordbanks_router)
 router.include_router(export_router)
 router.include_router(quality_router)
 router.include_router(scanner_router)
+router.include_router(skills_router)
 router.include_router(generation_router)
