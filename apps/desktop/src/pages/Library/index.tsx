@@ -55,16 +55,16 @@ export default function Library() {
   async function handleExport(novel: Novel, format: "md" | "html" | "docx") {
     try {
       const file = await novelsApi.export(novel.id, format);
-      if (format === "docx") {
-        toast.info("Word 导出提示", {
-          description: "docx 需后端安装 python-docx；当前返回 501。",
-        });
-      }
       downloadExportFile(file);
       toast.success("已开始下载", { description: file.filename });
     } catch (e: unknown) {
       const msg = e instanceof ApiError ? e.message : String(e);
-      toast.error("导出失败", { description: msg });
+      // docx 仍 501 时给出友好提示
+      if (format === "docx" && msg.includes("python-docx")) {
+        toast.error("Word 导出未启用", { description: "后端需安装 python-docx" });
+      } else {
+        toast.error("导出失败", { description: msg });
+      }
     }
   }
 
@@ -133,10 +133,9 @@ export default function Library() {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => handleExport(n, "docx")}
-                          disabled
                         >
                           <FileDown className="mr-2 h-3.5 w-3.5" />
-                          Word (待装包)
+                          Word (.docx)
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

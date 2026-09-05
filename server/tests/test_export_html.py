@@ -153,8 +153,8 @@ async def test_api_export_html(db_initialized: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_export_docx_returns_501(db_initialized: Path) -> None:
-    """docx 导出未装 python-docx 时返回 501。"""
+async def test_api_export_docx_returns_docx_bytes(db_initialized: Path) -> None:
+    """docx 导出：python-docx 已装 → 返回二进制 docx 文件。"""
     from fastapi.testclient import TestClient
 
     from src.db import SessionLocal
@@ -164,15 +164,32 @@ async def test_api_export_docx_returns_501(db_initialized: Path) -> None:
 
     async with SessionLocal() as session:
         novel = await NovelService(session).create(
-            NovelCreate(name="测试", genre="xuanhuan")
+            NovelCreate(name="测试 docx", genre="xuanhuan")
         )
         novel_id = novel.id
 
     client = TestClient(app)
     resp = client.get(f"/novels/{novel_id}/export?format=docx")
-    # 未装 python-docx → 501
-    assert resp.status_code == 501
-    assert "python-docx" in resp.json()["detail"]
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["filename"].endswith(".docx")
+    assert "officedocument" in body["mime"]
+    import base64
+
+    data = base64.b64decode(body["content_b64"])
+    # docx 是 zip 格式，开头是 "PK\x03\x04"
+    assert data[:4] == b"PK\x03\x04"
+    assert len(data) > 100  # 非空
+
+
+@pytest.mark.asyncio
+async def test_build_docx_bytes_novel_not_found(db_initialized: Path) -> None:
+    from src.db import SessionLocal
+    from src.services.export_docx import WordExportUnavailableError, build_docx_bytes
+
+    async with SessionLocal() as session:
+        with pytest.raises(WordExportUnavailableError, match="not found"):
+            await build_docx_bytes(99999, session)
 
 
 @pytest.mark.asyncio

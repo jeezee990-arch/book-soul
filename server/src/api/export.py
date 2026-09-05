@@ -81,7 +81,7 @@ async def export_novel(
         )
     if fmt == "docx":
         try:
-            data = build_docx_bytes(novel_id, session)
+            data = await build_docx_bytes(novel_id, session)
         except WordExportUnavailableError as e:
             raise HTTPException(status_code=501, detail=str(e)) from e
         return ExportFileResponse(
