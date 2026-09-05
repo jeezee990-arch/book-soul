@@ -32,4 +32,9 @@ export const chaptersApi = {
     callApi<ChapterVersion[]>("GET", `/chapters/${id}/versions`),
   getVersion: (id: number, versionId: number) =>
     callApi<ChapterVersion>("GET", `/chapters/${id}/versions/${versionId}`),
+  /** Phase 4.3/4.4：写一条新版本（流式生成 / 选区重写 / 用户编辑后）。 */
+  saveContent: (
+    id: number,
+    data: { content: string; trigger: string; prompt?: string; metadata?: Record<string, unknown> },
+  ) => callApi<ChapterVersion>("POST", `/chapters/${id}/content`, data),
 };
