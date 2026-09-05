@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -174,3 +175,111 @@ async def generate_plot(
         provider = "unknown"
         model = ""
     return PlotGenerationResponse(versions=versions, provider=provider, model=model)
+
+
+# ===== Phase 6.1：灵感详情（含关联作品的人物卡/大纲/章节摘要）=====
+
+
+async def _build_novel_summary(
+    session: AsyncSession, novel_id: int
+):
+    """构造 :class:`NovelContextSummary`；没有该 novel 时返回 None。"""
+    # 延迟 import 避免循环
+    from ..models.novel import Novel
+    from ..models.character import Character
+    from ..models.chapter import Chapter
+    from ..models.outline import Outline
+    from ..schemas.inspiration import (
+        CharacterSummary,
+        ChapterSummary,
+        NovelContextSummary,
+    )
+
+    novel = await session.get(Novel, novel_id)
+    if novel is None:
+        return None
+    # 人物卡
+    chars_stmt = (
+        select(Character)
+        .where(Character.novel_id == novel_id)
+        .order_by(Character.role.asc(), Character.id.asc())
+    )
+    chars = list((await session.execute(chars_stmt)).scalars())
+    char_summaries = [
+        CharacterSummary(
+            id=c.id,
+            name=c.name,
+            role=c.role,
+            personality=c.personality,
+            is_active=c.is_active,
+        )
+        for c in chars
+    ]
+    # 大纲（取最新一条）
+    outline_stmt = (
+        select(Outline)
+        .where(Outline.novel_id == novel_id)
+        .order_by(Outline.id.desc())
+        .limit(1)
+    )
+    outline = (await session.execute(outline_stmt)).scalar_one_or_none()
+    # 章节
+    ch_stmt = (
+        select(Chapter)
+        .where(Chapter.novel_id == novel_id)
+        .order_by(Chapter.chapter_number.asc(), Chapter.id.asc())
+    )
+    chs = list((await session.execute(ch_stmt)).scalars())
+    ch_summaries = [
+        ChapterSummary(
+            id=c.id,
+            chapter_number=c.chapter_number,
+            title=c.title,
+            word_count=c.word_count,
+            status=c.status,
+        )
+        for c in chs
+    ]
+    return NovelContextSummary(
+        id=novel.id,
+        name=novel.name,
+        genre=novel.genre,
+        outline_type=novel.outline_mode,
+        description=novel.description,
+        outline_structure=outline.structure if outline else None,
+        characters=char_summaries,
+        chapters=ch_summaries,
+    )
+
+
+@router.get(
+    "/{inspiration_id}/detail",
+    response_model=None,  # forward ref by name（避免循环 import）
+    summary="Phase 6.1：灵感详情（含关联作品的人物卡/大纲/章节摘要）",
+)
+async def get_inspiration_detail(
+    inspiration_id: int,
+    session: AsyncSession = Depends(get_db),
+    service: InspirationService = Depends(get_service),
+):
+    from ..schemas.inspiration import InspirationDetailRead
+
+    try:
+        inspiration = await service.get(inspiration_id)
+    except InspirationNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    novel_summary = None
+    if inspiration.novel_id is not None:
+        novel_summary = await _build_novel_summary(session, inspiration.novel_id)
+
+    return InspirationDetailRead(
+        id=inspiration.id,
+        novel_id=inspiration.novel_id,
+        type=inspiration.type,
+        source=inspiration.source,
+        tags=list(inspiration.tags or []),
+        content=dict(inspiration.content or {}),
+        created_at=inspiration.created_at,
+        novel=novel_summary,
+    )

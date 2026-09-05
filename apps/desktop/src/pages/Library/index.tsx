@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Download, FileDown } from "lucide-react";
+import { Download, FileDown, BookOpen, Lightbulb } from "lucide-react";
 import { toast } from "sonner";
 import { downloadExportFile, novelsApi } from "@/api/novels";
 import { ApiError } from "@/api";
 import type { Novel } from "@/lib/types";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Card,
   CardContent,
@@ -21,14 +22,52 @@ import {
 import EmptyState from "@/components/layout/EmptyState";
 import LoadingSkeleton from "@/components/layout/LoadingSkeleton";
 import ErrorState from "@/components/layout/ErrorState";
+import InspirationList from "./InspirationList";
+import InspirationDetail from "./InspirationDetail";
+import type { InspirationDetail as InspirationDetailType } from "@/api/inspirations";
 
-/** 作品库 —— 列出所有作品（Phase 3.9：复用共用 layout 组件） */
+/** 作品库 —— 作品列表 + 灵感库（Phase 6.1 tab 切换） */
 export default function Library() {
+  const [tab, setTab] = useState<"novels" | "inspirations">("novels");
+  return (
+    <section className="space-y-6">
+      <header className="space-y-1.5">
+        <h1 className="text-2xl font-semibold tracking-tight">作品库</h1>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          作品管理 · 灵感库 · 人物卡 · 章节集中管理。
+        </p>
+      </header>
+
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "novels" | "inspirations")}>
+        <TabsList>
+          <TabsTrigger value="novels">
+            <BookOpen className="mr-1.5 h-3.5 w-3.5" />
+            作品
+          </TabsTrigger>
+          <TabsTrigger value="inspirations">
+            <Lightbulb className="mr-1.5 h-3.5 w-3.5" />
+            灵感库
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="novels" className="mt-4">
+          <NovelList />
+        </TabsContent>
+        <TabsContent value="inspirations" className="mt-4">
+          <InspirationTab />
+        </TabsContent>
+      </Tabs>
+    </section>
+  );
+}
+
+/* ===== 作品列表（Phase 3.9 沿用 + Phase 4.7 导出）===== */
+
+function NovelList() {
   const [items, setItems] = useState<Novel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = () => {
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -50,7 +89,7 @@ export default function Library() {
     return () => {
       cancelled = true;
     };
-  };
+  }, []);
 
   async function handleExport(novel: Novel, format: "md" | "html" | "docx") {
     try {
@@ -59,7 +98,6 @@ export default function Library() {
       toast.success("已开始下载", { description: file.filename });
     } catch (e: unknown) {
       const msg = e instanceof ApiError ? e.message : String(e);
-      // docx 仍 501 时给出友好提示
       if (format === "docx" && msg.includes("python-docx")) {
         toast.error("Word 导出未启用", { description: "后端需安装 python-docx" });
       } else {
@@ -68,33 +106,21 @@ export default function Library() {
     }
   }
 
-  useEffect(() => {
-    return load();
-  }, []);
-
   return (
-    <section className="space-y-6">
-      <header className="flex items-center justify-between">
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-tight">作品库</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            所有作品 · 人物卡 · 章节的集中管理。
-          </p>
-        </div>
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-neutral-500">共 {items.length} 部作品</span>
         <Button
           variant="outline"
           size="sm"
-          onClick={() =>
-            toast.info("敬请期待", { description: "Phase 4 接入" })
-          }
+          onClick={() => toast.info("敬请期待", { description: "Phase 4 接入" })}
         >
           新建作品
         </Button>
-      </header>
+      </div>
 
       {loading && <LoadingSkeleton rows={4} height={100} />}
-
-      {error && !loading && <ErrorState message={error} onRetry={load} />}
+      {error && !loading && <ErrorState message={error} />}
 
       {!loading && !error && items.length === 0 && (
         <EmptyState
@@ -131,9 +157,7 @@ export default function Library() {
                           <FileDown className="mr-2 h-3.5 w-3.5" />
                           HTML
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleExport(n, "docx")}
-                        >
+                        <DropdownMenuItem onClick={() => handleExport(n, "docx")}>
                           <FileDown className="mr-2 h-3.5 w-3.5" />
                           Word (.docx)
                         </DropdownMenuItem>
@@ -151,14 +175,38 @@ export default function Library() {
                 <span>状态：{n.status}</span>
                 <span>文风：{n.style ?? "—"}</span>
                 <span>大纲：{n.outline_mode ?? "—"}</span>
-                {n.read_only && (
-                  <span className="text-amber-500">只读</span>
-                )}
+                {n.read_only && <span className="text-amber-500">只读</span>}
               </CardContent>
             </Card>
           ))}
         </div>
       )}
-    </section>
+    </div>
+  );
+}
+
+/* ===== 灵感库 Tab（Phase 6.1）===== */
+
+function InspirationTab() {
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [selected, setSelected] = useState<InspirationDetailType | null>(null);
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <InspirationList
+        typeFilter={typeFilter}
+        onTypeFilterChange={setTypeFilter}
+        onSelect={(d) => {
+          setSelected(d);
+          setOpen(true);
+        }}
+      />
+      <InspirationDetail
+        open={open}
+        onOpenChange={setOpen}
+        detail={selected}
+      />
+    </>
   );
 }

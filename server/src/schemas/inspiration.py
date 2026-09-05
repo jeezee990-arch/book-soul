@@ -170,3 +170,54 @@ class PlotGenerationResponse(BaseModel):
     versions: list[PlotVersion]
     provider: str = Field(description="实际使用的 LLM provider")
     model: str = Field(default="", description="实际使用的模型名（可能为空）")
+
+
+# ===== Phase 6.1：灵感详情（带关联 novel 的人物卡 / 大纲 / 章节概览）=====
+
+
+class CharacterSummary(BaseModel):
+    """人物卡摘要（详情页用）。"""
+
+    id: int
+    name: str
+    role: str
+    personality: str | None = None
+    is_active: bool
+
+
+class ChapterSummary(BaseModel):
+    """章节摘要（详情页用）。"""
+
+    id: int
+    chapter_number: int
+    title: str | None
+    word_count: int
+    status: str
+
+
+class NovelContextSummary(BaseModel):
+    """关联作品的 context 摘要。"""
+
+    id: int
+    name: str
+    genre: str
+    outline_type: str | None
+    description: str | None
+    outline_structure: dict[str, Any] | None
+    characters: list[CharacterSummary]
+    chapters: list[ChapterSummary]
+
+
+class InspirationDetailRead(BaseModel):
+    """灵感详情（含关联作品摘要）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    novel_id: int | None
+    type: str
+    source: str | None
+    tags: list[str]
+    content: dict[str, Any]
+    created_at: datetime
+    novel: NovelContextSummary | None

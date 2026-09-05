@@ -27,6 +27,44 @@ export interface PlotGenerationRequest {
   n_versions?: number;
 }
 
+export interface CharacterSummary {
+  id: number;
+  name: string;
+  role: string;
+  personality: string | null;
+  is_active: boolean;
+}
+
+export interface ChapterSummary {
+  id: number;
+  chapter_number: number;
+  title: string | null;
+  word_count: number;
+  status: string;
+}
+
+export interface NovelContextSummary {
+  id: number;
+  name: string;
+  genre: string;
+  outline_type: string | null;
+  description: string | null;
+  outline_structure: Record<string, unknown> | null;
+  characters: CharacterSummary[];
+  chapters: ChapterSummary[];
+}
+
+export interface InspirationDetail {
+  id: number;
+  novel_id: number | null;
+  type: string;
+  source: string | null;
+  tags: string[];
+  content: Record<string, unknown>;
+  created_at: string;
+  novel: NovelContextSummary | null;
+}
+
 export const inspirationsApi = {
   list: (params?: { novel_id?: number; type?: string; tag?: string }) => {
     const q = new URLSearchParams();
@@ -38,6 +76,9 @@ export const inspirationsApi = {
     return callApi<Inspiration[]>("GET", `/inspirations${qs ? `?${qs}` : ""}`);
   },
   get: (id: number) => callApi<Inspiration>("GET", `/inspirations/${id}`),
+  /** Phase 6.1：详情（含关联 novel 的人物卡 / 大纲 / 章节摘要）。 */
+  detail: (id: number) =>
+    callApi<InspirationDetail>("GET", `/inspirations/${id}/detail`),
   create: (data: InspirationCreate) =>
     callApi<Inspiration>("POST", "/inspirations", data),
   update: (id: number, data: InspirationUpdate) =>
