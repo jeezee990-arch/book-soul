@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Book Soul 应用图标占位（Phase 8.1）。
+
+  设计意图：
+  - 书本：暗示"小说 / 写作"
+  - 紫色火焰：暗示"灵魂" / 创造力
+  - 圆角方形：macOS / Windows 现代应用风格
+
+  生产图标流程（部署前需替换）：
+  1. 用 Figma / Sketch 重新设计（512×512 主图 + 多尺寸）
+  2. 导出 PNG：32×32, 128×128, 256×256, 512×512
+  3. macOS：用 iconutil 生成 .icns
+  4. Windows：用 png2ico 生成 .ico
+  5. Linux：用 png 即可
+
+  工具推荐：
+  - https://realfavicongenerator.net/  （自动生成多尺寸）
+  - https://www.figma.com/  （设计 + 导出）
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="50%" stop-color="#d946ef"/>
+      <stop offset="100%" stop-color="#f472b6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景：圆角矩形 -->
+  <rect x="16" y="16" width="480" height="480" rx="80" ry="80" fill="url(#bg)"/>
+
+  <!-- 书本（半透明） -->
+  <g transform="translate(96, 144) rotate(-12 160 112)" opacity="0.85">
+    <rect x="0" y="0" width="320" height="224" rx="12" fill="#e2e8f0"/>
+    <line x1="160" y1="0" x2="160" y2="224" stroke="#94a3b8" stroke-width="3"/>
+    <line x1="20" y1="40" x2="140" y2="40" stroke="#cbd5e1" stroke-width="6"/>
+    <line x1="20" y1="80" x2="140" y2="80" stroke="#cbd5e1" stroke-width="6"/>
+    <line x1="20" y1="120" x2="140" y2="120" stroke="#cbd5e1" stroke-width="6"/>
+    <line x1="20" y1="160" x2="140" y2="160" stroke="#cbd5e1" stroke-width="6"/>
+    <line x1="180" y1="40" x2="300" y2="40" stroke="#cbd5e1" stroke-width="6"/>
+    <line x1="180" y1="80" x2="300" y2="80" stroke="#cbd5e1" stroke-width="6"/>
+    <line x1="180" y1="120" x2="300" y2="120" stroke="#cbd5e1" stroke-width="6"/>
+    <line x1="180" y1="160" x2="300" y2="160" stroke="#cbd5e1" stroke-width="6"/>
+  </g>
+
+  <!-- 灵魂火焰（叠加在书本上方） -->
+  <g transform="translate(256, 200)">
+    <path
+      d="M 0 -80
+         C 40 -40, 60 0, 50 30
+         C 45 50, 30 60, 0 60
+         C -30 60, -45 50, -50 30
+         C -60 0, -40 -40, 0 -80 Z"
+      fill="url(#flame)"
+      opacity="0.9"
+    />
+    <path
+      d="M 0 -50
+         C 20 -25, 30 0, 25 15
+         C 22 30, 10 40, 0 40
+         C -10 40, -22 30, -25 15
+         C -30 0, -20 -25, 0 -50 Z"
+      fill="#fce7f3"
+      opacity="0.7"
+    />
+  </g>
+</svg>

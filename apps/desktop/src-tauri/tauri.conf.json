@@ -31,7 +31,33 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/32x32.png"
-    ]
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "AI 辅助小说写作",
+    "longDescription": "Book Soul - 网文 / 严肃文学作者的 AI 创作桌面应用。从灵感发现到章节创作的全流程支持：人物卡驱动一致性、Skill 工具箱、上下文记忆、多格式导出。",
+    "publisher": "Book Soul Team",
+    "homepage": "https://github.com/jeezee990-arch/book-soul",
+    "resources": [],
+    "externalBin": [],
+    "copyright": "Copyright © 2026 Book Soul Team",
+    "licenseFile": "",
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": []
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "wix": null,
+      "nsis": null
+    }
   }
 }
