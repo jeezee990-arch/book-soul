@@ -14,6 +14,7 @@ from .novels import router as novels_router
 from .outlines import generation_router
 from .outlines import router as outlines_router
 from .quality import router as quality_router
+from .scanner import router as scanner_router
 from .settings import router as settings_router
 from .wordbanks import router as wordbanks_router
 
@@ -32,4 +33,5 @@ router.include_router(settings_router)
 router.include_router(wordbanks_router)
 router.include_router(export_router)
 router.include_router(quality_router)
+router.include_router(scanner_router)
 router.include_router(generation_router)

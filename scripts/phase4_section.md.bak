@@ -1,0 +1,1107 @@
+﻿### Phase 4：创作（2.5 周）
+
+#### 模块 4.1：作品选择 + 章节列表
+
+- **文件**：
+  - `apps/desktop/src/pages/Creation/NovelSelector.tsx`
+  - `apps/desktop/src/pages/Creation/ChapterList.tsx`
+
+#### 模块 4.2：Tiptap 集成
+
+- **步骤**：
+  1. `pnpm dlx shadcn@latest add`（按需）
+  2. 安装：`pnpm add @tiptap/react @tiptap/starter-kit @tiptap/extension-selection`
+  3. 创建基础编辑器组件
+- **关键代码**：
+  ```tsx
+  import { useEditor, EditorContent } from "@tiptap/react";
+  import StarterKit from "@tiptap/starter-kit";
+
+  export function NovelEditor({ content, onChange, onSelection }: Props) {
+    const editor = useEditor({
+      extensions: [StarterKit],
+      content,
+      onUpdate: ({ editor }) => onChange(editor.getHTML()),
+      onSelectionUpdate: ({ editor }) => {
+        const { from, to } = editor.state.selection;
+        if (from !== to) onSelection({ from, to, text: editor.state.doc.textBetween(from, to) });
+      },
+    });
+
+    return <EditorContent editor={editor} />;
+  }
+  ```
+
+#### 模块 4.3：章节生成（流式）
+
+- **文件**：
+  - `config/prompts/chapter_generation.yaml`
+  - `server/src/api/chapters.py`（流式接口）
+  - `server/src/services/chapter_service.py`（生成逻辑）
+- **关键代码（流式 + 人物卡注入）**：
+  ```python
+  async def generate_chapter_stream(
+      self,
+      novel_id: int,
+      chapter_number: int,
+      outline_mode: str,
+  ) -> AsyncIterator[str]:
+      # 1. 加载上下文
+      novel = await self.novel_service.get(novel_id)
+      characters = await self.character_service.get_active_characters(novel_id)
+      outline = await self.outline_service.get(novel_id)
+      chapter_outline = outline.get_chapter_outline(chapter_number)
+      recent_summaries = await self.get_recent_summaries(novel_id, n=3)
+      previous_tail = await self.get_chapter_tail(novel_id, chapter_number - 1, chars=1500)
+
+      # 2. 拼 prompt
+      prompt = self.prompts["chapter_generation"].format(
+          novel_name=novel.name,
+          genre=novel.genre,
+          outline_mode=outline_mode,
+          all_characters=format_characters(characters),
+          novel_outline=outline.structure,
+          chapter_outline=chapter_outline,
+          recent_summaries=recent_summaries,
+          previous_tail=previous_tail,
+          target_word_count=4000,
+      )
+
+      # 3. 流式调用
+      client = create_llm_client("minimax")
+      messages = [ChatMessage("user", prompt)]
+      async for chunk in client.chat(messages, stream=True):
+          yield chunk
+  ```
+- **前端**：`fetch` + `ReadableStream` 解析，逐字渲染
+
+#### 模块 4.4：选区 AI 重写
+
+- **文件**：
+  - `config/prompts/chapter_rewrite.yaml`
+  - `server/src/api/chapters.py`（rewrite 接口）
+- **流程**：
+  ```
+  用户选中文本 → 输入提示词 → 点击"AI 重写"
+  → 前端调 API：{chapter_id, from, to, prompt}
+  → 后端流式返回新内容
+  → 前端替换选区
+  → 自动保存版本
+  ```
+- **关键代码（前端）**：
+  ```tsx
+  async function rewriteSelection(editor: Editor, prompt: string) {
+    const { from, to } = editor.state.selection;
+    const original = editor.state.doc.textBetween(from, to);
+
+    const newContent = await streamApi("/chapters/rewrite", {
+      chapter_id: currentChapterId,
+      original_text: original,
+      user_prompt: prompt,
+    });
+
+    editor.chain().focus().setTextSelection({ from, to }).insertContent(newContent).run();
+
+    // 自动保存版本
+    await saveVersion(currentChapterId, "ai_rewrite", prompt);
+  }
+  ```
+
+#### 模块 4.5：提示词框（始终显示）
+
+- **文件**：
+  - `apps/desktop/src/components/PromptBox.tsx`
+- **设计**：
+  - 悬浮在右侧或底部
+  - 输入框 + 按钮
+  - 灵感园：用于修改大纲
+  - 创作：用于重新生成/重写
+
+#### 模块 4.6：版本控制（核心）
+
+- **文件**：
+  - `server/src/core/versioning/version_tree.py`
+  - `server/src/core/versioning/diff.py`
+  - `server/src/api/chapters.py`（版本接口）
+  - `apps/desktop/src/pages/Creation/VersionPanel.tsx`
+  - `apps/desktop/src/components/DiffViewer.tsx`
+- **关键代码 `version_tree.py`**：
+  ```python
+  from datetime import datetime
+  from sqlalchemy.ext.asyncio import AsyncSession
+  from sqlalchemy import select
+  from ..models.version import Version
+
+  class VersionTree:
+      def __init__(self, session: AsyncSession, entity_type: str, entity_id: int):
+          self.session = session
+          self.entity_type = entity_type
+          self.entity_id = entity_id
+
+      async def save_version(
+          self,
+          content: str,
+          trigger: str,
+          parent_id: int | None = None,
+          prompt: str | None = None,
+      ) -> int:
+          # 计算 diff
+          parent_content = None
+          if parent_id:
+              parent = await self.session.get(Version, parent_id)
+              parent_content = parent.content
+          diff = compute_diff(parent_content, content) if parent_content else None
+
+          version = Version(
+              entity_type=self.entity_type,
+              entity_id=self.entity_id,
+              parent_version_id=parent_id,
+              content=content,
+              diff=diff,
+              trigger=trigger,
+              prompt=prompt,
+              metadata={"created_at": datetime.now().isoformat()},
+          )
+          self.session.add(version)
+          await self.session.commit()
+          return version.id
+
+      async def list_versions(self) -> list[Version]:
+          result = await self.session.execute(
+              select(Version)
+              .where(Version.entity_type == self.entity_type, Version.entity_id == self.entity_id)
+              .order_by(Version.created_at.desc())
+          )
+          return list(result.scalars())
+
+      async def rollback(self, version_id: int) -> int:
+          """软回滚：把该版本内容设为当前内容，生成新版本"""
+          target = await self.session.get(Version, version_id)
+          if not target:
+              raise ValueError(f"Version {version_id} not found")
+
+          # 找到当前最新版本作为 parent
+          latest = (await self.list_versions())[0]
+
+          return await self.save_version(
+              content=target.content,
+              trigger="rollback",
+              parent_id=latest.id,
+              prompt=f"rollback_to:{version_id}",
+          )
+  ```
+- **diff 库**：`diff-match-patch`
+- **DiffViewer**：`react-diff-viewer-continued`
+
+#### 模块 4.7：导出 md / word
+
+- **文件**：
+  - `server/src/services/export_service.py`
+  - `server/src/api/export.py`
+- **word 导出**：用 `python-docx` + 模板
+- **关键代码**：
+  ```python
+  from docx import Document
+  from docx.shared import Pt
+
+  def export_to_word(chapters: list[Chapter], novel: Novel) -> bytes:
+      doc = Document()
+      doc.add_heading(novel.name, 0)
+
+      for chapter in chapters:
+          doc.add_heading(chapter.title, level=1)
+          for para in chapter.content.split("\n\n"):
+              doc.add_paragraph(para)
+
+      buffer = io.BytesIO()
+      doc.save(buffer)
+      return buffer.getvalue()
+  ```
+
+#### 阶段 4 产出物
+
+- [ ] 选择作品进入创作
+- [ ] 流式生成章节
+- [ ] 选区 AI 重写
+- [ ] 全文重写
+- [ ] 提示词框工作
+- [ ] 版本控制完整
+- [ ] diff 对比 + 回滚
+- [ ] 导出 md/word
+
+---
+
+### Phase 5：质量检测（1.5 周）
+
+#### 模块 5.1：检测范围选择
+
+- **文件**：
+  - `apps/desktop/src/pages/QualityCheck/RangeSelector.tsx`
+  - `server/src/api/quality.py`
+
+#### 模块 5.2：多维度并行评分
+
+- **文件**：
+  - `config/prompts/quality_*.yaml`（6 个维度）
+  - `server/src/services/quality_service.py`
+- **维度**：
+  1. 文笔
+  2. 逻辑
+  3. 节奏
+  4. 人设一致性 ⭐（基于人物卡）
+  5. 题材合规性 ⭐（基于常识库）
+  6. [题材特色]
+- **关键代码（并行调用）**：
+  ```python
+  import asyncio
+
+  async def evaluate_chapter(
+      self,
+      novel_id: int,
+      chapter_id: int,
+  ) -> QualityReport:
+      chapter = await self.chapter_service.get(chapter_id)
+      characters = await self.character_service.get_active_characters(novel_id)
+      genre_config = load_genre_config(novel.genre)
+
+      dimensions = ["writing", "logic", "pacing", "consistency", "genre"]
+
+      # 并行调用
+      tasks = [
+          self._evaluate_dimension(dim, chapter, characters, genre_config)
+          for dim in dimensions
+      ]
+      results = await asyncio.gather(*tasks)
+
+      return QualityReport(
+          chapter_id=chapter_id,
+          total_score=sum(r.score for r in results) / len(results),
+          dimension_scores={dim: r.score for dim, r in zip(dimensions, results)},
+          issues=[issue for r in results for issue in r.issues],
+          suggestions=[s for r in results for s in r.suggestions],
+      )
+  ```
+
+#### 模块 5.3：人设一致性检测
+
+- **文件**：
+  - `config/prompts/quality_consistency.yaml`
+  - `server/src/services/quality_service.py`（内嵌）
+- **关键代码**：
+  ```python
+  async def _check_consistency(
+      self,
+      chapter: Chapter,
+      characters: list[Character],
+  ) -> DimensionResult:
+      prompt = f"""
+      请检查以下章节中人物行为是否与人物卡一致。
+
+      # 人物卡
+      {format_characters(characters)}
+
+      # 章节内容
+      {chapter.content}
+
+      # 检查项
+      1. 人物决策是否符合其"做事习惯"
+      2. 人物对话是否符合其性格
+      3. 是否有人物突然转变性格而未交代原因
+      4. 人物关系是否前后一致
+
+      # 输出 JSON
+      ```json
+      {{
+        "score": 0-10,
+        "issues": [
+          {{"character": "姓名", "problem": "问题", "quote": "原文章节引用", "suggestion": "建议"}}
+        ]
+      }}
+      ```
+      """
+      response = await self.llm.chat([ChatMessage("user", prompt)], temperature=0.3)
+      result = json.loads(response.content)
+      return DimensionResult(
+          dimension="consistency",
+          score=result["score"],
+          issues=result["issues"],
+      )
+  ```
+
+#### 模块 5.4：题材合规性检测
+
+- **文件**：
+  - `config/genres/xuanhuan.yaml`（常识库）
+  - `config/prompts/quality_genre.yaml`
+- **实现**：从常识库加载规则，注入 prompt，让 LLM 检查
+
+#### 模块 5.5：报告生成 + UI
+
+- **文件**：
+  - `apps/desktop/src/pages/QualityCheck/Report.tsx`
+  - 雷达图：recharts
+- **关键组件**：
+  - 总分（圆环）
+  - 各维度分数（雷达图）
+  - 问题列表（可点击跳转到段落）
+  - 改进建议
+
+#### 阶段 5 产出物
+
+- [ ] 选择章节范围
+- [ ] 多维度评分
+- [ ] 题材合规性检测
+- [ ] 人设一致性检测
+- [ ] 报告可视化
+
+---
+
+### Phase 6：仓库（1 周）
+
+#### 模块 6.1：灵感库列表 + 详情
+
+- **文件**：
+  - `apps/desktop/src/pages/Library/InspirationList.tsx`
+  - `apps/desktop/src/pages/Library/InspirationDetail.tsx`
+- **详情页内容**：
+  - 基础信息
+  - ⭐ 人物卡查看
+  - ⭐ 大纲查看
+  - 简要剧情
+  - 灵感词记录
+  - 操作（编辑/导出/进入创作/删除）
+
+#### 模块 6.2：藏书馆列表 + 详情
+
+- **文件**：
+  - `apps/desktop/src/pages/Library/LibraryList.tsx`
+  - `apps/desktop/src/pages/Library/LibraryDetail.tsx`
+- **详情页**：
+  - 章节列表
+  - 章节查看
+  - 版本历史入口
+  - 导出
+
+#### 模块 6.3：本地文件夹扫描 ⭐
+
+- **文件**：
+  - `server/src/core/scanner/novel_detector.py`
+  - `server/src/core/scanner/novel_scanner.py`
+  - `server/src/core/scanner/novel_importer.py`
+  - `server/src/api/scanner.py`
+  - `apps/desktop/src/pages/Library/ScannerConfig.tsx`
+- **关键代码 `novel_detector.py`**：
+  ```python
+  import re
+  from pathlib import Path
+  from dataclasses import dataclass
+
+  CHAPTER_PATTERNS = [
+      re.compile(r"第[一二三四五六七八九十百千万\d]+章\s*[^\n]*"),
+      re.compile(r"Chapter\s*\d+", re.IGNORECASE),
+  ]
+
+  @dataclass
+  class DetectedNovel:
+      dir_path: str
+      title: str
+      chapter_count: int
+      total_words: int
+      chapters: list[dict]  # [{"title": ..., "path": ..., "word_count": ...}]
+
+  class NovelDetector:
+      def is_novel_dir(self, path: str) -> bool:
+          p = Path(path)
+          if not p.is_dir():
+              return False
+
+          md_files = list(p.glob("*.md"))
+          if len(md_files) < 3:
+              return False
+
+          # 检查文件命名
+          for f in md_files[:5]:
+              content = f.read_text(encoding="utf-8", errors="ignore")[:500]
+              if any(p.search(content) for p in CHAPTER_PATTERNS):
+                  return True
+
+          return False
+
+      def extract_metadata(self, path: str) -> DetectedNovel:
+          p = Path(path)
+          md_files = sorted(p.glob("*.md"))
+
+          chapters = []
+          total_words = 0
+          for f in md_files:
+              content = f.read_text(encoding="utf-8", errors="ignore")
+              words = len(content)
+              total_words += words
+
+              # 提取章节标题
+              title = f.stem
+              for pattern in CHAPTER_PATTERNS:
+                  match = pattern.search(content[:200])
+                  if match:
+                      title = match.group(0)
+                      break
+
+              chapters.append({
+                  "title": title,
+                  "path": str(f.absolute()),
+                  "word_count": words,
+              })
+
+          return DetectedNovel(
+              dir_path=str(p.absolute()),
+              title=p.name,
+              chapter_count=len(md_files),
+              total_words=total_words,
+              chapters=chapters,
+          )
+  ```
+- **用户人工**：配置扫描目录 → 启动扫描 → 看到结果 → 确认导入
+
+#### 模块 6.4：Skill 系统基础（提前）
+
+- **文件**：
+  - `server/src/core/skills/base.py`
+  - `server/src/core/skills/registry.py`
+  - `server/src/core/skills/builtin/word_counter.py`（先做 1-2 个）
+  - `server/src/core/skills/builtin/sensitive_word.py`
+  - `server/tests/test_skills.py`
+- **关键代码 `base.py`**：
+  ```python
+  from typing import Protocol
+  from dataclasses import dataclass, field
+  from abc import abstractmethod
+
+  @dataclass
+  class SkillResult:
+      success: bool
+      data: dict = field(default_factory=dict)
+      error: str | None = None
+
+  class Skill(Protocol):
+      name: str
+      description: str
+      input_schema: dict
+      requires_llm: bool
+
+      @abstractmethod
+      async def execute(self, **kwargs) -> SkillResult:
+          ...
+  ```
+- **关键代码 `word_counter.py`**：
+  ```python
+  from .base import Skill, SkillResult
+
+  class WordCounterSkill:
+      name = "word_counter"
+      description = "统计文本字数（中英文混合）"
+      input_schema = {
+          "type": "object",
+          "properties": {
+              "text": {"type": "string", "description": "要统计的文本"}
+          },
+          "required": ["text"]
+      }
+      requires_llm = False
+
+      async def execute(self, text: str) -> SkillResult:
+          chinese = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+          english = len([w for w in text.split() if w.isascii()])
+          return SkillResult(
+              success=True,
+              data={"chinese_chars": chinese, "english_words": english, "total": chinese + english}
+          )
+  ```
+
+#### 阶段 6 产出物
+
+- [ ] 灵感库列表 + 详情完整
+- [ ] 详情页可看人物卡和大纲
+- [ ] 藏书馆列表 + 详情
+- [ ] 本地扫描 + 接入
+- [ ] 2-3 个基础 Skill 可用
+
+---
+
+### Phase 7：优化与 Skill 完善（1 周）
+
+#### 模块 7.1：剩余 9 个 Skill
+
+- `chapter_summarizer.py`
+- `character_extractor.py`
+- `plot_analyzer.py`
+- `web_search.py`
+- `read_local_file.py`
+- `consistency_checker.py`
+- `style_analyzer.py`
+- `pacing_visualizer.py`
+- `outline_structurer.py`
+- `genre_classifier.py`
+
+每个 Skill 按 `base.py` 接口实现。
+
+#### 模块 7.2：Skill 市场 UI
+
+- **文件**：
+  - `apps/desktop/src/pages/Skills/index.tsx`
+  - `apps/desktop/src/pages/Skills/SkillCard.tsx`
+  - `apps/desktop/src/pages/Skills/CustomSkillForm.tsx`
+
+#### 模块 7.3：错误处理 + 加载状态
+
+- 全局错误边界
+- API 错误提示 toast
+- 加载骨架屏
+- 按钮 disabled 状态
+
+#### 模块 7.4：备份/恢复
+
+- **文件**：
+  - `server/src/services/backup_service.py`
+  - 设置页加"导出/导入"
+- **导出**：打包 `data/novels/` + `book-soul.db` 为 zip
+- **导入**：解压并恢复
+
+#### 阶段 7 产出物
+
+- [ ] 全部 12 个预装 Skill 可用
+- [ ] Skill 市场 UI 完整
+- [ ] 错误处理优雅
+- [ ] 备份/恢复可用
+
+---
+
+### Phase 8：打包与发布（1 周）
+
+#### 模块 8.1：Tauri 打包配置
+
+- **文件**：
+  - `apps/desktop/src-tauri/tauri.conf.json`（配置 icons、bundle）
+  - `apps/desktop/src-tauri/Cargo.toml`（release 配置）
+- **步骤**：
+  1. 设计应用图标（512x512 + 多尺寸）
+  2. 配置 `tauri.conf.json` bundle
+  3. 准备安装包信息
+
+#### 模块 8.2：自动 Release
+
+- **文件**：
+  - `.github/workflows/release.yml`
+- **关键代码**：
+  ```yaml
+  name: Release
+
+  on:
+    push:
+      tags: ['v*']
+
+  jobs:
+    release:
+      runs-on: ${{ matrix.os }}
+      strategy:
+        matrix:
+          os: [windows-latest, macos-latest, ubuntu-latest]
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/setup-node@v4
+          with: { node-version: '20' }
+        - run: npm install -g pnpm
+        - run: cd apps/desktop && pnpm install && pnpm tauri build
+        - uses: softprops/action-gh-release@v2
+          with:
+            files: |
+              apps/desktop/src-tauri/target/release/bundle/**/*.msi
+              apps/desktop/src-tauri/target/release/bundle/**/*.exe
+              apps/desktop/src-tauri/target/release/bundle/**/*.dmg
+              apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
+  ```
+
+#### 模块 8.3：README + 文档
+
+- **文件**：
+  - `README.md`（完善）
+  - `docs/USER_GUIDE.md`
+  - `docs/API.md`
+  - `docs/ARCHITECTURE.md`
+
+#### 阶段 8 产出物
+
+- [ ] Windows .msi / .exe 可下载
+- [ ] Mac .dmg（如果在 Mac 上 build）
+- [ ] Linux .AppImage
+- [ ] GitHub Release 自动发布
+- [ ] README 完整
+
+---
+
+## 6. 质量门禁规范（必须）
+
+### 6.1 Pre-commit 拦截
+
+每次 commit 前自动运行：
+
+1. **ruff format** —— 代码格式化
+2. **ruff check** —— lint 检查
+3. **gitleaks** —— 检查泄露 key
+4. **check-yaml / check-json** —— 配置文件语法
+
+**不通过 = 阻断 commit**。
+
+### 6.2 CI 必跑
+
+每个 push / PR：
+
+1. ruff format --check
+2. ruff check
+3. pytest --cov（覆盖率 > 60%）
+4. mypy src
+5. 前端 tsc --noEmit
+6. 前端 pnpm build
+
+**不通过 = 红色 ✗**。
+
+### 6.3 提交前必读
+
+每次新对话开始，用户要先说：
+> "请先运行 `pre-commit run --all-files` 和 `pytest`，确认全过再开始新功能。"
+
+---
+
+## 7. GitHub 自动同步规范
+
+### 7.1 .gitignore 必须包含
+
+```
+# 隐私
+.env
+.env.*
+!.env.example
+data/
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Tauri
+apps/desktop/src-tauri/target/
+
+# 系统
+.DS_Store
+Thumbs.db
+```
+
+### 7.2 提交流程
+
+每次 Phase 模块完成后：
+
+```bash
+# 1. 跑质量门禁
+pre-commit run --all-files
+pytest
+# 必须全过
+
+# 2. 提交
+git add .
+git commit -m "Phase X 模块 Y: <描述>"
+
+# 3. 推送
+git push origin main
+
+# 4. CI 跑通（在 GitHub Actions 页面查看）
+```
+
+### 7.3 发布流程
+
+每完成一个 Phase：
+
+```bash
+git tag v0.X.0
+git push origin v0.X.0
+# GitHub Actions 自动 build + release
+```
+
+---
+
+## 8. 重要提醒（agent 必读）
+
+### 8.1 不允许做的事
+
+- ❌ 不用 LangChain
+- ❌ 不用 Flask / Django
+- ❌ 不用 Electron
+- ❌ 一次写超过 300 行代码（一个模块）
+- ❌ 用 print 调试
+- ❌ 写未经测试的业务代码
+- ❌ 提交未通过 ruff 的代码
+- ❌ 引用不存在的库或 API（必须先 Google 确认）
+- ❌ 把 API Key 硬编码在代码里
+- ❌ 跳过测试写新功能
+
+### 8.2 必须做的事
+
+- ✅ 写代码前先写测试
+- ✅ 每次提交前跑 ruff + pytest
+- ✅ 每个模块完成后输出"验证步骤清单"
+- ✅ 区分代码验证和用户验证
+- ✅ 长函数必须拆分
+- ✅ 复杂逻辑加注释
+- ✅ API 设计遵循 RESTful
+
+### 8.3 写测试的规范
+
+```python
+# tests/test_character_service.py
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.services.character_service import CharacterService
+from src.schemas.character import CharacterCreate
+
+@pytest.mark.asyncio
+async def test_create_character(session: AsyncSession):
+    service = CharacterService(session)
+    data = CharacterCreate(
+        novel_id=1,
+        name="张三",
+        role="主角",
+        personality="坚毅",
+    )
+    character = await service.create(data)
+    assert character.id is not None
+    assert character.name == "张三"
+    assert character.current_version_id is not None
+
+@pytest.mark.asyncio
+async def test_update_growth(session: AsyncSession):
+    # 创建人物
+    # 更新 growth
+    # 验证 growth_arc 追加
+    # 验证版本数 +1
+    ...
+```
+
+---
+
+# 文档 2：USER_CHECKLIST.md（用户人工清单）
+
+> 退出 Plan Mode 后，此文档将写入 `C:\Users\JZ\Desktop\Book Soul\USER_CHECKLIST.md`
+
+## Part A：环境准备（一次性，约 1-2 天）
+
+### A.1 系统要求
+
+- **操作系统**：Windows 10/11（推荐）、macOS 12+、Ubuntu 20.04+
+- **磁盘空间**：至少 5GB（开发环境 + 模型缓存）
+- **内存**：至少 8GB（跑本地 LLM 建议 16GB+）
+
+### A.2 必装工具清单
+
+| 工具 | 版本 | 安装命令 | 验证命令 |
+|------|------|----------|----------|
+| **Python** | 3.11+ | https://www.python.org/downloads/ | `python --version` |
+| **Node.js** | 20 LTS | https://nodejs.org/ | `node --version` |
+| **pnpm** | 9+ | `npm install -g pnpm` | `pnpm --version` |
+| **Rust** | stable | https://rustup.rs/ | `rustc --version` |
+| **uv** | latest | `pip install uv` | `uv --version` |
+| **Git** | 2.40+ | https://git-scm.com/ | `git --version` |
+| **VS Code** | latest | https://code.visualstudio.com/ | - |
+| **Visual Studio Build Tools** | 2022 | https://visualstudio.microsoft.com/downloads/（选"C++ build tools"工作负载） | - |
+
+### A.3 可选工具
+
+| 工具 | 用途 | 安装 |
+|------|------|------|
+| **Ollama** | 本地 LLM 推理 | https://ollama.com/ |
+| **LM Studio** | 图形化本地 LLM | https://lmstudio.ai/ |
+
+### A.4 安装后必须验证的 5 件事
+
+打开 PowerShell 依次运行：
+
+```powershell
+python --version        # 应显示 3.11.x 或更高
+node --version          # 应显示 v20.x.x
+pnpm --version          # 应显示 9.x.x
+rustc --version         # 应显示 rustc 1.xx.x
+uv --version            # 应显示 uv 0.x.x
+git --version           # 应显示 git version 2.4x.x
+```
+
+如果其中任何一个失败，**先解决再继续**。
+
+### A.5 VS Code 推荐插件
+
+- Python（Microsoft）
+- Pylance
+- ESLint
+- Prettier
+- Tailwind CSS IntelliSense
+- Tauri
+- GitLens
+- Error Lens
+- Chinese Language Pack（中文界面）
+
+---
+
+## Part B：账号与 API Key（约 1-2 天）
+
+### B.1 GitHub 账号
+
+- 注册：https://github.com/
+- 创建 Personal Access Token（PAT）：
+  - GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
+  - 勾选 `repo`, `workflow`
+  - 保存到密码管理器
+
+### B.2 LLM API Key
+
+#### 主用：minimax-M3
+
+- 注册：https://api.minimaxi.com/
+- 申请 API Key
+- 记录：`MINIMAX_API_KEY=sk-xxx`、`MINIMAX_BASE_URL=https://api.minimaxi.com/v1`
+
+#### 备用：OpenAI / Anthropic（至少 1 个）
+
+- OpenAI: https://platform.openai.com/
+- Anthropic: https://console.anthropic.com/
+
+### B.3 可选 Key
+
+- **Tavily**（网络搜索）：https://tavily.com/
+- **LangSmith**（调试）：https://smith.langchain.com/
+
+### B.4 填入 .env
+
+项目根目录创建 `.env`（**绝对不入 git**）：
+
+```bash
+# minimax
+MINIMAX_API_KEY=sk-xxx
+MINIMAX_BASE_URL=https://api.minimaxi.com/v1
+
+# OpenAI（备用）
+OPENAI_API_KEY=sk-xxx
+
+# Tavily（可选）
+TAVILY_API_KEY=tvly-xxx
+
+# LangSmith（可选）
+LANGSMITH_API_KEY=lsv2_xxx
+LANGSMITH_TRACING=false
+```
+
+---
+
+## Part C：素材准备（贯穿开发过程）
+
+### C.1 质量检测测试样本
+
+准备 5-10 本完整小说（任意题材）：
+
+- 每本 ≥ 10 章
+- 存到 `~/Documents/test-novels/`
+- Phase 5 质量检测时使用
+
+### C.2 词库参考
+
+如有余力，可先收集（**按 JEE 决策的优先级**）：
+
+- 修仙经典词条 800+（P0，最高优先级）
+- 都市经典词条 500+（P1）
+- 悬疑经典词条 500+（P2）
+- 言情经典词条 500+（P3）
+- Phase 3 词库系统时使用
+
+### C.3 本地小说扫描
+
+如果你电脑里已有小说：
+
+- 整理路径到 `~/Documents/我的小说/`
+- Phase 6 扫描接入时使用
+
+---
+
+## Part D：每次开发对话模板
+
+### D.1 通用模板（新对话开头用）
+
+```
+我要做 Book Soul 项目（小说 AI 写作桌面应用）。
+
+完整计划在项目根目录 PROJECT_PLAN.md 和 USER_CHECKLIST.md。
+
+本次任务：
+- 阶段：Phase X
+- 模块：模块 X.Y
+- 目标：<一句话目标>
+- 验收标准：<怎么验证完成>
+
+请：
+1. 先读取 PROJECT_PLAN.md 中 Phase X 模块 X.Y 部分
+2. 列出本模块要创建/修改的文件清单
+3. 按计划逐步实施
+4. 完成后运行 ruff + pytest + pre-commit
+5. 给出我需要在 UI 或功能上人工验证的点
+6. 给出 commit 消息建议
+```
+
+### D.2 bug 反馈模板
+
+```
+Phase X 模块 X.Y 出现 bug。
+
+错误信息：
+<粘贴完整错误>
+
+复现步骤：
+1. ...
+2. ...
+
+期望：...
+实际：...
+
+请：
+1. 定位问题
+2. 修复
+3. 加测试防止回归
+4. 验证修复
+```
+
+### D.3 续写提示
+
+如果上次的对话太长/上下文满了，开新对话时：
+
+```
+继续 Book Soul 项目 Phase X 模块 X.Y 的开发。
+
+上次进度：<简短描述>
+
+请读取 PROJECT_PLAN.md，先确认本模块进度，然后继续。
+```
+
+---
+
+## Part E：每个阶段的检验方法
+
+### E.1 代码层面（agent 自动跑）
+
+- `pre-commit run --all-files` —— 必须全过
+- `pytest` —— 必须全过
+- `ruff check .` —— 必须全过
+- `mypy src` —— 警告可接受，错误不接受
+
+### E.2 功能层面（用户必须测）
+
+每个模块完成，agent 会列出"用户验证清单"，用户按清单手动测试：
+
+| 模块 | 验证动作 |
+|------|----------|
+| Phase 0.3 | 浏览器打开 http://127.0.0.1:8765/docs 看到 Swagger |
+| Phase 0.7 | 运行 `pnpm tauri dev` 看到窗口 |
+| Phase 0.10 | 点击"测试 LLM"按钮看到真实回复 |
+| Phase 1.1 | 用 curl 测试 /novels 接口 CRUD |
+| Phase 3.3 | 选 5 个灵感词 → 生成 3 个剧情 → 看到结果 |
+| Phase 4.3 | 点击"生成章节" → 看到流式输出（字一个个蹦出来） |
+| Phase 4.4 | 选中一段 → 输入提示词 → AI 重写 → 内容替换 |
+| Phase 4.6 | 修改内容 → 看版本历史 → 对比 → 回滚 |
+| Phase 5.2 | 选章节 → 检测 → 看雷达图 + 问题列表 |
+| Phase 6.3 | 配置扫描目录 → 看到检测到的小说 → 导入 |
+
+### E.3 集成测试（贯穿）
+
+- **数据流测试**：UI 操作 → 后端 → DB 写入 → 重新读出正确
+- **错误处理测试**：断网、LLM 超时、key 错误时应用不崩
+- **重启测试**：关闭应用再打开，数据还在
+
+---
+
+## Part F：常见问题
+
+### F.1 启动报错 "ModuleNotFoundError"
+
+**原因**：依赖没装
+**解决**：`cd server && uv sync`
+
+### F.2 pre-commit 拦截了 commit
+
+**原因**：代码风格不对或泄露 key
+**解决**：
+```bash
+# 看具体哪个 hook 失败
+pre-commit run --all-files
+# 修复后再 commit
+```
+
+### F.3 LLM 调用失败
+
+**排查**：
+1. `.env` 里 API Key 是否正确
+2. 网络是否能访问 provider
+3. 余额是否充足
+4. 用 curl 单独测试：
+   ```bash
+   curl -X POST https://api.minimaxi.com/v1/chat/completions \
+     -H "Authorization: Bearer $MINIMAX_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"model":"MiniMax-M3","messages":[{"role":"user","content":"hi"}]}'
+   ```
+
+### F.4 Tauri 启动失败
+
+**排查**：
+1. Rust 是否装好
+2. Visual Studio Build Tools 是否装（C++ 工作负载）
+3. WebView2 是否装（Windows 11 自带，10 需要手动装）
+
+### F.5 章节生成卡住
+
+**排查**：
+1. 人物卡是否合理（不能是空卡）
+2. 大纲是否太短（至少一段话）
+3. LLM provider 是否稳定
+4. 日志：`tail -f data/logs/server.log`
+
+### F.6 桌面应用打包失败
+
+**排查**：
+1. icon 是否准备
+2. 平台工具链是否齐全
+3. `tauri.conf.json` identifier 是否正确
+
+### F.7 GitHub Actions 失败
+
+**排查**：
+1. 看具体哪个 step 失败
+2. 本地重现：
+   ```bash
+   ruff check .
+   pytest
+   mypy src
+   ```
+3. 修复后 push 自动重跑
+
+### F.8 提交时 gitleaks 报警
+
+**说明**：可能你引用了某个看起来像 key 的字符串
+**解决**：
+- 如果是测试用的假 key，加 `# gitleaks:allow` 注释
+- 如果是真的 key，**立即撤销** + 重新生成
+
+---
+
+

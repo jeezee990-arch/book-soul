@@ -185,13 +185,13 @@ async def _build_novel_summary(
 ):
     """构造 :class:`NovelContextSummary`；没有该 novel 时返回 None。"""
     # 延迟 import 避免循环
-    from ..models.novel import Novel
-    from ..models.character import Character
     from ..models.chapter import Chapter
+    from ..models.character import Character
+    from ..models.novel import Novel
     from ..models.outline import Outline
     from ..schemas.inspiration import (
-        CharacterSummary,
         ChapterSummary,
+        CharacterSummary,
         NovelContextSummary,
     )
 

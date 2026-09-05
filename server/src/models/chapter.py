@@ -33,6 +33,7 @@ CHAPTER_STATUSES: tuple[str, ...] = (
     "drafting",
     "written",
     "final",
+    "imported",  # Phase 6.3 本地扫描导入
 )
 
 # ChapterVersion.trigger 的取值

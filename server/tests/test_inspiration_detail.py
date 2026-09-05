@@ -17,13 +17,13 @@ async def _make_novel_with_inspiration(
 ):
     """最小数据集：novel + character + outline + chapter + inspiration。"""
     from src.db import SessionLocal
-    from src.models.character import Character
     from src.models.chapter import Chapter, ChapterVersion
+    from src.models.character import Character
     from src.models.outline import Outline
-    from src.services.novel_service import NovelService
-    from src.services.inspiration_service import InspirationService
-    from src.schemas.novel import NovelCreate
     from src.schemas.inspiration import InspirationCreate
+    from src.schemas.novel import NovelCreate
+    from src.services.inspiration_service import InspirationService
+    from src.services.novel_service import NovelService
 
     content = content or {"words": ["修仙", "逆袭"]}
     tags = tags or ["热门"]
@@ -67,6 +67,7 @@ async def _make_novel_with_inspiration(
 @pytest.mark.asyncio
 async def test_detail_with_novel(db_initialized: Path) -> None:
     from fastapi.testclient import TestClient
+
     from src.main import app
 
     ins_id, novel_id = await _make_novel_with_inspiration(db_initialized)
@@ -92,6 +93,7 @@ async def test_detail_with_novel(db_initialized: Path) -> None:
 async def test_detail_without_novel(db_initialized: Path) -> None:
     """通用灵感（novel_id=None）：返回 novel=null。"""
     from fastapi.testclient import TestClient
+
     from src.main import app
 
     ins_id, _ = await _make_novel_with_inspiration(db_initialized, with_novel=False)
@@ -106,6 +108,7 @@ async def test_detail_without_novel(db_initialized: Path) -> None:
 @pytest.mark.asyncio
 async def test_detail_plot_type(db_initialized: Path) -> None:
     from fastapi.testclient import TestClient
+
     from src.main import app
 
     ins_id, _ = await _make_novel_with_inspiration(
@@ -125,6 +128,7 @@ async def test_detail_plot_type(db_initialized: Path) -> None:
 @pytest.mark.asyncio
 async def test_detail_404(db_initialized: Path) -> None:
     from fastapi.testclient import TestClient
+
     from src.main import app
 
     client = TestClient(app)
