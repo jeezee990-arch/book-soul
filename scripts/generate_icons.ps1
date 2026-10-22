@@ -1,4 +1,4 @@
-# Generate Book Soul app icons (Phase 8.1 升级版)
+﻿# Generate Book Soul app icons (Phase 8.1 升级版)
 # 用 PowerShell + System.Drawing 生成多尺寸 PNG
 # 设计：深蓝渐变背景 + 白色书本 + 紫色灵魂火焰
 

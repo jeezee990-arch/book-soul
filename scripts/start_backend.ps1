@@ -1,4 +1,4 @@
-# Start Book Soul Python backend (standalone, for pnpm tauri dev beforeDevCommand).
+﻿# Start Book Soul Python backend (standalone, for pnpm tauri dev beforeDevCommand).
 #
 # Behavior:
 #   - Check 127.0.0.1:8765; if taken, skip (auto-spawn already done by Tauri/Rust).

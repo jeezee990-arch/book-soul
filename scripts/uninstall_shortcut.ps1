@@ -1,4 +1,4 @@
-# Uninstall Book Soul desktop + Start Menu shortcuts.
+﻿# Uninstall Book Soul desktop + Start Menu shortcuts.
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/uninstall_shortcut.ps1
 
 $ErrorActionPreference = 'Stop'

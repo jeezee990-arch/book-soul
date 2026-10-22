@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     构建 Python 后端 sidecar exe，放到 Tauri 期望的位置。
 
