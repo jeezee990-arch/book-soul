@@ -19,6 +19,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
+# 本地时区时间戳（desktop.log）。chrono 已经作为 tauri 的传递依赖被链接进来，
+# 显式声明只是为了让代码能直接用，不会额外增加产物体积。
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # 优化：release 编译体积
 [profile.release]
