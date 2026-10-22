@@ -71,7 +71,15 @@ class SettingsRead(SettingsBase):
 
     api_key_configured: dict[str, bool] = Field(
         default_factory=dict,
-        description="key=provider name, value=key 是否已存 keyring",
+        description="key=provider name, value=key 是否已存应用内（密钥库 / keyring）",
+    )
+
+    api_key_source: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "key=provider name, value=key 来源："
+            "env（环境变量）/ secret_store（DPAPI 加密文件）/ keyring（系统凭据）/ none"
+        ),
     )
 
 
