@@ -18,6 +18,7 @@ from ..core.llm import (
     ChatMessage,
     LLMError,
     RateLimitError,
+    check_all_providers_health,
     create_llm_client,
 )
 
@@ -104,3 +105,13 @@ async def test_llm(req: TestLLMRequest) -> TestLLMResponse:
         completion_tokens=resp.usage.completion_tokens,
         total_tokens=resp.usage.total_tokens,
     )
+
+
+@router.get("/llm/health")
+async def llm_health() -> dict:
+    """探活所有 provider（设置页显示用）。
+
+    返回 ``{provider: {"ok": bool, "message": str}}``。
+    """
+    results = await check_all_providers_health()
+    return {name: {"ok": ok, "message": message} for name, (ok, message) in results.items()}

@@ -25,6 +25,7 @@ from ..core.chapter_context import (
     get_previous_tail,
     get_recent_summaries,
     load_chapter_generation_prompt,
+    select_relevant_characters,
 )
 from ..core.llm.base import ChatMessage, describe_llm_error
 from ..models.chapter import Chapter
@@ -113,10 +114,7 @@ class ChapterGenerator:
         from sqlalchemy import select
 
         stmt = (
-            select(Outline)
-            .where(Outline.novel_id == novel_id)
-            .order_by(Outline.id.asc())
-            .limit(1)
+            select(Outline).where(Outline.novel_id == novel_id).order_by(Outline.id.asc()).limit(1)
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -135,13 +133,25 @@ class ChapterGenerator:
         """
         chapter = await self._load_chapter(chapter_id)
         novel = await self._load_novel(chapter.novel_id)
-        characters = await self._load_active_characters(chapter.novel_id)
+        all_characters = await self._load_active_characters(chapter.novel_id)
         outline = await self._load_outline(chapter.novel_id)
         chapter_outline = await get_chapter_outline(self.session, chapter, outline)
         recent_summaries = await get_recent_summaries(self.session, chapter.novel_id, n=3)
         previous_tail = await get_previous_tail(
             self.session, chapter.novel_id, chapter.chapter_number - 1, chars=1500
         )
+
+        # 只把"本章相关"的人物卡塞进 prompt（缩短 prompt → 首字更快、token 更省）
+        context_text = "\n".join([chapter_outline, previous_tail, user_prompt])
+        characters = select_relevant_characters(all_characters, context_text)
+        if len(characters) != len(all_characters):
+            logger.debug(
+                "chapter {}: character cards filtered {}/{} -> {}",
+                chapter_id,
+                len(all_characters),
+                len(all_characters),
+                len(characters),
+            )
 
         prompt_tpl = load_chapter_generation_prompt()
         try:

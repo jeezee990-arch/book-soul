@@ -9,14 +9,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from .api import router as api_router
 from .core.config import settings
 from .core.logging import setup_logging
+from .core.skills.loader import init_skill_paths, load_all_skills
 from .db import init_db
 
 # 应用启动最早阶段初始化日志（必须在任何业务 logger.info 之前调用）
@@ -25,17 +28,67 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """应用生命周期：启动时初始化 DB，关闭时记录日志。"""
+    """应用生命周期：DB 同步装载 + skills 后台异步装载，关闭时记录日志。
+
+    性能优化（Phase 性能优化）：
+    - DB init 在 startup 同步跑（必须先建表才能 serve 请求）
+    - Skill loading 在 background task 异步跑（~600-1000ms）——
+      首 LLM 请求到达时若仍未完成，会短暂等待 loading 完成
+    """
     logger.info(
         "Starting Book Soul server (host={}, port={})",
         settings.book_soul_host,
         settings.book_soul_port,
     )
+
     await init_db()
+
+    skills_root = settings.data_dir / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    init_skill_paths(skills_root)
+
+    skills_task = asyncio.create_task(
+        asyncio.to_thread(load_all_skills),
+        name="book-soul-skills-load",
+    )
+
+    # provider 预检放后台：不能拖慢启动（探活每个 provider 最多 5s）
+    preflight_task = asyncio.create_task(
+        _preflight_providers(),
+        name="book-soul-provider-preflight",
+    )
+
     try:
         yield
     finally:
+        if not skills_task.done():
+            try:
+                await asyncio.wait_for(skills_task, timeout=2.0)
+            except (TimeoutError, asyncio.CancelledError):
+                skills_task.cancel()
+        if not preflight_task.done():
+            preflight_task.cancel()
         logger.info("Shutting down Book Soul server")
+
+
+async def _preflight_providers() -> None:
+    """启动预检：探测各 provider 可达性，不可用只告警不阻塞启动。
+
+    背景：配置里多个场景默认路由到本地 Ollama，而 Ollama 经常"没启动"。
+    与其让用户等 30 秒超时后看到裸 ConnectError，不如启动时就明确告知。
+    """
+    from .core.llm import check_all_providers_health
+
+    try:
+        results = await check_all_providers_health()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("provider preflight failed: {}", e)
+        return
+    for name, (ok, message) in results.items():
+        if ok:
+            logger.info("provider '{}' OK — {}", name, message)
+        else:
+            logger.warning("provider '{}' UNAVAILABLE — {}", name, message)
 
 
 app = FastAPI(
@@ -45,16 +98,96 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 实际绑定的端口（serve() 会用真实值覆盖）。
+# 桌面版由 Tauri 分配随机端口，配置里的 8765 并不是真实端口 ——
+# /ping 必须回报真实值，否则排查问题时会被误导。
+app.state.actual_port = settings.book_soul_port
+
+# CORS：dev 模式 Vite (5173) 与后端 (8765) 跨 origin；prod 模式 Tauri webview
+# 不走 http(s) 协议，但保险起见也允许 tauri:// / http://tauri.localhost
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8765",
+        "http://127.0.0.1:8765",
+        "tauri://localhost",
+        "http://tauri.localhost",
+        # Tauri 2 + WebView2 on Windows uses these origins
+        "https://tauri.localhost",
+        "http://0.0.0.0:8765",
+        "null",  # file:// origin (Tauri fallback)
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
+)
+
 # 挂载 API 路由
 app.include_router(api_router)
 
 
-if __name__ == "__main__":
+def serve(host: str | None = None, port: int | None = None) -> None:
+    """启动 uvicorn（dev 与打包版共用）。
+
+    :param host: 监听地址（None → settings.book_soul_host）
+    :param port: 监听端口（None → settings.book_soul_port）
+    """
+    import sys
+
     import uvicorn
 
-    uvicorn.run(
-        "src.main:app",
-        host=settings.book_soul_host,
-        port=settings.book_soul_port,
-        reload=False,
+    # 性能优化（Phase 性能优化）：
+    # - http="httptools"：用 httptools 解析 HTTP，比默认快 ~20%
+    # - loop="uvloop"：Linux/macOS 用 uvloop 替换 asyncio（Windows 不支持，自动回退）
+    # - backlog=2048：高并发连接堆积
+    # - timeout_keep_alive=30：客户端空闲保持连接时长
+    kwargs: dict[str, object] = {
+        "host": host or settings.book_soul_host,
+        "port": port if port is not None else settings.book_soul_port,
+        "reload": False,
+        "http": "httptools",
+        "backlog": 2048,
+        "timeout_keep_alive": 30,
+        "log_level": "info",
+    }
+    # 记录真实端口（/ping 用它回报，别让调用方被配置里的默认端口误导）
+    app.state.actual_port = int(kwargs["port"])
+    # uvloop 在 Windows 上 import 即报错；只在非 Windows 才启用
+    if sys.platform != "win32":
+        try:
+            import uvloop  # type: ignore[import-not-found]  # noqa: F401
+
+            kwargs["loop"] = "uvloop"
+        except ImportError:
+            pass
+
+    # ⚠️ 传 app 对象（不是 "src.main:app" 字符串）：
+    #    打包后不存在可重新 import 的 src.main 模块，字符串形式会 RuntimeError。
+    uvicorn.run(app, **kwargs)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    # ===== 启动参数 =====
+    # --port：桌面版由 Tauri 侧分配随机端口传入，避免固定端口冲突
+    # --host：监听地址
+    _parser = argparse.ArgumentParser(prog="book-soul-server", description="Book Soul backend")
+    _parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="监听端口（默认取 settings.book_soul_port）",
     )
+    _parser.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="监听地址（默认取 settings.book_soul_host）",
+    )
+    _args = _parser.parse_args()
+    serve(host=_args.host, port=_args.port)

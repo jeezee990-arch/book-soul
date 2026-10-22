@@ -14,6 +14,7 @@
 - check_model_capability
 - ChatMessage / ChatResponse / Usage
 - LLMError / AuthError / RateLimitError / ModelNotFoundError / ContextOverflowError
+- ProviderUnavailableError
 """
 
 from .base import (
@@ -23,12 +24,17 @@ from .base import (
     ContextOverflowError,
     LLMError,
     ModelNotFoundError,
+    ProviderUnavailableError,
     RateLimitError,
     Usage,
 )
 from .factory import (
+    check_all_providers_health,
+    check_provider_health,
+    clear_llm_client_cache,
     create_llm_client,
     create_llm_client_for_scene,
+    get_cached_llm_client,
     get_default_provider,
     get_provider_config,
     load_llm_config,
@@ -47,13 +53,19 @@ __all__ = [
     "RateLimitError",
     "ModelNotFoundError",
     "ContextOverflowError",
+    "ProviderUnavailableError",
     # 工厂
     "create_llm_client",
     "create_llm_client_for_scene",
+    "get_cached_llm_client",
+    "clear_llm_client_cache",
     "get_default_provider",
     "get_provider_config",
     "load_llm_config",
     "resolve_provider_for_scene",
+    # 健康检查
+    "check_provider_health",
+    "check_all_providers_health",
     # 模型能力
     "ModelCheckResult",
     "ModelWarning",

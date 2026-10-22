@@ -15,6 +15,10 @@ providers:
     # 国内节点响应快（< 5s），30s timeout + 2 retry 足够
     timeout_seconds: 30
     max_retries: 2
+    # 流式专用：read = 两个 chunk 之间的最大间隔（推理模型思考久不会误杀）
+    stream_read_timeout: 120
+    # 流式专用：整条流的总时长上限（防对端挂死）
+    stream_total_timeout: 600
     models: [mimo-v2.5-pro]
     model_specs:
       mimo-v2.5-pro:
@@ -32,6 +36,8 @@ providers:
     # 30s 足够海外节点正常响应（5-15s），2 retry 总等待 ≤ 60s
     timeout_seconds: 30
     max_retries: 2
+    stream_read_timeout: 180
+    stream_total_timeout: 900
     models: [MiniMax-M3]
     model_specs:
       MiniMax-M3:
@@ -47,6 +53,8 @@ providers:
     default_model: gpt-4o-mini
     timeout_seconds: 30
     max_retries: 2
+    stream_read_timeout: 120
+    stream_total_timeout: 600
     models: [gpt-4o-mini, gpt-4o]
     model_specs:
       gpt-4o-mini:
@@ -67,6 +75,8 @@ providers:
     default_model: qwen2.5:14b
     timeout_seconds: 120
     max_retries: 1
+    stream_read_timeout: 300
+    stream_total_timeout: 1800
     models: [qwen2.5:14b, qwen2.5:7b, llama3.1:8b]
     model_specs:
       qwen2.5:14b:

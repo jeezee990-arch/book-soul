@@ -40,6 +40,11 @@ def setup_logging(*, level: str | None = None) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "server.log"
 
+    # 0) 移除 loguru **默认 handler**（它也写 stderr）。
+    #    不移除的话每条日志会被输出两遍（默认 handler + 我们自己的 sink），
+    #    打包成 sidecar 后尤其明显（stderr 被重定向到文件，文件里全是重复行）。
+    logger.remove()
+
     # 1) 控制台 sink：带颜色的简洁输出
     logger.add(
         sys.stderr,

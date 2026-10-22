@@ -78,6 +78,14 @@ class ContextOverflowError(LLMError):
     """上下文超出模型窗口。"""
 
 
+class ProviderUnavailableError(LLMError):
+    """Provider 不可达（服务未启动 / 网络不通 / 地址错误）。
+
+    与 ``AuthError``（key 无效）区分：这个错误说明"根本连不上"，
+    错误信息里应给出可操作提示（如"请先启动 Ollama"）。
+    """
+
+
 def describe_llm_error(e: BaseException) -> str:
     """把 LLM 调用异常转成一句话（异常类型 + 消息 + 响应 body 片段）。
 
