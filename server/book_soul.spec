@@ -58,9 +58,10 @@ hiddenimports = [
     "cryptography.hazmat.backends.openssl",
     "cryptography.hazmat.backends.openssl.backend",
     # keyring（Windows 凭据管理器）
+    # 注意：没有 keyring.backends.win32 —— 新版 keyring 里这个模块已经不存在，
+    # 写上去会让 PyInstaller 每次构建都报一条 ERROR（不影响产物，但是噪音）。
     "keyring.backends",
     "keyring.backends.Windows",
-    "keyring.backends.win32",
     "keyring.backends.chainer",
     # 其他
     "yaml",

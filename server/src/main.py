@@ -20,6 +20,7 @@ from .api import router as api_router
 from .core.config import settings
 from .core.logging import setup_logging
 from .core.skills.loader import init_skill_paths, load_all_skills
+from .core.watchdog import start_parent_watchdog
 from .db import init_db
 
 # 应用启动最早阶段初始化日志（必须在任何业务 logger.info 之前调用）
@@ -170,24 +171,45 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     uvicorn.run(app, **kwargs)
 
 
-if __name__ == "__main__":
+def run_from_cli(argv: list[str] | None = None) -> None:
+    """解析命令行参数并启动服务。
+
+    dev（``python -m src.main``）和打包版（``run_server.py``）**共用**这一份
+    参数定义 —— 之前两边各写一套 argparse，打包版漏了 ``--parent-pid``，
+    结果桌面端传过去的参数会被 argparse 当成"无法识别的参数"直接报错退出。
+
+    :param argv: 参数列表（None → 取 sys.argv[1:]，便于测试）
+    """
     import argparse
 
-    # ===== 启动参数 =====
-    # --port：桌面版由 Tauri 侧分配随机端口传入，避免固定端口冲突
-    # --host：监听地址
-    _parser = argparse.ArgumentParser(prog="book-soul-server", description="Book Soul backend")
-    _parser.add_argument(
+    parser = argparse.ArgumentParser(prog="book-soul-server", description="Book Soul backend")
+    parser.add_argument(
         "--port",
         type=int,
         default=None,
         help="监听端口（默认取 settings.book_soul_port）",
     )
-    _parser.add_argument(
+    parser.add_argument(
         "--host",
         type=str,
         default=None,
         help="监听地址（默认取 settings.book_soul_host）",
     )
-    _args = _parser.parse_args()
-    serve(host=_args.host, port=_args.port)
+    parser.add_argument(
+        "--parent-pid",
+        type=int,
+        default=None,
+        help="父进程 pid；桌面端传��，父进程消失时后端自动退出",
+    )
+    # ⚠️ 必须把 argv 传进去：parse_args() 不带参数时读的是 sys.argv[1:]，
+    #    在测试里那会变成 pytest 的参数 → argparse 直接 SystemExit(2)。
+    args = parser.parse_args(argv)
+
+    # 看门狗要在 uvicorn 占用主线程**之前**启动
+    start_parent_watchdog(args.parent_pid)
+
+    serve(host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    run_from_cli()

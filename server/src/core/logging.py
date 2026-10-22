@@ -45,18 +45,25 @@ def setup_logging(*, level: str | None = None) -> None:
     #    打包成 sidecar 后尤其明显（stderr 被重定向到文件，文件里全是重复行）。
     logger.remove()
 
-    # 1) 控制台 sink：带颜色的简洁输出
-    logger.add(
-        sys.stderr,
-        level=log_level,
-        format=(
-            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-            "<level>{level: <8}</level> | "
-            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
-            "<level>{message}</level>"
-        ),
-        colorize=True,
-    )
+    # 1) 控制台 sink：带颜色的简洁输出。
+    #    ⚠️ PyInstaller 打包成 `console=False`（GUI 子系统）后，
+    #    如果父进程没有重定向标准流，`sys.stderr` 可能是 None。
+    #    这时 loguru.add(None) 会抛异常 → 整个后端起不来。
+    #    所以这里判空跳过控制台 sink —— 文件 sink（server.log）永远可用。
+    if sys.stderr is not None:
+        logger.add(
+            sys.stderr,
+            level=log_level,
+            format=(
+                "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+                "<level>{level: <8}</level> | "
+                "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+                "<level>{message}</level>"
+            ),
+            colorize=True,
+        )
+    else:
+        logger.warning("stderr 不可用（GUI 子系统模式），仅输出到文件")
 
     # 2) 文件 sink：带轮转
     logger.add(
