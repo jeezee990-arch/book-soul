@@ -7,6 +7,7 @@
 - PATCH  /inspirations/{id}             部分更新
 - DELETE /inspirations/{id}             删除（幂等）
 - POST   /inspirations/generate-plot    Phase 3.3 剧情生成（不入库）
+- POST   /inspirations/generate-plot/stream  流式剧情生成（ndjson）
 
 错误映射：
 - InspirationNotFoundError / NovelNotFoundError -> 404
@@ -37,6 +38,7 @@ from ..services.inspiration_service import (
     PlotGenerationError,
     PlotService,
 )
+from ._stream_helpers import ndjson_line, ndjson_response
 
 router = APIRouter(prefix="/inspirations", tags=["inspirations"])
 
@@ -177,12 +179,36 @@ async def generate_plot(
     return PlotGenerationResponse(versions=versions, provider=provider, model=model)
 
 
+# ===== 流式版本（Phase 性能优化）=====
+
+
+@router.post(
+    "/generate-plot/stream",
+    summary="流式生成简要剧情（ndjson；多版本实时 ticker-by-tick）",
+)
+async def generate_plot_stream(payload: PlotGenerationRequest):
+    """流式端点：每个版本独立并行；前端按 ndjson 行解析。
+
+    协议见 :mod:`src.api._stream_helpers`。
+    """
+    svc = PlotService()
+
+    async def gen():
+        async for event in svc.stream_generate(
+            genre=payload.genre,
+            keywords=payload.keywords,
+            n_versions=payload.n_versions,
+            user_extra=payload.user_extra,
+        ):
+            yield ndjson_line(event)
+
+    return ndjson_response(gen())
+
+
 # ===== Phase 6.1：灵感详情（含关联作品的人物卡/大纲/章节摘要）=====
 
 
-async def _build_novel_summary(
-    session: AsyncSession, novel_id: int
-):
+async def _build_novel_summary(session: AsyncSession, novel_id: int):
     """构造 :class:`NovelContextSummary`；没有该 novel 时返回 None。"""
     # 延迟 import 避免循环
     from ..models.chapter import Chapter
@@ -217,10 +243,7 @@ async def _build_novel_summary(
     ]
     # 大纲（取最新一条）
     outline_stmt = (
-        select(Outline)
-        .where(Outline.novel_id == novel_id)
-        .order_by(Outline.id.desc())
-        .limit(1)
+        select(Outline).where(Outline.novel_id == novel_id).order_by(Outline.id.desc()).limit(1)
     )
     outline = (await session.execute(outline_stmt)).scalar_one_or_none()
     # 章节

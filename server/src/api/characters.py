@@ -43,6 +43,7 @@ from ..services.character_service import (
     CharacterValidationError,
     NovelNotFoundError,
 )
+from ._stream_helpers import ndjson_line, ndjson_response
 
 router = APIRouter(tags=["characters"])
 
@@ -141,6 +142,41 @@ async def generate_characters_from_outline(
         provider=result["provider"],
         model=result["model"],
     )
+
+
+# ===== 流式版（Phase 性能优化）=====
+
+
+@router.post(
+    "/novels/{novel_id}/characters/generate-from-outline/stream",
+    summary="流式生成人物卡（ndjson；抽取阶段 + 每张卡生成实时）",
+)
+async def generate_characters_from_outline_stream(
+    novel_id: int,
+    payload: CharacterGenerationRequest,
+    session: AsyncSession = Depends(get_db),
+):
+    """流式生成端点：边抽取边推 + 每张卡实时推 token + 入库。
+
+    协议见 :mod:`src.api._stream_helpers`。
+    """
+    generator = CharacterGenerator(session)
+
+    async def gen():
+        try:
+            async for event in generator.stream_generate_from_outline(
+                novel_id=novel_id,
+                outline=payload.outline,
+                genre=payload.genre,
+                user_extra=payload.user_extra,
+            ):
+                yield ndjson_line(event)
+        except NovelNotFoundError as e:
+            yield ndjson_line({"event": "error", "message": str(e)})
+        except CharacterGenerationError as e:
+            yield ndjson_line({"event": "error", "message": str(e)})
+
+    return ndjson_response(gen())
 
 
 # ===== 顶层 character 端点 =====

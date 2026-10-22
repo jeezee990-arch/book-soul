@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import random
 from functools import cache
-from pathlib import Path
 from typing import Any
 
 import yaml
 from loguru import logger
+
+from ..core.paths import wordbanks_dir
 
 
 class WordbankServiceError(Exception):
@@ -40,17 +41,7 @@ class WordbankValidationError(WordbankServiceError):
     """category 不存在 / 参数非法。"""
 
 
-def _find_repo_root() -> Path:
-    """向上找项目根：包含 ``config/`` + ``pyproject.toml``。"""
-    p = Path(__file__).resolve().parent
-    for _ in range(8):
-        if (p / "config").is_dir() and (p / "pyproject.toml").is_file():
-            return p
-        p = p.parent
-    return Path(__file__).resolve().parents[4]
-
-
-_WORDBANK_DIR = _find_repo_root() / "config" / "wordbanks"
+_WORDBANK_DIR = wordbanks_dir()
 
 
 @cache

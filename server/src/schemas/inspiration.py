@@ -148,6 +148,7 @@ class PlotGenerationRequest(BaseModel):
                 "genre": "修仙",
                 "keywords": ["废柴逆袭", "退婚打脸", "秘境"],
                 "n_versions": 3,
+                "user_extra": "",
             }
         }
     )
@@ -155,6 +156,7 @@ class PlotGenerationRequest(BaseModel):
     genre: str = Field(min_length=1, max_length=50, description="题材中文名（如 修仙/都市）")
     keywords: list[str] = Field(min_length=1, max_length=50, description="灵感词列表（≥1）")
     n_versions: int = Field(default=3, ge=1, le=10, description="生成版本数（1-10）")
+    user_extra: str = Field(default="", max_length=2000, description="作者个人想法，会拼进 prompt")
 
 
 class PlotVersion(BaseModel):

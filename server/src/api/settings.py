@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 
+from ..core.llm.factory import clear_llm_client_cache
 from ..schemas.settings import APIKeyUpdate, SettingsRead, SettingsUpdate
 from ..services.settings_service import (
     SettingsService,
@@ -70,6 +71,8 @@ async def set_api_key(
         raise HTTPException(status_code=422, detail=str(e)) from e
     except SettingsServiceError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+    # 新 key 写入：清掉缓存的 LLM client（让下次请求用新 key）
+    clear_llm_client_cache()
     return service.get()
 
 
@@ -86,4 +89,5 @@ async def delete_api_key(
         service.delete_api_key(provider)
     except SettingsValidationError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    clear_llm_client_cache()
     return service.get()

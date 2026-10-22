@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from loguru import logger
@@ -161,9 +162,7 @@ class QualityService:
         try:
             prompt_tpl = load_quality_prompt(dimension)
         except QualityPromptError as e:
-            return DimensionResult(
-                dimension=dimension, score=0.0, error=f"prompt load failed: {e}"
-            )
+            return DimensionResult(dimension=dimension, score=0.0, error=f"prompt load failed: {e}")
 
         if dimension == "consistency":
             extra = format_characters_for_quality(characters)
@@ -195,9 +194,7 @@ class QualityService:
             )
         except Exception as e:  # noqa: BLE001
             logger.error("LLM call failed (quality/{}): {}", dimension, describe_llm_error(e))
-            return DimensionResult(
-                dimension=dimension, score=0.0, error=describe_llm_error(e)
-            )
+            return DimensionResult(dimension=dimension, score=0.0, error=describe_llm_error(e))
 
         raw = getattr(resp, "content", "") or ""
         return self._parse_dimension_response(dimension, raw)
@@ -289,15 +286,11 @@ class QualityService:
         return json.loads(text[start:end])
 
     # ===== 主入口 =====
-    async def check_chapter(
-        self, novel_id: int, chapter_id: int
-    ) -> QualityReport:
+    async def check_chapter(self, novel_id: int, chapter_id: int) -> QualityReport:
         """对单章节做 5 维度质检（并行）。"""
         chapter = await self._load_chapter(chapter_id)
         if chapter.novel_id != novel_id:
-            raise QualityCheckError(
-                f"Chapter {chapter_id} not in novel {novel_id}"
-            )
+            raise QualityCheckError(f"Chapter {chapter_id} not in novel {novel_id}")
         novel = await self._load_novel(novel_id)
         chapter_content = await self._get_chapter_content(chapter)
         if not chapter_content.strip():
@@ -325,9 +318,7 @@ class QualityService:
             else:
                 # 出错的维度：记 0 但不计入均分
                 dim_scores[r.dimension] = 0.0
-                logger.warning(
-                    "Dimension {} failed: {}", r.dimension, r.error
-                )
+                logger.warning("Dimension {} failed: {}", r.dimension, r.error)
             all_issues.extend(r.issues)
             all_suggestions.extend(r.suggestions)
         total = round(sum(valid_scores) / len(valid_scores), 2) if valid_scores else 0.0
@@ -352,6 +343,136 @@ class QualityService:
             provider=provider,
             model=model,
         )
+
+    # ===== 流式（Phase 性能优化）=====
+
+    async def stream_check_chapter(
+        self,
+        novel_id: int,
+        chapter_id: int,
+        *,
+        user_extra: str = "",
+    ) -> AsyncIterator[dict[str, Any]]:
+        """流式质检：5 维度**并行**调 LLM，单个完成即推送。
+
+        协议：
+        - ``{"event": "start", "dimensions": [...]}``
+        - ``{"event": "dimension_done", "dim": "...", "score": ..., "issues": [...], "suggestions": [...], "error": null|"..."}``
+        - ``{"event": "done", "chapter_id": ..., "novel_id": ..., "total_score": ..., "dimension_scores": {...}, "provider": "...", "model": "..."}``
+        - ``{"event": "error", "message": "..."}``
+        """
+        try:
+            chapter = await self._load_chapter(chapter_id)
+            if chapter.novel_id != novel_id:
+                raise QualityCheckError(f"Chapter {chapter_id} not in novel {novel_id}")
+            novel = await self._load_novel(novel_id)
+            chapter_content = await self._get_chapter_content(chapter)
+            if not chapter_content.strip():
+                raise QualityCheckError(f"Chapter {chapter_id} has no content")
+            characters = await self._load_active_characters(novel_id)
+        except Exception as e:  # noqa: BLE001
+            yield {"event": "error", "message": str(e)}
+            return
+
+        yield {"event": "start", "dimensions": list(QUALITY_DIMENSIONS)}
+
+        # 并行跑 + 每个维度完成后立即发事件（用 queue 透出）
+        queues: list[asyncio.Queue[dict[str, Any] | None]] = [
+            asyncio.Queue() for _ in QUALITY_DIMENSIONS
+        ]
+
+        async def dim_runner(idx: int, dim: str) -> None:
+            try:
+                result = await self._evaluate_dimension(
+                    dim, chapter, chapter_content, novel, characters
+                )
+            except Exception as e:  # noqa: BLE001
+                result = DimensionResult(dimension=dim, score=0.0, error=str(e))
+            payload = {
+                "event": "dimension_done",
+                "dim": dim,
+                "score": result.score,
+                "issues": [asdict(i) for i in result.issues],
+                "suggestions": list(result.suggestions),
+                "error": result.error,
+            }
+            await queues[idx].put(payload)
+            await queues[idx].put(None)
+
+        tasks = [
+            asyncio.create_task(dim_runner(i, dim)) for i, dim in enumerate(QUALITY_DIMENSIONS)
+        ]
+
+        finished = 0
+        all_results: dict[str, DimensionResult] = {}
+        try:
+            while finished < len(tasks):
+                get_tasks = [asyncio.create_task(q.get()) for q in queues]
+                done, _ = await asyncio.wait(get_tasks, return_when=asyncio.FIRST_COMPLETED)
+                for t in done:
+                    payload = t.result()
+                    if payload is None:
+                        finished += 1
+                        continue
+                    all_results[payload["dim"]] = DimensionResult(
+                        dimension=payload["dim"],
+                        score=float(payload["score"]),
+                        issues=[
+                            DimensionIssue(
+                                type=i.get("type", ""),
+                                character=i.get("character", ""),
+                                quote=i.get("quote", ""),
+                                problem=i.get("problem", ""),
+                                suggestion=i.get("suggestion", ""),
+                            )
+                            for i in payload["issues"]
+                        ],
+                        suggestions=payload["suggestions"],
+                        error=payload["error"],
+                    )
+                    yield payload
+                    for pending in _:
+                        pending.cancel()
+        finally:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 整合
+        dim_scores: dict[str, float] = {}
+        valid_scores: list[float] = []
+        all_issues: list[DimensionIssue] = []
+        all_suggestions: list[str] = []
+        for dim in QUALITY_DIMENSIONS:
+            r = all_results.get(dim)
+            if r is None:
+                continue
+            if r.error is None:
+                dim_scores[dim] = r.score
+                valid_scores.append(r.score)
+            else:
+                dim_scores[dim] = 0.0
+                logger.warning("Dimension {} failed: {}", dim, r.error)
+            all_issues.extend(r.issues)
+            all_suggestions.extend(r.suggestions)
+        total = round(sum(valid_scores) / len(valid_scores), 2) if valid_scores else 0.0
+
+        provider = "unknown"
+        model = ""
+        if self._llm is not None:
+            provider = str(getattr(self._llm, "provider", "unknown") or "unknown")
+            model = str(getattr(self._llm, "model", "") or "")
+
+        yield {
+            "event": "done",
+            "chapter_id": chapter.id,
+            "novel_id": novel.id,
+            "chapter_title": chapter.title or "（未命名）",
+            "total_score": total,
+            "dimension_scores": dim_scores,
+            "issues": [asdict(i) for i in all_issues],
+            "suggestions": all_suggestions,
+            "provider": provider,
+            "model": model,
+        }
 
 
 __all__ = [

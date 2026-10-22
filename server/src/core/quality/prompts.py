@@ -3,26 +3,15 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 import yaml
 
 from ...models.character import Character
+from ..paths import genres_dir, prompts_dir
 
-
-def _find_repo_root() -> Path:
-    """向上找项目根：包含 ``config/`` + ``pyproject.toml``。"""
-    p = Path(__file__).resolve().parent
-    for _ in range(8):
-        if (p / "config").is_dir() and (p / "pyproject.toml").is_file():
-            return p
-        p = p.parent
-    return Path(__file__).resolve().parents[6]
-
-
-_PROMPTS_DIR = _find_repo_root() / "config" / "prompts"
-_GENRES_DIR = _find_repo_root() / "config" / "genres"
+_PROMPTS_DIR = prompts_dir()
+_GENRES_DIR = genres_dir()
 
 
 class QualityPromptError(Exception):

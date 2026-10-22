@@ -187,6 +187,15 @@ class ChapterService:
         """写新版本（正文更新）。"""
         self._validate_trigger(data.trigger)
         chapter = await self.get(chapter_id)
+
+        # 自动调用 scene=chapter_generation 的 post-process skills（默认 sensitive_word）
+        # 仅当 trigger 是 LLM 生成时才过滤（手动编辑不过滤，保留用户原意）
+        from ..core.skills import manager as skill_manager
+
+        content = data.content
+        if data.trigger in ("llm_generate", "rewrite"):
+            content = await skill_manager.apply_post("chapter_generation", content)
+
         # Phase 4.6：自动算与 parent 的 unified diff（标准库 difflib 实现）
         parent_content: str | None = None
         parent_id: int | None = chapter.current_version_id
@@ -196,15 +205,15 @@ class ChapterService:
                 parent_content = parent_version.content
         diff = compute_unified_diff(
             parent_content,
-            data.content,
+            content,
             fromfile=f"v{parent_id or 0}",
             tofile="new",
         )
-        wc = _word_count(data.content)
+        wc = _word_count(content)
         version = ChapterVersion(
             chapter_id=chapter.id,
             parent_version_id=chapter.current_version_id,
-            content=data.content,
+            content=content,
             diff=diff or None,
             trigger=data.trigger,
             prompt=data.prompt,

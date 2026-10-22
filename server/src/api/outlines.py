@@ -40,6 +40,7 @@ from ..services.outline_service import (
     OutlineTypeConflictError,
     OutlineValidationError,
 )
+from ._stream_helpers import ndjson_line, ndjson_response
 
 router = APIRouter(prefix="/novels/{novel_id}/outlines", tags=["outlines"])
 
@@ -190,3 +191,30 @@ async def generate_outline(
         # LLM 失败 / 结构错 → 500（业务可重试）；参数错由 Pydantic 422 拦
         raise HTTPException(status_code=500, detail=str(e)) from e
     return OutlineGenerationResponse(**result)
+
+
+@generation_router.post(
+    "/generate/stream",
+    summary="流式生成大纲（ndjson；token 实时 + 最后入库）",
+)
+async def generate_outline_stream(
+    payload: OutlineGenerationRequest,
+    generator: OutlineGenerator = Depends(get_generator),
+):
+    """流式端点：边生成边推 token；解析 + 入库在最后完成。
+
+    协议见 :mod:`src.api._stream_helpers`。
+    """
+
+    async def gen():
+        async for event in generator.stream_generate(
+            genre=payload.genre,
+            plot_summary=payload.plot_summary,
+            keywords=payload.keywords or [],
+            novel_name=payload.novel_name,
+            outline_type=payload.outline_type,
+            user_extra=payload.user_extra,
+        ):
+            yield ndjson_line(event)
+
+    return ndjson_response(gen())

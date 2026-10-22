@@ -18,21 +18,11 @@ from loguru import logger
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .paths import config_dir, repo_root
 
-def _find_repo_root() -> Path:
-    """向上找项目根：包含 ``config/`` 目录 + ``pyproject.toml``。"""
-    p = Path(__file__).resolve().parent
-    for _ in range(8):
-        if (p / "config").is_dir() and (p / "pyproject.toml").is_file():
-            return p
-        p = p.parent
-    # fallback：硬编码（server/src/core/config.py → 根）
-    return Path(__file__).resolve().parents[3]
-
-
-_REPO_ROOT = _find_repo_root()
+_REPO_ROOT = repo_root()
 _ENV_FILE = _REPO_ROOT / ".env"
-_APP_YAML = _REPO_ROOT / "config" / "app.yaml"
+_APP_YAML = config_dir() / "app.yaml"
 
 
 def _find_app_yaml() -> Path | None:

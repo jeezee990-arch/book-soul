@@ -15,8 +15,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Protocol
 
 import yaml
@@ -25,23 +25,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
-from ..core.llm.formatting import extract_json_object
+from ..core.llm.formatting import extract_json_object, strip_thinking
+from ..core.paths import prompts_dir
+from ..core.skills import manager as skill_manager
 from ..models.novel import Novel
 from ..models.outline import OUTLINE_TYPES
 from .outline_service import OutlineService, OutlineTypeConflictError
 
-
-def _find_repo_root() -> Path:
-    """向上找项目根：包含 ``config/`` + ``pyproject.toml``。"""
-    p = Path(__file__).resolve().parent
-    for _ in range(8):
-        if (p / "config").is_dir() and (p / "pyproject.toml").is_file():
-            return p
-        p = p.parent
-    return Path(__file__).resolve().parents[4]
-
-
-_PROMPTS_DIR = _find_repo_root() / "config" / "prompts"
+_PROMPTS_DIR = prompts_dir()
 
 
 @lru_cache(maxsize=16)
@@ -244,6 +235,123 @@ class OutlineGenerator:
     def clear_prompt_cache() -> None:
         """测试用：清 prompt lru_cache。"""
         _load_outline_prompt.cache_clear()
+
+    # ===== 流式（Phase 性能优化）=====
+
+    async def stream_generate(
+        self,
+        genre: str,
+        plot_summary: str,
+        *,
+        keywords: list[str] | None = None,
+        novel_name: str | None = None,
+        outline_type: str = "complete",
+        user_extra: str = "",
+    ) -> AsyncIterator[dict[str, Any]]:
+        """流式生成大纲（边生成边推 token，最后再解析 + 入库）。
+
+        协议：
+        - ``{"event": "start", "phase": "outline"}``
+        - ``{"event": "delta", "text": "..."}``（每条 token；前端累加显示）
+        - ``{"event": "done", "novel_id": ..., "outline_id": ..., "novel_name": ..., "structure": ..., "provider": "...", "model": "..."}``
+        - ``{"event": "error", "message": "..."}``
+        """
+        if outline_type not in OUTLINE_TYPES:
+            yield {"event": "error", "message": f"invalid outline_type: {outline_type!r}"}
+            return
+        if not plot_summary or len(plot_summary) < 10:
+            yield {"event": "error", "message": "plot_summary too short (>= 10 chars)"}
+            return
+
+        prompt = _load_outline_prompt(outline_type)
+        kw_str = ", ".join(keywords or []) if keywords else "（无）"
+        extra_block = ""
+        if user_extra.strip():
+            extra_block = (
+                f"\n\n【作者个人想法（请在生成时参考，但不要照搬）】\n{user_extra.strip()}\n"
+            )
+        full_prompt = prompt.format(genre=genre, plot=plot_summary, keywords=kw_str) + extra_block
+
+        llm = self._get_llm(outline_type)
+        owns_client = self._llm_override is None
+        provider = str(getattr(llm, "provider", "unknown") or "unknown")
+        model = str(getattr(llm, "model", "") or "")
+
+        yield {"event": "start", "phase": "outline", "outline_type": outline_type}
+
+        full_text = ""
+        try:
+            stream = await llm.chat(
+                [ChatMessage("user", full_prompt)],
+                temperature=0.7,
+                stream=True,
+            )
+            async for delta in stream:  # type: ignore[union-attr]
+                if not delta:
+                    continue
+                if "<think>" in delta and "</think>" not in delta:
+                    continue
+                full_text += delta
+                yield {"event": "delta", "text": delta}
+        except Exception as e:  # noqa: BLE001
+            logger.error("outline LLM stream failed: {}", describe_llm_error(e))
+            yield {"event": "error", "message": describe_llm_error(e)}
+            return
+        finally:
+            if owns_client:
+                await self._release_llm(llm, owns=True)
+
+        cleaned = strip_thinking(full_text)
+        if not cleaned:
+            yield {"event": "error", "message": "LLM returned empty"}
+            return
+
+        # 自动调用 scene=outline_generation 的 post-process skills（仅作用于 LLM 原始输出）
+        # skill 应是 JSON-safe 的（substring-based）；若破坏 JSON 解析会 fallback 原文
+        post_cleaned = await skill_manager.apply_post("outline_generation", cleaned)
+
+        try:
+            structure = extract_json_object(post_cleaned)
+        except ValueError as e:
+            yield {"event": "error", "message": f"JSON parse failed: {e}"}
+            return
+
+        outline_service = OutlineService(self.session)
+        try:
+            structure = outline_service._validate_structure(outline_type, structure)  # noqa: SLF001
+        except Exception as e:  # noqa: BLE001
+            yield {"event": "error", "message": f"structure invalid: {e}"}
+            return
+        structure["outline_type"] = outline_type
+
+        name = (novel_name or f"{genre}新作").strip() or f"{genre}新作"
+        novel = await self._upsert_novel(name=name, genre=genre, description=plot_summary[:500])
+
+        from ..schemas.outline import OutlineCreate
+
+        outline_payload = OutlineCreate(
+            novel_id=novel.id,
+            outline_type=outline_type,
+            structure=structure,
+        )
+        try:
+            outline = await outline_service.create(outline_payload)
+        except OutlineTypeConflictError:
+            existing = await outline_service.list_all(novel_id=novel.id, outline_type=outline_type)
+            for o in existing:
+                await outline_service.delete(o.id)
+            outline = await outline_service.create(outline_payload)
+
+        yield {
+            "event": "done",
+            "novel_id": novel.id,
+            "novel_name": novel.name,
+            "outline_id": outline.id,
+            "outline_type": outline_type,
+            "structure": structure,
+            "provider": provider,
+            "model": model,
+        }
 
 
 # 兼容性别名：让 ``from src.services.outline_generator import ...`` 一目了然

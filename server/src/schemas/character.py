@@ -171,6 +171,7 @@ class CharacterGenerationRequest(BaseModel):
         max_length=20,
         description="题材（如'修仙'/'都市'/'悬疑'/'言情'）",
     )
+    user_extra: str = Field(default="", max_length=2000, description="作者个人想法，会拼进 prompt")
 
 
 class CharacterGenerationItem(BaseModel):

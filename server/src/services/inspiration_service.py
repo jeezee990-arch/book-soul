@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from functools import lru_cache
-from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import yaml
 from loguru import logger
@@ -23,6 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
+from ..core.paths import prompts_dir
+from ..core.skills import manager as skill_manager
 from ..models.inspiration import INSPIRATION_TYPES, Inspiration
 from ..models.novel import Novel
 from ..schemas.inspiration import (
@@ -196,17 +198,7 @@ class InspirationService:
 # =====================================================================
 
 
-def _find_repo_root() -> Path:
-    """向上找项目根：包含 ``config/`` + ``pyproject.toml``。"""
-    p = Path(__file__).resolve().parent
-    for _ in range(8):
-        if (p / "config").is_dir() and (p / "pyproject.toml").is_file():
-            return p
-        p = p.parent
-    return Path(__file__).resolve().parents[4]
-
-
-_PROMPTS_DIR = _find_repo_root() / "config" / "prompts"
+_PROMPTS_DIR = prompts_dir()
 
 
 @lru_cache(maxsize=8)
@@ -239,6 +231,8 @@ class _LLMClientLike(Protocol):
         max_tokens: int | None = None,
         stream: bool = False,
     ) -> ChatResponse: ...
+
+    async def aclose(self) -> None: ...
 
 
 class PlotGenerationError(Exception):
@@ -326,6 +320,131 @@ class PlotService:
         """单次 LLM 调用，返回原始文本（空 content 返回空串，由调用方判定）。"""
         resp = await llm.chat([ChatMessage("user", prompt)], temperature=0.8)
         return resp.content if isinstance(resp.content, str) else ""
+
+    def _build_prompt(
+        self,
+        genre: str,
+        keywords: list[str],
+        *,
+        user_extra: str = "",
+    ) -> str:
+        """构造 LLM 输入 prompt（含 ``user_extra`` 注入）。"""
+        template = _load_prompt("plot_generation")
+        extra_block = ""
+        if user_extra.strip():
+            extra_block = (
+                f"\n\n【作者个人想法（请在生成时参考，但不要照搬）】\n{user_extra.strip()}\n"
+            )
+        return template.format(genre=genre, keywords=", ".join(keywords)) + extra_block
+
+    async def stream_generate(
+        self,
+        genre: str,
+        keywords: list[str],
+        n_versions: int = DEFAULT_N_VERSIONS,
+        *,
+        user_extra: str = "",
+    ) -> AsyncIterator[dict[str, Any]]:
+        """流式生成 n 个简要剧情版本（Phase 性能优化）。
+
+        协议（与 ``_stream_helpers.ndjson_line`` 配合）：
+
+        - ``{"event": "version_start", "index": i}``
+        - ``{"event": "delta", "index": i, "text": "..."}``（每条 delta）
+        - ``{"event": "version_done", "index": i, "summary": "..."}``（该版本完成）
+        - ``{"event": "done", "provider": "...", "model": "..."}``（全部完成）
+
+        失败：
+        - ``{"event": "error", "message": "..."}``
+
+        行为：每个版本独立调 LLM，多个版本并行；
+        每个版本的 stream token 实时 push 给前端；
+        整流完成后统一发 ``done``。
+        """
+        if not keywords:
+            yield {"event": "error", "message": "keywords must not be empty"}
+            return
+        if n_versions < 1:
+            yield {"event": "error", "message": f"n_versions must be >= 1, got {n_versions}"}
+            return
+
+        prompt = self._build_prompt(genre, keywords, user_extra=user_extra)
+        # 流式版使用缓存单例（不关闭 → httpx 连接池复用）
+        from ..core.llm import get_cached_llm_client
+
+        if self._llm_override is not None:
+            llm = self._llm_override  # 测试 mock
+            owns_client = True
+        else:
+            llm = get_cached_llm_client("plot_generation")
+            owns_client = False
+        provider = getattr(llm, "provider", "unknown")
+        model = getattr(llm, "model", "")
+
+        # 每个版本独立 task；内部用 asyncio.Queue 把 token 透出
+        queues: list[asyncio.Queue[dict[str, Any] | None]] = [
+            asyncio.Queue() for _ in range(n_versions)
+        ]
+
+        async def version_runner(idx: int) -> None:
+            """单版本流式 LLM 调用，结果塞到自己的 queue。"""
+            q = queues[idx]
+            full_text = ""
+            try:
+                stream = await llm.chat(
+                    [ChatMessage("user", prompt)],
+                    temperature=0.8,
+                    stream=True,
+                )
+                # OpenAI 兼容流式：stream 是 ``AsyncIterator[str]``（每个 delta 文本）
+                async for delta in stream:  # type: ignore[union-attr]
+                    if not delta:
+                        continue
+                    # 过滤跨 chunk 的 <think> 推理块
+                    if "<think>" in delta and "</think>" not in delta:
+                        continue
+                    full_text += delta
+                    await q.put({"event": "delta", "index": idx, "text": delta})
+                raw_summary = _strip_thinking(full_text)
+                if not raw_summary:
+                    await q.put({"event": "error", "message": f"version {idx} empty"})
+                else:
+                    # 自动调用 scene=plot_generation 的 post-process skills（默认 sensitive_word）
+                    cleaned_summary = await skill_manager.apply_post("plot_generation", raw_summary)
+                    await q.put({"event": "version_done", "index": idx, "summary": cleaned_summary})
+            except Exception as e:  # noqa: BLE001
+                logger.error("plot version {} failed: {}", idx, describe_llm_error(e))
+                await q.put({"event": "error", "message": describe_llm_error(e)})
+            finally:
+                await q.put(None)  # 哨兵
+
+        tasks = [asyncio.create_task(version_runner(i + 1)) for i in range(n_versions)]
+        # 先发所有 version_start
+        for i in range(n_versions):
+            yield {"event": "version_start", "index": i + 1}
+        # 轮询所有 queue，按事件实际到达顺序透出
+        finished = 0
+        try:
+            while finished < n_versions:
+                # 并发等待下一个事件
+                get_tasks = [asyncio.create_task(q.get()) for q in queues]
+                done, _ = await asyncio.wait(get_tasks, return_when=asyncio.FIRST_COMPLETED)
+                for t in done:
+                    payload = t.result()
+                    if payload is None:
+                        finished += 1
+                    else:
+                        yield payload
+                    # 取消未完成的 get 任务
+                    for pending in _:
+                        pending.cancel()
+        finally:
+            # 等待所有 runner 退出
+            await asyncio.gather(*tasks, return_exceptions=True)
+            if owns_client:
+                await self._release_llm(llm, owns=True)
+
+        yield {"event": "done", "provider": provider, "model": model}
 
     async def _release_llm(self, llm: _LLMClientLike, owns: bool) -> None:
         """懒加载的客户端用完关闭（防连接泄漏），并清缓存让下次重建。"""

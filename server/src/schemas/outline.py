@@ -172,6 +172,7 @@ class OutlineGenerationRequest(BaseModel):
         default="complete",
         description="complete（分卷/章）or freedom（散文+节拍）",
     )
+    user_extra: str = Field(default="", max_length=2000, description="作者个人想法，会拼进 prompt")
 
 
 class OutlineGenerationResponse(BaseModel):

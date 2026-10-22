@@ -3,6 +3,8 @@
 端点：
 - POST /novels/{novel_id}/chapters/{chapter_id}/quality
     对单章节做 5 维度并行质检，返回 QualityReport
+- POST /novels/{novel_id}/chapters/{chapter_id}/quality/stream
+    流式版：5 维度并行调用 LLM，逐个完成即推送（ndjson）
 
 错误映射：
 - QualityCheckError -> 422（参数错）/ 404（chapter/novel 不存在）
@@ -16,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..schemas.quality import QualityReportRead
 from ..services.quality_service import QualityCheckError, QualityService
+from ._stream_helpers import ndjson_line, ndjson_response
 
 router = APIRouter(tags=["quality"])
 
@@ -81,6 +84,30 @@ async def check_chapter_quality(
         provider=report.provider,
         model=report.model,
     )
+
+
+# ===== 流式版本（Phase 性能优化）=====
+
+
+@router.post(
+    "/novels/{novel_id}/chapters/{chapter_id}/quality/stream",
+    summary="流式质检（5 维度并行；逐维度完成即推送）",
+)
+async def check_chapter_quality_stream(
+    novel_id: int,
+    chapter_id: int,
+    service: QualityService = Depends(get_service),
+):
+    """流式端点：5 维度 LLM **并行**调，单个完成即推事件。
+
+    协议见 :mod:`src.api._stream_helpers`。
+    """
+
+    async def gen():
+        async for event in service.stream_check_chapter(novel_id, chapter_id):
+            yield ndjson_line(event)
+
+    return ndjson_response(gen())
 
 
 __all__ = ["router"]
