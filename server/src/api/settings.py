@@ -3,8 +3,8 @@
 端点：
 - GET    /settings                    读取设置（包含哪些 provider 已存 key）
 - PUT    /settings                    部分更新（合并到 yaml）
-- POST   /settings/api-key/{provider}  保存 API key 到 keyring
-- DELETE /settings/api-key/{provider}  删除 keyring 中的 key（幂等）
+- POST   /settings/api-key/{provider}  保存 API key（DPAPI 加密文件优先，keyring 降级）
+- DELETE /settings/api-key/{provider}  删除 API key（幂等）
 
 API Key 永远不出现在响应里，只通过 api_key_configured 字典告知是否存在。
 """
@@ -22,6 +22,8 @@ from ..services.settings_service import (
 )
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+_PROVIDER_PATH_DESC = "provider name: mimo/minimax/openai/ollama"
 
 
 def get_service() -> SettingsService:
@@ -50,18 +52,21 @@ async def update_settings(
     service: SettingsService = Depends(get_service),
 ) -> SettingsRead:
     try:
-        return service.update(payload)
+        result = service.update(payload)
     except SettingsValidationError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    # 换 provider / 模型后，缓存的 LLM client（带旧 provider+model）要作废
+    clear_llm_client_cache()
+    return result
 
 
 @router.post(
     "/api-key/{provider}",
     response_model=SettingsRead,
-    summary="保存 API key 到系统 keyring",
+    summary="保存 API key（DPAPI 加密文件优先，系统凭据管理器降级）",
 )
 async def set_api_key(
-    provider: str = Path(..., description="provider name: minimax/openai/ollama"),
+    provider: str = Path(..., description=_PROVIDER_PATH_DESC),
     payload: APIKeyUpdate = ...,
     service: SettingsService = Depends(get_service),
 ) -> SettingsRead:
@@ -79,10 +84,10 @@ async def set_api_key(
 @router.delete(
     "/api-key/{provider}",
     response_model=SettingsRead,
-    summary="删除 keyring 中的 API key（幂等）",
+    summary="删除 API key（幂等）",
 )
 async def delete_api_key(
-    provider: str = Path(..., description="provider name: minimax/openai/ollama"),
+    provider: str = Path(..., description=_PROVIDER_PATH_DESC),
     service: SettingsService = Depends(get_service),
 ) -> SettingsRead:
     try:

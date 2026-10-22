@@ -4,6 +4,10 @@ version: 1
 # 注意：本文件不含真 key；api_key_env 指向 .env 里的变量名
 # 切换默认 provider：改 default_provider
 # 切换场景默认：改 routing.<场景>
+#
+# ⚠️ 模型名会以服务端实际支持为准。2026-10-22 实测 mimo 的 /models 接口：
+#    v2.5 系列只有 asr / tts（语音），**没有 chat 模型**；
+#    chat 只有 v2.6 系列。写死 mimo-v2.5-pro 会让生成直接 400。
 
 providers:
   # MiMo (Xiaomi 国内节点，默认) - 兼容 OpenAI Chat Completions
@@ -11,7 +15,7 @@ providers:
     type: openai_compat
     base_url: https://api.xiaomimimo.com/v1
     api_key_env: MIMO_API_KEY
-    default_model: mimo-v2.5-pro
+    default_model: mimo-v2.6-pro
     # 国内节点响应快（< 5s），30s timeout + 2 retry 足够
     timeout_seconds: 30
     max_retries: 2
@@ -19,9 +23,23 @@ providers:
     stream_read_timeout: 120
     # 流式专用：整条流的总时长上限（防对端挂死）
     stream_total_timeout: 600
-    models: [mimo-v2.5-pro]
+    # 已知可用的 chat 模型（2026-10-22 实测确认）
+    models: [mimo-v2.6-pro, mimo-v2.6-pro-ultraspeed, mimo-v2.6-flash]
+    # 用户自填的未知模型按这组能力值兜底（避免"没登记规格就发不出章节"）
+    default_context_window: 128000
+    default_max_output_tokens: 8192
     model_specs:
-      mimo-v2.5-pro:
+      mimo-v2.6-pro:
+        context_window: 128000
+        max_output_tokens: 8192
+        supports_chapter_range: true
+        quality_tier: premium
+      mimo-v2.6-pro-ultraspeed:
+        context_window: 128000
+        max_output_tokens: 8192
+        supports_chapter_range: true
+        quality_tier: premium
+      mimo-v2.6-flash:
         context_window: 128000
         max_output_tokens: 8192
         supports_chapter_range: true
@@ -38,13 +56,50 @@ providers:
     max_retries: 2
     stream_read_timeout: 180
     stream_total_timeout: 900
-    models: [MiniMax-M3]
+    # 已知可用（2026-10-22 实测确认）
+    models:
+      - MiniMax-M3.1-Flash
+      - MiniMax-M3
+      - MiniMax-M2.7
+      - MiniMax-M2.7-highspeed
+      - MiniMax-M2.5
+      - MiniMax-M2.5-highspeed
+      - MiniMax-M2.1
+      - MiniMax-M2.1-highspeed
+      - MiniMax-M2
+    default_context_window: 200000
+    default_max_output_tokens: 8192
     model_specs:
       MiniMax-M3:
         context_window: 1000000      # 1M tokens（开发期辅助模型）
         max_output_tokens: 64000
         supports_chapter_range: true
         quality_tier: premium
+      MiniMax-M3.1-Flash:
+        context_window: 200000
+        max_output_tokens: 32000
+        supports_chapter_range: true
+        quality_tier: premium
+      MiniMax-M2.7:
+        context_window: 200000
+        max_output_tokens: 32000
+        supports_chapter_range: true
+        quality_tier: standard
+      MiniMax-M2.5:
+        context_window: 200000
+        max_output_tokens: 32000
+        supports_chapter_range: true
+        quality_tier: standard
+      MiniMax-M2.1:
+        context_window: 200000
+        max_output_tokens: 16000
+        supports_chapter_range: true
+        quality_tier: standard
+      MiniMax-M2:
+        context_window: 200000
+        max_output_tokens: 16000
+        supports_chapter_range: true
+        quality_tier: standard
 
   openai:
     type: openai_compat
@@ -56,6 +111,8 @@ providers:
     stream_read_timeout: 120
     stream_total_timeout: 600
     models: [gpt-4o-mini, gpt-4o]
+    default_context_window: 128000
+    default_max_output_tokens: 8192
     model_specs:
       gpt-4o-mini:
         context_window: 128000
@@ -78,6 +135,8 @@ providers:
     stream_read_timeout: 300
     stream_total_timeout: 1800
     models: [qwen2.5:14b, qwen2.5:7b, llama3.1:8b]
+    default_context_window: 128000
+    default_max_output_tokens: 8192
     model_specs:
       qwen2.5:14b:
         context_window: 128000
@@ -95,7 +154,7 @@ providers:
         supports_chapter_range: true
         quality_tier: local
 
-# 默认 provider（国内 MiMo，免 VPN）
+# 默认 provider（国内 MiMo，免 VPN）—— 用户没在设置页选过时用它
 default_provider: mimo
 
 # 章节硬限（来自 AGENTS.md 安全规范 + JEE 决策）
@@ -105,19 +164,25 @@ chapter_limits:
   min_context_needed: 32000       # 低于此 context_window 不允许生成章节
 
 # 场景路由：每个业务场景用哪个 provider
-# Phase 3.4+ 改：默认全部走 mimo（国内快），quality_* 仍走 ollama（本地，不依赖网络）
+#
+# "@settings" = 跟随设置页的选择（用户在设置页选了 minimax，创作就真的用 minimax）
+# 写死具体 provider 名 = 该场景强制用那个
+#   例：本机跑了 Ollama，想让质检走本地不花钱 → 把 quality_check 改成 ollama
+#
+# 2026-10-22 改：原先全部写死 mimo，导致"设置页选了 minimax 也没用"；
+# 质检类场景写死 ollama，导致没装 Ollama 的机器质检直接失败。
 routing:
-  inspiration: mimo
-  plot_generation: mimo
-  outline_complete: mimo
-  outline_freedom: mimo
-  character_generation: mimo
-  chapter_generation: mimo
-  chapter_rewrite: mimo
-  quality_check: ollama
-  summarize: ollama
-  quality_writing: ollama
-  quality_logic: ollama
-  quality_pacing: ollama
-  quality_consistency: ollama
-  quality_genre: ollama
+  inspiration: "@settings"
+  plot_generation: "@settings"
+  outline_complete: "@settings"
+  outline_freedom: "@settings"
+  character_generation: "@settings"
+  chapter_generation: "@settings"
+  chapter_rewrite: "@settings"
+  quality_check: "@settings"
+  summarize: "@settings"
+  quality_writing: "@settings"
+  quality_logic: "@settings"
+  quality_pacing: "@settings"
+  quality_consistency: "@settings"
+  quality_genre: "@settings"

@@ -35,12 +35,19 @@ def test_qwen_7b_warning_for_small_max_output():
     assert result.can_generate_chapter is True
 
 
-def test_unknown_model_raises():
-    """不存在的 model 应抛 KeyError。"""
+def test_unknown_model_does_not_raise():
+    """不存在的 model 不再抛错（用户可以自己填服务端新出的模型名）。
+
+    2026-10-22 改：原来直接抛 KeyError，导致"自己换模型"这个能力被堵死。
+    现在按 provider 级默认值估算能力，并给一条 info 提示。
+    """
     from src.core.llm.model_checker import check_model_capability
 
-    with pytest.raises(KeyError):
-        check_model_capability("minimax", "nonexistent-model")
+    result = check_model_capability("minimax", "nonexistent-model")
+    # 按 provider 兜底值估算（minimax.default_context_window = 200000）
+    assert result.context_window == 200000
+    assert result.can_generate_chapter is True
+    assert any("未在 config/llm.yaml 登记规格" in w.message for w in result.warnings)
 
 
 def test_unknown_provider_raises():

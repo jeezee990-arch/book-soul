@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..core.llm import (
@@ -21,6 +21,7 @@ from ..core.llm import (
     check_all_providers_health,
     create_llm_client,
 )
+from ..core.llm.factory import describe_provider_models, get_provider_config
 
 router = APIRouter(tags=["llm"])
 
@@ -115,3 +116,24 @@ async def llm_health() -> dict:
     """
     results = await check_all_providers_health()
     return {name: {"ok": ok, "message": message} for name, (ok, message) in results.items()}
+
+
+@router.get("/llm/models")
+async def llm_models(provider: str = Query(..., description="provider name")) -> dict:
+    """列出某个 provider 支持的模型（设置页下拉框用）。
+
+    实时从 provider 的 ``/models`` 端点拉取 —— 服务端下线模型后，
+    设置页立刻能反映出来，不会再出现"配了个服务端不认的模型名"的 400。
+
+    返回字段：
+    - ``models``：实时列表 ∪ 配置登记列表（前端下拉框用这个）
+    - ``live_models``：服务端实时支持的
+    - ``configured_models``：``config/llm.yaml`` 登记的
+    - ``default_model``：该 provider 的默认模型
+    - ``reachable`` / ``message``：连通性
+    """
+    try:
+        get_provider_config(provider)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return await describe_provider_models(provider)

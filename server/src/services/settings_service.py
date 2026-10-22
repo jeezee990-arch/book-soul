@@ -19,6 +19,7 @@ from loguru import logger
 
 from ..core.config import settings as app_settings
 from ..core.security.secret_store import SecretStore, get_secret_store
+from ..core.user_settings import read_settings_yaml
 from ..schemas.settings import (
     LLM_PROVIDERS,
     UI_THEMES,
@@ -91,16 +92,8 @@ class SettingsService:
 
     # ===== 文件读写 =====
     def _read_yaml(self) -> dict[str, Any]:
-        path = self._settings_path()
-        if not path.is_file():
-            return {}
-        try:
-            with path.open(encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Failed to read {path}: {e}; using defaults")
-            return {}
-        return data if isinstance(data, dict) else {}
+        """读用户设置 yaml（文件不存在 / 损坏都返回空 dict）。"""
+        return read_settings_yaml(self._settings_path())
 
     def _write_yaml(self, data: dict[str, Any]) -> None:
         path = self._settings_path()
@@ -113,7 +106,7 @@ class SettingsService:
     # ===== 校验 =====
     @staticmethod
     def _validate(data: SettingsUpdate) -> None:
-        if data.llm is not None and data.llm.provider not in LLM_PROVIDERS:
+        if data.llm is not None and data.llm.provider not in ("", *LLM_PROVIDERS):
             raise SettingsValidationError(
                 f"Invalid llm.provider: {data.llm.provider!r}; allowed: {LLM_PROVIDERS}"
             )
@@ -121,6 +114,20 @@ class SettingsService:
             raise SettingsValidationError(
                 f"Invalid ui.theme: {data.ui.theme!r}; allowed: {UI_THEMES}"
             )
+
+    @staticmethod
+    def _fill_llm_defaults(llm: LLMConfig) -> LLMConfig:
+        """provider / model 留空时，用 ``config/llm.yaml`` 的默认值补齐。
+
+        为什么不在 schema 里写死默认值：模型名会随服务端升级下线
+        （mimo-v2.5-pro 就是这么消失的），写死就会 400。
+        唯一的真相来源应该是 ``config/llm.yaml``。
+        """
+        from ..core.llm.factory import get_default_provider, provider_default_model
+
+        provider = llm.provider or get_default_provider()
+        model = llm.model or provider_default_model(provider)
+        return llm.model_copy(update={"provider": provider, "model": model})
 
     # ===== 业务方法 =====
     def get(self) -> SettingsRead:
@@ -134,7 +141,7 @@ class SettingsService:
             logger.warning(f"Invalid settings.yaml, using defaults: {e}")
             llm, ui, security = LLMConfig(), UIConfig(), SecurityConfig()
         return SettingsRead(
-            llm=llm,
+            llm=self._fill_llm_defaults(llm),
             ui=ui,
             security=security,
             api_key_configured=self._key_status_all(),
@@ -146,7 +153,7 @@ class SettingsService:
         self._validate(data)
         raw = self._read_yaml()
         if data.llm is not None:
-            raw["llm"] = {**data.llm.model_dump()}
+            raw["llm"] = {**self._fill_llm_defaults(data.llm).model_dump()}
         if data.ui is not None:
             raw["ui"] = {**data.ui.model_dump()}
         if data.security is not None:

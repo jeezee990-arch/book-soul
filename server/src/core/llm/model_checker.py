@@ -48,16 +48,22 @@ def check_model_capability(
 ) -> ModelCheckResult:
     """检查指定 provider/model 是否支持章节生成。
 
-    抛 :class:`KeyError` 如果 provider 或 model 不在 llm.yaml 中。
+    模型没在 ``llm.yaml`` 登记规格时**不抛错** —— 用户可以自己填服务端
+    新出的模型名（项目要求"能自行更换模型"）。这时按 provider 级
+    ``default_context_window`` / ``default_max_output_tokens`` 估算能力，
+    并给一条 info 级别的提示。
+
+    :raises KeyError: provider 不存在时
     """
     pc = get_provider_config(provider)
     specs = pc.get("model_specs") or {}
-    if model not in specs:
-        raise KeyError(f"Model {model!r} not found in provider {provider!r}")
+    spec = specs.get(model)
+    known = isinstance(spec, dict)
+    if not known:
+        spec = {}
 
-    spec = specs[model] or {}
-    context_window = int(spec.get("context_window", 0))
-    max_output = int(spec.get("max_output_tokens", 0))
+    context_window = int(spec.get("context_window", pc.get("default_context_window", 0)) or 0)
+    max_output = int(spec.get("max_output_tokens", pc.get("default_max_output_tokens", 0)) or 0)
     quality_tier = str(spec.get("quality_tier", "unknown"))
 
     min_chars, max_chars, min_context = _get_chapter_limits()
@@ -65,6 +71,17 @@ def check_model_capability(
     max_chars_tokens = max_chars * 2
 
     warnings: list[ModelWarning] = []
+
+    if not known:
+        warnings.append(
+            ModelWarning(
+                level="info",
+                message=(
+                    f"模型 {model} 未在 config/llm.yaml 登记规格，"
+                    f"能力按 provider 默认值估算（上下文 {context_window} tokens）"
+                ),
+            )
+        )
 
     if context_window <= 0:
         warnings.append(

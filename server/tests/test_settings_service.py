@@ -52,10 +52,12 @@ def svc(fake_keyring: FakeKeyring, settings_file) -> SettingsService:
 
 
 def test_get_default_no_yaml(svc: SettingsService) -> None:
-    """无 yaml 时返默认。"""
+    """无 yaml 时返默认（provider / model 来自 config/llm.yaml，不硬编码）。"""
+    from src.core.llm.factory import get_default_provider, provider_default_model
+
     s = svc.get()
-    assert s.llm.provider == "mimo"
-    assert s.llm.model == "mimo-v2.5-pro"
+    assert s.llm.provider == get_default_provider()
+    assert s.llm.model == provider_default_model(get_default_provider())
     assert s.ui.theme == "dark"
     assert s.security.encryption_enabled is False
     # 没有 key 时全部 False
@@ -65,6 +67,24 @@ def test_get_default_no_yaml(svc: SettingsService) -> None:
         "openai": False,
         "ollama": False,
     }
+
+
+def test_get_default_model_is_not_stale(svc: SettingsService) -> None:
+    """默认模型必须是服务端还支持的（mimo-v2.5-pro 已下线，别再写死）。"""
+    from src.core.llm.factory import get_configured_models
+
+    s = svc.get()
+    assert s.llm.model != "mimo-v2.5-pro"
+    assert s.llm.model in get_configured_models(s.llm.provider)
+
+
+def test_update_empty_model_fills_provider_default(svc: SettingsService) -> None:
+    """只改 provider、不填 model → 用该 provider 的默认模型补齐。"""
+    from src.core.llm.factory import provider_default_model
+
+    s = svc.update(SettingsUpdate(llm=LLMConfig(provider="minimax", model="")))
+    assert s.llm.provider == "minimax"
+    assert s.llm.model == provider_default_model("minimax")
 
 
 def test_get_reads_yaml(svc: SettingsService, settings_file) -> None:

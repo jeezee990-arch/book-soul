@@ -19,18 +19,28 @@ UI_THEMES = ("dark", "light")
 
 
 class LLMConfig(BaseModel):
-    """LLM 配置。"""
+    """LLM 配置。
+
+    ``provider`` / ``model`` 留空表示"用 ``config/llm.yaml`` 里的默认值"，
+    由 :meth:`src.services.settings_service.SettingsService.get` 补齐。
+    这里**不硬编码任何模型名** —— 模型名会随服务端升级下线，
+    写死过一次（mimo-v2.5-pro）就直接 400 了。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(
-        default="mimo",
-        description=f"LLM provider，取值之一：{', '.join(LLM_PROVIDERS)}",
+        default="",
+        max_length=50,
+        description=(
+            f"LLM provider，取值之一：{', '.join(LLM_PROVIDERS)}；"
+            "留空表示用 config/llm.yaml 的 default_provider"
+        ),
     )
     model: str = Field(
-        default="mimo-v2.5-pro",
+        default="",
         max_length=100,
-        description="当前 provider 的模型名",
+        description="当前 provider 的模型名；留空表示用该 provider 的 default_model",
     )
 
 

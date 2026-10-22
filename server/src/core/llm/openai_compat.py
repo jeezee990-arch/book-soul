@@ -54,6 +54,30 @@ DEFAULT_STREAM_TOTAL_TIMEOUT = 600.0
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_CONNECT_TIMEOUT = 10.0
 
+# 上游"模型名不认识"的各种说法（命中任意一个就当成模型不存在）
+_UNKNOWN_MODEL_MARKERS = (
+    "unsupported model",
+    "unknown model",
+    "model_not_found",
+    "model not found",
+    "no such model",
+    "does not exist",
+    "invalid model",
+    "model is not supported",
+)
+
+
+def _looks_like_unknown_model(msg: str) -> bool:
+    """判断报错文案是不是"模型名不对"。
+
+    上游对同一个问题有多种措辞（Unsupported model / model_not_found /
+    does not exist ...），统一识别，避免用户只看到一句干巴巴的 400。
+    """
+    low = msg.lower()
+    if "model" not in low:
+        return False
+    return any(marker in low for marker in _UNKNOWN_MODEL_MARKERS)
+
 
 class OpenAICompatClient:
     """OpenAI 兼容协议客户端。"""
@@ -93,6 +117,8 @@ class OpenAICompatClient:
 
         # 模型规格表（max_output_tokens 等）—— 用于自动补 max_tokens
         self._model_specs: dict[str, Any] = config.get("model_specs") or {}
+        # provider 级兜底：模型没登记规格时用它（用户自填的新模型名）
+        self._default_max_output_tokens: Any = config.get("default_max_output_tokens")
 
         if not self._api_key:
             raise AuthError(
@@ -135,11 +161,17 @@ class OpenAICompatClient:
         完全依赖上游 API 的默认值（常见 1024 / 2048），长章节会被静默截断。
 
         显式传入的 max_tokens 优先，本函数只做兜底。
+
+        模型没登记规格时用 provider 级 ``default_max_output_tokens``——
+        用户自己填了个新模型名，也得有明确的输出上限（推理模型的
+        reasoning token 也要算在这个额度里，给太小会正文为空）。
         """
         spec = self._model_specs.get(model_name)
-        if not isinstance(spec, dict):
-            return None
-        value = spec.get("max_output_tokens")
+        value = None
+        if isinstance(spec, dict):
+            value = spec.get("max_output_tokens")
+        if value is None:
+            value = self._default_max_output_tokens
         try:
             n = int(value)
         except (TypeError, ValueError):
@@ -200,7 +232,7 @@ class OpenAICompatClient:
                 resp = await self._client.post(url, json=payload)
             except httpx.ConnectError as e:
                 raise ProviderUnavailableError(self._unavailable_hint(e)) from e
-            self._raise_for_status(resp)
+            self._raise_for_status(resp, payload.get("model"))
             data = resp.json()
             return self._parse_response(data)
 
@@ -268,7 +300,7 @@ class OpenAICompatClient:
                     if resp.status_code >= 400:
                         # 错误分支：必须先把 body 读完才能拿到错误文本
                         await resp.aread()
-                        self._raise_for_status(resp)
+                        self._raise_for_status(resp, payload.get("model"))
                     async for chunk in iter_sse_chunks(resp):
                         text = extract_delta_text(chunk)
                         if text:
@@ -288,7 +320,11 @@ class OpenAICompatClient:
 
     # ===================== 错误映射 =====================
 
-    def _raise_for_status(self, resp: httpx.Response) -> None:
+    def _raise_for_status(self, resp: httpx.Response, model: str | None = None) -> None:
+        """把 HTTP 错误映射成对应异常。
+
+        :param model: 本次请求用的模型名（用于生成可操作的报错文案）
+        """
         if resp.status_code < 400:
             return
         try:
@@ -313,4 +349,13 @@ class OpenAICompatClient:
             raise RateLimitError(f"Rate limited: {msg}")
         if resp.status_code == 413 or "context_length" in msg.lower():
             raise ContextOverflowError(f"Context overflow: {msg}")
+        # 模型名不对时上游多返回 400（不是 404），文案五花八门：
+        #   "Unsupported model xxx" / "model_not_found" / "does not exist" ...
+        # 统一识别成 ModelNotFoundError，并给出"去设置页换模型"的可操作提示。
+        if _looks_like_unknown_model(msg):
+            raise ModelNotFoundError(
+                f"模型 {model or '(未知)'} 在 provider '{self._provider_name}' 下不可用：{msg}\n"
+                f"  提示：服务端已经下线了这个模型名。请到「设置 → LLM Provider」"
+                f"刷新模型列表，重新选一个再生成。"
+            )
         raise LLMError(f"LLM HTTP {msg}")

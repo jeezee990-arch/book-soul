@@ -18,6 +18,37 @@ def _isolate_env(monkeypatch, tmp_path):
     yield
 
 
+@pytest.fixture
+def user_settings(monkeypatch):
+    """伪造"用户在设置页选了 provider/model"。"""
+
+    def _set(provider: str = "", model: str = "") -> None:
+        from src.core.llm import factory as factory_mod
+
+        monkeypatch.setattr(
+            factory_mod,
+            "get_user_llm_prefs",
+            lambda: (provider, model),
+            raising=True,
+        )
+
+    return _set
+
+
+def _pin_routing(monkeypatch, scene: str, provider: str) -> None:
+    """临时把某个场景的 routing 钉到指定 provider（不改 llm.yaml）。"""
+    from src.core.llm import factory as factory_mod
+
+    original = factory_mod.load_llm_config
+
+    def patched():
+        cfg = dict(original())
+        cfg["routing"] = {**cfg.get("routing", {}), scene: provider}
+        return cfg
+
+    monkeypatch.setattr(factory_mod, "load_llm_config", patched)
+
+
 def test_load_llm_config_has_providers():
     """llm.yaml 应至少包含 mimo / minimax / openai / ollama 四个 provider。"""
     from src.core.llm.factory import load_llm_config
@@ -77,11 +108,51 @@ def test_resolve_provider_for_scene_plot():
     assert resolve_provider_for_scene("plot_generation") == "mimo"
 
 
-def test_resolve_provider_for_scene_quality_check():
-    """routing.quality_check 应映射到 ollama（本地，不依赖网络）。"""
+def test_resolve_provider_for_scene_follows_settings_by_default():
+    """routing 写 ``@settings`` 时跟随设置页的选择（2026-10-22 改）。
+
+    这是"设置页选了 minimax 却还在用 mimo"那个 bug 的根因：
+    原先把 routing 全部写死成 mimo，设置页形同虚设。
+    """
     from src.core.llm.factory import resolve_provider_for_scene
 
+    assert resolve_provider_for_scene("chapter_generation") == "mimo"
+
+
+def test_resolve_provider_for_scene_uses_user_choice(user_settings):
+    """用户在设置页选了 minimax → 创作场景真的走 minimax。"""
+    from src.core.llm.factory import resolve_provider_for_scene
+
+    user_settings("minimax", "MiniMax-M3")
+    assert resolve_provider_for_scene("chapter_generation") == "minimax"
+    assert resolve_provider_for_scene("plot_generation") == "minimax"
+    assert resolve_provider_for_scene("quality_check") == "minimax"
+
+
+def test_resolve_provider_for_scene_pinned_provider_wins(user_settings, monkeypatch):
+    """routing 写死具体 provider 时，以它为准（不跟设置页）。"""
+    from src.core.llm.factory import resolve_provider_for_scene
+
+    user_settings("minimax", "MiniMax-M3")
+    _pin_routing(monkeypatch, "quality_check", "ollama")
     assert resolve_provider_for_scene("quality_check") == "ollama"
+
+
+def test_resolve_model_for_scene_uses_user_model(user_settings):
+    """场景 provider == 用户选的 provider → 用用户选的模型。"""
+    from src.core.llm.factory import resolve_model_for_scene
+
+    user_settings("minimax", "MiniMax-M3.1-Flash")
+    assert resolve_model_for_scene("chapter_generation") == "MiniMax-M3.1-Flash"
+
+
+def test_resolve_model_for_scene_falls_back_to_provider_default(user_settings, monkeypatch):
+    """场景被钉到别的 provider → 用那个 provider 的 default_model。"""
+    from src.core.llm.factory import resolve_model_for_scene
+
+    user_settings("minimax", "MiniMax-M3")
+    _pin_routing(monkeypatch, "quality_check", "ollama")
+    assert resolve_model_for_scene("quality_check") == "qwen2.5:14b"
 
 
 def test_resolve_provider_for_scene_unknown_falls_back():
@@ -115,8 +186,8 @@ def test_create_llm_client_for_scene_uses_routing():
     from src.core.llm.factory import create_llm_client_for_scene
 
     client = create_llm_client_for_scene("quality_check")
-    # quality_check 路由到 ollama
-    assert client.provider == "ollama"
+    # quality_check 默认跟随设置页 → 没设置时是 default_provider（mimo）
+    assert client.provider == "mimo"
 
 
 def test_get_provider_config_unknown_raises():

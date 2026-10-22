@@ -3,6 +3,8 @@
 - ``temp_db``：把数据目录切到 tmp_path，强制重建 src.* 模块（让 engine 用新路径）。
   Phase 0 的 test_db_init.py 也使用这个 fixture（从 inline 升级而来）。
 - ``db_initialized``：基于 temp_db，调 init_db 建表（Phase 1 起 service 测试用）。
+- ``isolate_user_settings``：把"用户运行时设置"（设置页里选的 provider/model）
+  隔离到临时目录 —— 否则 LLM 工厂会读到开发者自己的设置，断言随用户选择漂移。
 """
 
 from __future__ import annotations
@@ -13,6 +15,12 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+
+
+@pytest.fixture(autouse=True)
+def isolate_user_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """把用户运行时设置隔离到 tmp_path（不读开发者真实设置文件）。"""
+    monkeypatch.setenv("BOOK_SOUL_DATA_DIR", str(tmp_path / "isolated-data"))
 
 
 @pytest.fixture
