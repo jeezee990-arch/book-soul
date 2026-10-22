@@ -77,6 +77,21 @@ Write-Host ""
 Write-Host "[2/2] Collecting artifacts..." -ForegroundColor Cyan
 
 # 清掉旧产物，避免残留上一版的文件
+# ⚠️ 先检查有没有人正在用这个目录 —— 应用运行时 exe 和日志文件都被锁着，
+#    删不掉（而且半删的目录比不删更糟）。直接给出明确提示。
+$running = @()
+Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.Path -and $_.Path.StartsWith($distDir, [StringComparison]::OrdinalIgnoreCase)) {
+        $running += $_
+    }
+}
+if ($running.Count -gt 0) {
+    Write-Host ""
+    Write-Host "[X] Book Soul 正在运行，无法重建 dist 目录：" -ForegroundColor Red
+    $running | ForEach-Object { Write-Host "      PID $($_.Id)  $($_.ProcessName)" -ForegroundColor Red }
+    Write-Host "    请先关闭 Book Soul 窗口再重新执行本脚本。" -ForegroundColor Yellow
+    exit 1
+}
 if (Test-Path -LiteralPath $distDir) {
     Remove-Item -LiteralPath $distDir -Recurse -Force
 }

@@ -304,9 +304,29 @@ pub fn start_backend(app: &tauri::AppHandle, data_dir: &Path) -> BackendStart {
 }
 
 /// 终止后端子进程（幂等）。
+///
+/// Windows 上必须**杀整个进程树**：sidecar 是 PyInstaller onefile，
+/// 运行时是「引导进程 → Python 子进程」两层。`Child::kill()` 只杀得掉引导进程，
+/// Python 子进程会变成孤儿（继续占端口 + 锁 SQLite 文件）。
+///
+/// 另有第二层保障：Python 侧的父进程看门狗（`core/watchdog.py`）会在
+/// 桌面端消失时自行退出。两层机制互不依赖，任何一层单独失效都不会留孤儿。
 pub fn kill_backend(slot: &mut Option<Child>) {
     if let Some(mut child) = slot.take() {
-        logging::info(&format!("正在结束后端进程（pid={:?}）", child.id()));
+        let pid = child.id();
+        logging::info(&format!("正在结束后端进程（pid={pid}）"));
+
+        // 杀进程树（Windows 专用；taskkill /T 会连带干掉子孙进程）
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+
+        // 兜底：直接 kill 引导进程
         let _ = child.kill();
         let _ = child.wait();
     }
