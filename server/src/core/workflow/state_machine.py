@@ -33,14 +33,10 @@ class StateMachine:
 
     def __init__(self, *, initial: str | None = None, **initial_context: object) -> None:
         if not self.STATES:
-            raise TypeError(
-                f"{type(self).__name__} must declare STATES before instantiation"
-            )
+            raise TypeError(f"{type(self).__name__} must declare STATES before instantiation")
         start = initial or self.STATES[0]
         if start not in self.STATES:
-            raise ValueError(
-                f"initial state {start!r} not in STATES {self.STATES}"
-            )
+            raise ValueError(f"initial state {start!r} not in STATES {self.STATES}")
         self.current_state: str = start
         self.context: dict[str, object] = dict(initial_context)
 
@@ -64,9 +60,7 @@ class StateMachine:
         :raises InvalidTransitionError: 当前状态不允许转移到 to
         """
         if to not in self.STATES:
-            raise ValueError(
-                f"Unknown target state {to!r}; valid: {self.STATES}"
-            )
+            raise ValueError(f"Unknown target state {to!r}; valid: {self.STATES}")
         if to not in self.allowed_next():
             raise InvalidTransitionError(
                 f"Invalid transition: {self.current_state} -> {to}; "

@@ -52,7 +52,13 @@ def test_load_chapter_generation_prompt() -> None:
 def test_load_chapter_rewrite_prompt() -> None:
     p = load_chapter_rewrite_prompt()
     assert isinstance(p, str)
-    for ph in ("{genre}", "{all_characters}", "{chapter_outline}", "{original_text}", "{user_prompt}"):
+    for ph in (
+        "{genre}",
+        "{all_characters}",
+        "{chapter_outline}",
+        "{original_text}",
+        "{user_prompt}",
+    ):
         assert ph in p, f"missing placeholder {ph}"
 
 
@@ -193,7 +199,9 @@ async def test_get_version_tail_short_content(db_initialized: Path) -> None:
         chapter = Chapter(novel_id=novel.id, chapter_number=1, status="drafting", word_count=0)
         session.add(chapter)
         await session.flush()
-        ver = ChapterVersion(chapter_id=chapter.id, content="短", trigger="user_create", word_count=1)
+        ver = ChapterVersion(
+            chapter_id=chapter.id, content="短", trigger="user_create", word_count=1
+        )
         session.add(ver)
         await session.flush()
         chapter.current_version_id = ver.id
@@ -218,7 +226,9 @@ async def test_get_version_tail_truncates(db_initialized: Path) -> None:
         chapter = Chapter(novel_id=novel.id, chapter_number=1, status="drafting")
         session.add(chapter)
         await session.flush()
-        ver = ChapterVersion(chapter_id=chapter.id, content=content, trigger="user_create", word_count=2000)
+        ver = ChapterVersion(
+            chapter_id=chapter.id, content=content, trigger="user_create", word_count=2000
+        )
         session.add(ver)
         await session.flush()
         chapter.current_version_id = ver.id
@@ -236,8 +246,12 @@ async def test_get_previous_tail_chapter_0(db_initialized: Path) -> None:
     from src.db import SessionLocal
 
     async with SessionLocal() as session:
-        assert await get_previous_tail(session, novel_id=1, before_chapter_number=0) == "（无上一章）"
-        assert await get_previous_tail(session, novel_id=1, before_chapter_number=-5) == "（无上一章）"
+        assert (
+            await get_previous_tail(session, novel_id=1, before_chapter_number=0) == "（无上一章）"
+        )
+        assert (
+            await get_previous_tail(session, novel_id=1, before_chapter_number=-5) == "（无上一章）"
+        )
 
 
 @pytest.mark.asyncio

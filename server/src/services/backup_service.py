@@ -1,4 +1,4 @@
-﻿"""备份 / 恢复服务（Phase 7.4）。
+"""备份 / 恢复服务（Phase 7.4）。
 
 设计：
 - 备份：把 data_dir（含 db / novels/ / logs/）打包为 zip

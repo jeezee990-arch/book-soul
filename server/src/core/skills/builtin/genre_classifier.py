@@ -50,10 +50,7 @@ class GenreClassifierSkill:
         return SkillResult(
             success=True,
             data={
-                "candidates": [
-                    {"genre": g, "score": s, "matched_keywords": k}
-                    for g, s, k in top
-                ],
+                "candidates": [{"genre": g, "score": s, "matched_keywords": k} for g, s, k in top],
                 "char_count": len(text),
             },
         )

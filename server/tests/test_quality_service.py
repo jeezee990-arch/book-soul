@@ -55,8 +55,12 @@ def test_format_characters_for_quality_basic() -> None:
     from src.models.character import Character
 
     c = Character(
-        id=1, novel_id=1, name="韩立", role="主角",
-        personality="谨慎", habits="动手前先想",
+        id=1,
+        novel_id=1,
+        name="韩立",
+        role="主角",
+        personality="谨慎",
+        habits="动手前先想",
     )
     out = format_characters_for_quality([c])
     assert "韩立" in out
@@ -92,7 +96,7 @@ def test_extract_json_in_markdown() -> None:
 
 
 def test_extract_json_strip_thinking() -> None:
-    text = "<think>分析中...</think>\n```json\n{\"score\": 8.0}\n```"
+    text = '<think>分析中...</think>\n```json\n{"score": 8.0}\n```'
     obj = QualityService._extract_json(text)
     assert obj["score"] == 8.0
 
@@ -203,7 +207,10 @@ async def _make_chapter(db_initialized: Path) -> tuple[int, int]:
         await session.flush()
         ch.current_version_id = ver.id
         c = Character(
-            novel_id=novel.id, name="韩立", role="主角", personality="谨慎",
+            novel_id=novel.id,
+            name="韩立",
+            role="主角",
+            personality="谨慎",
         )
         session.add(c)
         await session.commit()

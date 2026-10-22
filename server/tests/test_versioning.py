@@ -244,7 +244,9 @@ async def test_api_get_version_diff(db_initialized: Path) -> None:
     async with SessionLocal() as session:
         tree = VersionTree(session, chapter_id=chapter_id)
         # 用多行内容，确保 unified diff 产生清晰的 + / - 行
-        v2 = await tree.save_version("第二版第一段\n第二版第二段\n第二版第三段\n", trigger="user_edit")
+        v2 = await tree.save_version(
+            "第二版第一段\n第二版第二段\n第二版第三段\n", trigger="user_edit"
+        )
 
     client = TestClient(app)
     resp = client.get(f"/chapters/{chapter_id}/versions/{v2.id}/diff")

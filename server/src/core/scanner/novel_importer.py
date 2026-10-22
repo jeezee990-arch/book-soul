@@ -1,4 +1,4 @@
-﻿"""小说目录导入（Phase 6.3）。
+"""小说目录导入（Phase 6.3）。
 
 把 :class:`DetectedNovel` 导入为 DB 里的 ``novel`` + ``chapter`` + ``chapter_version``。
 - novel.read_only = True（标记为导入，不允许直接编辑）

@@ -1,4 +1,4 @@
-﻿"""本地扫描器测试（Phase 6.3）。
+"""本地扫描器测试（Phase 6.3）。
 
 覆盖：
 - novel_detector.is_novel_dir / extract_metadata
@@ -49,7 +49,7 @@ def test_is_novel_dir_chinese_chapter(tmp_path: Path) -> None:
     for i in range(3):
         path = tmp_path / f"ch{i:02d}.md"
         path.write_text(
-            f"# 第一卷\n\n第{i+1}章 开篇\n\n某主角开始冒险。",
+            f"# 第一卷\n\n第{i + 1}章 开篇\n\n某主角开始冒险。",
             encoding="utf-8",
         )
     assert is_novel_dir(str(tmp_path))
@@ -60,7 +60,7 @@ def test_is_novel_dir_english_chapter(tmp_path: Path) -> None:
 
     for i in range(3):
         (tmp_path / f"ch{i:02d}.md").write_text(
-            f"# Volume 1\n\nChapter {i+1}\n\nSome text.",
+            f"# Volume 1\n\nChapter {i + 1}\n\nSome text.",
             encoding="utf-8",
         )
     assert is_novel_dir(str(tmp_path))
@@ -107,12 +107,12 @@ def test_scan_directory_finds_nested(tmp_path: Path) -> None:
     novel_a = tmp_path / "novel_a"
     novel_a.mkdir()
     for i in range(3):
-        (novel_a / f"ch{i}.md").write_text(f"第{i+1}章 开篇\n\n正文", encoding="utf-8")
+        (novel_a / f"ch{i}.md").write_text(f"第{i + 1}章 开篇\n\n正文", encoding="utf-8")
 
     novel_b = tmp_path / "subdir" / "novel_b"
     novel_b.mkdir(parents=True)
     for i in range(3):
-        (novel_b / f"ch{i}.md").write_text(f"第{i+1}章\n\n正文", encoding="utf-8")
+        (novel_b / f"ch{i}.md").write_text(f"第{i + 1}章\n\n正文", encoding="utf-8")
 
     # 中间目录
     (tmp_path / "subdir").mkdir(exist_ok=True)
@@ -129,7 +129,7 @@ def test_scan_directory_skips_hidden(tmp_path: Path) -> None:
     hidden = tmp_path / ".hidden_novel"
     hidden.mkdir()
     for i in range(3):
-        (hidden / f"ch{i}.md").write_text(f"第{i+1}章\n\n正文", encoding="utf-8")
+        (hidden / f"ch{i}.md").write_text(f"第{i + 1}章\n\n正文", encoding="utf-8")
     result = scan_directory(str(tmp_path))
     assert all(".hidden" not in r.dir_path for r in result)
 
@@ -140,7 +140,7 @@ def test_scan_directory_max_depth(tmp_path: Path) -> None:
     deep = tmp_path / "a" / "b" / "c" / "novel"
     deep.mkdir(parents=True)
     for i in range(3):
-        (deep / f"ch{i}.md").write_text(f"第{i+1}章\n\n正文", encoding="utf-8")
+        (deep / f"ch{i}.md").write_text(f"第{i + 1}章\n\n正文", encoding="utf-8")
 
     # max_depth=2 找不到
     assert scan_directory(str(tmp_path), max_depth=2) == []
@@ -159,7 +159,7 @@ async def test_import_detected_novel(db_initialized: Path, tmp_path: Path) -> No
     from src.db import SessionLocal
 
     for i in range(3):
-        (tmp_path / f"ch{i}.md").write_text(f"第{i+1}章\n\n正文内容 {i}", encoding="utf-8")
+        (tmp_path / f"ch{i}.md").write_text(f"第{i + 1}章\n\n正文内容 {i}", encoding="utf-8")
 
     detected = extract_metadata(str(tmp_path))
     async with SessionLocal() as session:
@@ -223,7 +223,7 @@ async def test_api_scan_finds_novel(tmp_path: Path) -> None:
     from src.main import app
 
     for i in range(3):
-        (tmp_path / f"ch{i}.md").write_text(f"第{i+1}章\n\n正文", encoding="utf-8")
+        (tmp_path / f"ch{i}.md").write_text(f"第{i + 1}章\n\n正文", encoding="utf-8")
     client = TestClient(app)
     resp = client.post("/scanner/scan", json={"path": str(tmp_path)})
     assert resp.status_code == 200
@@ -250,11 +250,9 @@ async def test_api_import_novel(db_initialized: Path, tmp_path: Path) -> None:
     from src.main import app
 
     for i in range(3):
-        (tmp_path / f"ch{i}.md").write_text(f"第{i+1}章\n\n正文", encoding="utf-8")
+        (tmp_path / f"ch{i}.md").write_text(f"第{i + 1}章\n\n正文", encoding="utf-8")
     client = TestClient(app)
-    resp = client.post(
-        "/scanner/import", json={"dir_path": str(tmp_path), "genre": "xiuxian"}
-    )
+    resp = client.post("/scanner/import", json={"dir_path": str(tmp_path), "genre": "xiuxian"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["chapter_count"] == 3
@@ -279,7 +277,5 @@ async def test_api_import_invalid_path() -> None:
     from src.main import app
 
     client = TestClient(app)
-    resp = client.post(
-        "/scanner/import", json={"dir_path": "/nonexistent/dir/abc"}
-    )
+    resp = client.post("/scanner/import", json={"dir_path": "/nonexistent/dir/abc"})
     assert resp.status_code == 422

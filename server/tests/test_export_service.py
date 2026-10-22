@@ -85,7 +85,9 @@ async def _create_character(
     role: str = "主角",
     is_active: bool = True,
 ) -> int:
-    svc = __import__("src.services.character_service", fromlist=["CharacterService"]).CharacterService(session)
+    svc = __import__(
+        "src.services.character_service", fromlist=["CharacterService"]
+    ).CharacterService(session)
     c = await svc.create(
         CharacterCreate(
             novel_id=novel_id,
@@ -248,9 +250,10 @@ async def test_export_status_translated(db_initialized: Path) -> None:
     # 改 status
     async with SessionLocal() as session:
         svc = NovelService(session)
-        await svc.update(nid, __import__(
-            "src.schemas.novel", fromlist=["NovelUpdate"]
-        ).NovelUpdate(status="writing"))
+        await svc.update(
+            nid,
+            __import__("src.schemas.novel", fromlist=["NovelUpdate"]).NovelUpdate(status="writing"),
+        )
 
     async with SessionLocal() as session:
         md = await NovelExportService(session).export_markdown(nid)

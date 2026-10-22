@@ -11,15 +11,32 @@ from ..base import SkillResult
 # v1 内置词表（最小集）
 DEFAULT_SENSITIVE_WORDS: tuple[str, ...] = (
     # 色情
-    "色情", "裸聊", "约炮", "一夜情", "卖淫", "嫖娼",
+    "色情",
+    "裸聊",
+    "约炮",
+    "一夜情",
+    "卖淫",
+    "嫖娼",
     # 赌博
-    "赌博", "赌场", "百家乐", "澳门威尼斯", "网赌",
+    "赌博",
+    "赌场",
+    "百家乐",
+    "澳门威尼斯",
+    "网赌",
     # 毒品
-    "毒品", "海洛因", "冰毒", "大麻", "可卡因",
+    "毒品",
+    "海洛因",
+    "冰毒",
+    "大麻",
+    "可卡因",
     # 暴力
-    "炸弹制作", "制毒方法", "自杀方法",
+    "炸弹制作",
+    "制毒方法",
+    "自杀方法",
     # 政治（示例）
-    "法轮功", "台独", "港独",
+    "法轮功",
+    "台独",
+    "港独",
 )
 
 
@@ -40,9 +57,7 @@ class SensitiveWordSkill:
     }
     requires_llm = False
 
-    async def execute(
-        self, text: str, words: list[str] | None = None
-    ) -> SkillResult:
+    async def execute(self, text: str, words: list[str] | None = None) -> SkillResult:
         if not isinstance(text, str):
             return SkillResult(success=False, error="text must be a string")
         word_list = tuple(words) if words else DEFAULT_SENSITIVE_WORDS

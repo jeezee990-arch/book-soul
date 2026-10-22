@@ -111,9 +111,7 @@ async def test_api_export_md(db_initialized: Path) -> None:
     from src.services.novel_service import NovelService
 
     async with SessionLocal() as session:
-        novel = await NovelService(session).create(
-            NovelCreate(name="测试", genre="xuanhuan")
-        )
+        novel = await NovelService(session).create(NovelCreate(name="测试", genre="xuanhuan"))
         novel_id = novel.id
 
     client = TestClient(app)
@@ -135,9 +133,7 @@ async def test_api_export_html(db_initialized: Path) -> None:
     from src.services.novel_service import NovelService
 
     async with SessionLocal() as session:
-        novel = await NovelService(session).create(
-            NovelCreate(name="测试", genre="xuanhuan")
-        )
+        novel = await NovelService(session).create(NovelCreate(name="测试", genre="xuanhuan"))
         novel_id = novel.id
 
     client = TestClient(app)
@@ -163,9 +159,7 @@ async def test_api_export_docx_returns_docx_bytes(db_initialized: Path) -> None:
     from src.services.novel_service import NovelService
 
     async with SessionLocal() as session:
-        novel = await NovelService(session).create(
-            NovelCreate(name="测试 docx", genre="xuanhuan")
-        )
+        novel = await NovelService(session).create(NovelCreate(name="测试 docx", genre="xuanhuan"))
         novel_id = novel.id
 
     client = TestClient(app)

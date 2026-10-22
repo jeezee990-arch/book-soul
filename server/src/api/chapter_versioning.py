@@ -66,7 +66,9 @@ async def get_version_diff(
     else:
         version = await session.get(ChapterVersion, version_id)
         if version is None or version.chapter_id != chapter_id:
-            raise HTTPException(status_code=404, detail=f"Version {version_id} not in chapter {chapter_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Version {version_id} not in chapter {chapter_id}"
+            )
         diff = await tree.diff_with_parent(version_id)
         from_id = version.parent_version_id
     return DiffResponse(

@@ -240,7 +240,7 @@ def test_extract_json_array_simple() -> None:
 def test_extract_json_array_with_think_block() -> None:
     from src.core.llm.formatting import extract_json_array
 
-    text = "<think>\nthinking...\n</think>\n[{\"x\": 1}]"
+    text = '<think>\nthinking...\n</think>\n[{"x": 1}]'
     arr = extract_json_array(text)
     assert arr == [{"x": 1}]
 
@@ -315,9 +315,7 @@ async def test_generate_from_outline_creates_characters(
         assert len(rows) == 3
         for c in rows:
             assert c.current_version_id is not None
-            vstmt = select(CharacterVersion).where(
-                CharacterVersion.character_id == c.id
-            )
+            vstmt = select(CharacterVersion).where(CharacterVersion.character_id == c.id)
             versions = (await session.execute(vstmt)).scalars().all()
             assert len(versions) == 1
             assert versions[0].change_reason == "initial"
@@ -433,9 +431,7 @@ async def test_generate_from_outline_llm_error(
     async with _session() as session:
         gen = CharacterGenerator(session, llm_client=mock)
         with pytest.raises(CharacterGenerationError) as exc_info:
-            await gen.generate_from_outline(
-                novel_id=novel_id, outline={"volumes": []}, genre="x"
-            )
+            await gen.generate_from_outline(novel_id=novel_id, outline={"volumes": []}, genre="x")
     assert "network down" in str(exc_info.value) or "RuntimeError" in str(exc_info.value)
 
 
@@ -456,9 +452,7 @@ async def test_generate_from_outline_empty_response(
     async with _session() as session:
         gen = CharacterGenerator(session, llm_client=mock)
         with pytest.raises(CharacterGenerationError):
-            await gen.generate_from_outline(
-                novel_id=novel_id, outline={"volumes": []}, genre="x"
-            )
+            await gen.generate_from_outline(novel_id=novel_id, outline={"volumes": []}, genre="x")
 
 
 @pytest.mark.asyncio
@@ -478,9 +472,7 @@ async def test_generate_from_outline_invalid_json(
     async with _session() as session:
         gen = CharacterGenerator(session, llm_client=mock)
         with pytest.raises(CharacterGenerationError):
-            await gen.generate_from_outline(
-                novel_id=novel_id, outline={"volumes": []}, genre="x"
-            )
+            await gen.generate_from_outline(novel_id=novel_id, outline={"volumes": []}, genre="x")
 
 
 @pytest.mark.asyncio
@@ -504,9 +496,7 @@ async def test_generate_from_outline_invalid_yaml(
     async with _session() as session:
         gen = CharacterGenerator(session, llm_client=mock)
         with pytest.raises(CharacterGenerationError):
-            await gen.generate_from_outline(
-                novel_id=novel_id, outline={"volumes": []}, genre="x"
-            )
+            await gen.generate_from_outline(novel_id=novel_id, outline={"volumes": []}, genre="x")
 
 
 @pytest.mark.asyncio
@@ -527,9 +517,7 @@ async def test_generate_from_outline_genre_default(
     async with _session() as session:
         gen = CharacterGenerator(session, llm_client=mock)
         # 不传 genre → 默认 "通用"
-        result = await gen.generate_from_outline(
-            novel_id=novel_id, outline={"volumes": []}
-        )
+        result = await gen.generate_from_outline(novel_id=novel_id, outline={"volumes": []})
     assert result["characters"] == []
 
 

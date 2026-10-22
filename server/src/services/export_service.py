@@ -205,11 +205,7 @@ class NovelExportService:
 
     @staticmethod
     def _escape_html(text: str) -> str:
-        return (
-            text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     @classmethod
     def _markdown_to_html(cls, md: str) -> str:

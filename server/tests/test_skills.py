@@ -41,7 +41,11 @@ def test_registry_register_and_get() -> None:
     class FakeSkill:
         name = "fake"
         description = "fake skill"
-        input_schema = {"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]}
+        input_schema = {
+            "type": "object",
+            "properties": {"x": {"type": "integer"}},
+            "required": ["x"],
+        }
         requires_llm = False
 
         async def execute(self, x: int) -> SkillResult:  # type: ignore[override]
@@ -71,7 +75,11 @@ async def test_registry_run_success() -> None:
     class FakeSkill:
         name = "fake"
         description = ""
-        input_schema = {"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]}
+        input_schema = {
+            "type": "object",
+            "properties": {"x": {"type": "integer"}},
+            "required": ["x"],
+        }
         requires_llm = False
 
         async def execute(self, x: int) -> SkillResult:

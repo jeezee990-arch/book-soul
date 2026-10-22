@@ -80,7 +80,9 @@ class VersionTree:
             parent = await self.session.get(ChapterVersion, parent_id)
             if parent is not None and parent.chapter_id == self.chapter_id:
                 parent_content = parent.content
-        diff = compute_unified_diff(parent_content, content, fromfile=f"v{parent_id or 0}", tofile="new")
+        diff = compute_unified_diff(
+            parent_content, content, fromfile=f"v{parent_id or 0}", tofile="new"
+        )
 
         payload = ChapterContentUpdate(
             content=content,
@@ -126,7 +128,9 @@ class VersionTree:
             raise VersionNotFoundError(old_id)
         if new is None or new.chapter_id != self.chapter_id:
             raise VersionNotFoundError(new_id)
-        return compute_unified_diff(old.content, new.content, fromfile=f"v{old.id}", tofile=f"v{new.id}")
+        return compute_unified_diff(
+            old.content, new.content, fromfile=f"v{old.id}", tofile=f"v{new.id}"
+        )
 
     async def rollback(self, version_id: int) -> ChapterVersion:
         """软回滚：把目标版本内容设为当前内容，生成新版本（parent=当前最新）。
@@ -144,7 +148,9 @@ class VersionTree:
         latest_id = chapter.current_version_id
 
         if latest_id == version_id:
-            logger.info("rollback noop: target == current (chapter={}, v={})", self.chapter_id, version_id)
+            logger.info(
+                "rollback noop: target == current (chapter={}, v={})", self.chapter_id, version_id
+            )
             return target
 
         rollback_meta = {

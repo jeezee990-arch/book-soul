@@ -30,8 +30,7 @@ class Skill(Protocol):
     input_schema: dict[str, Any]
     requires_llm: bool
 
-    async def execute(self, **kwargs: Any) -> SkillResult:
-        ...
+    async def execute(self, **kwargs: Any) -> SkillResult: ...
 
 
 __all__ = ["Skill", "SkillResult"]

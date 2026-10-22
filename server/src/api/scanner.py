@@ -1,4 +1,4 @@
-﻿"""本地扫描 REST 端点（Phase 6.3）。
+"""本地扫描 REST 端点（Phase 6.3）。
 
 端点：
 - POST /scanner/scan   body: {"path": "D:/novels"} → 返回 DetectedNovel 列表

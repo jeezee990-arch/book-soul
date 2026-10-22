@@ -14,6 +14,7 @@ def test_web_search_no_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SERPAPI_KEY", raising=False)
 
     import asyncio
+
     result = asyncio.run(run_skill("web_search", query="test"))
     assert result.success is False
     assert "SERPAPI_KEY" in (result.error or "")
@@ -58,8 +59,18 @@ async def test_web_search_with_api_key_success(monkeypatch: pytest.MonkeyPatch) 
     fake_resp.status_code = 200
     fake_resp.json.return_value = {
         "organic_results": [
-            {"title": "Result 1", "link": "https://example.com/1", "snippet": "snip 1", "position": 1},
-            {"title": "Result 2", "link": "https://example.com/2", "snippet": "snip 2", "position": 2},
+            {
+                "title": "Result 1",
+                "link": "https://example.com/1",
+                "snippet": "snip 1",
+                "position": 1,
+            },
+            {
+                "title": "Result 2",
+                "link": "https://example.com/2",
+                "snippet": "snip 2",
+                "position": 2,
+            },
         ]
     }
     fake_client = _build_fake_client(httpx_response=fake_resp)

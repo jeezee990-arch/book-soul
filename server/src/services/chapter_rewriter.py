@@ -111,10 +111,7 @@ class ChapterRewriter:
         from sqlalchemy import select
 
         stmt = (
-            select(Outline)
-            .where(Outline.novel_id == novel_id)
-            .order_by(Outline.id.asc())
-            .limit(1)
+            select(Outline).where(Outline.novel_id == novel_id).order_by(Outline.id.asc()).limit(1)
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()

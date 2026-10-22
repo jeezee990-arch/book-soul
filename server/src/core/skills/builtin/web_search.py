@@ -39,9 +39,7 @@ class WebSearchSkill:
     }
     requires_llm = False
 
-    async def execute(
-        self, query: str, limit: int = 5, engine: str = "google"
-    ) -> SkillResult:
+    async def execute(self, query: str, limit: int = 5, engine: str = "google") -> SkillResult:
         if not isinstance(query, str) or not query.strip():
             return SkillResult(success=False, error="query is required")
 

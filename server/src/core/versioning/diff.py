@@ -63,8 +63,12 @@ def diff_stats(diff_text: str) -> dict[str, int]:
     removed = sum(1 for line in lines if line.startswith("-") and not line.startswith("---"))
     if added == 0 and removed == 0 and len(lines) >= 2:
         # 长行合并的回退：用字符级差
-        old_chars = sum(len(line) for line in lines if line.startswith("-") and not line.startswith("---"))
-        new_chars = sum(len(line) for line in lines if line.startswith("+") and not line.startswith("+++"))
+        old_chars = sum(
+            len(line) for line in lines if line.startswith("-") and not line.startswith("---")
+        )
+        new_chars = sum(
+            len(line) for line in lines if line.startswith("+") and not line.startswith("+++")
+        )
         return {"added": new_chars, "removed": old_chars}
     return {"added": added, "removed": removed}
 

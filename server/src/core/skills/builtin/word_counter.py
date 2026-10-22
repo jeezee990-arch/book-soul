@@ -43,7 +43,11 @@ class WordCounterSkill:
         # 简单英文/数字 token：split 后算 isascii 的词
         tokens = text.split()
         english_words = sum(1 for w in tokens if w.isascii() and any(c.isalpha() for c in w))
-        numbers = sum(1 for w in tokens if w.isascii() and any(c.isdigit() for c in w) and not any(c.isalpha() for c in w))
+        numbers = sum(
+            1
+            for w in tokens
+            if w.isascii() and any(c.isdigit() for c in w) and not any(c.isalpha() for c in w)
+        )
         total = chinese + english_words
         return SkillResult(
             success=True,

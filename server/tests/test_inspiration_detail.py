@@ -42,11 +42,11 @@ async def _make_novel_with_inspiration(
             session.add(ver)
             await session.flush()
             ch.current_version_id = ver.id
-            char = Character(
-                novel_id=novel.id, name="韩立", role="主角", personality="谨慎"
-            )
+            char = Character(novel_id=novel.id, name="韩立", role="主角", personality="谨慎")
             session.add(char)
-            session.add(Outline(novel_id=novel.id, outline_type="complete", structure={"chapters": []}))
+            session.add(
+                Outline(novel_id=novel.id, outline_type="complete", structure={"chapters": []})
+            )
             await session.commit()
             novel_id = novel.id
         else:
