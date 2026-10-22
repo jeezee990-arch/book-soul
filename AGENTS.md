@@ -68,7 +68,9 @@ book-soul/
 │   │   ├── stores/              # Zustand 状态
 │   │   ├── lib/  config/  types/
 │   ├── src-tauri/
-│   │   ├── src/lib.rs           # 桌面壳：拉起后端 / 端口 / 数据目录
+│   │   ├── src/lib.rs           # 桌面壳：Tauri command / 窗口事件 / 应用装配
+│   │   ├── src/sidecar.rs       # 后端定位与拉起：端口 / 数据目录 / sidecar 路径 / 子进程
+│   │   ├── src/logging.rs       # 桌面端日志（release 无控制台，eprintln! 会丢）
 │   │   ├── tauri.conf.json
 │   │   ├── binaries/            # sidecar 构建产物（gitignore）
 │   │   └── Cargo.toml
@@ -86,6 +88,7 @@ book-soul/
 │   │   │   ├── quality/         # 质检 prompt
 │   │   │   ├── chapter_context.py  # 上下文组装（人物卡 → prompt）
 │   │   │   ├── paths.py         # **路径解析统一入口**（开发态/打包态）
+│   │   │   ├── watchdog.py      # 父进程看门狗（桌面端崩了后端自己退）
 │   │   │   └── config.py
 │   │   ├── models/              # SQLAlchemy ORM
 │   │   ├── schemas/             # Pydantic
@@ -103,7 +106,8 @@ book-soul/
 │   ├── wordbanks/               # 题材词库
 │   ├── skills/                  # 用户自定义 skill
 │   └── skill_template/          # skill 脚手架
-├── scripts/                     # dev.ps1 / build_sidecar.ps1 / 快捷方式脚本
+├── scripts/                     # dev / build_standalone / build_sidecar / 快捷方式脚本
+├── dist/Book Soul/              # 独立版产物（便携目录，gitignore）
 ├── data/                        # 运行时（不入 git）
 ├── docs/                        # ARCHITECTURE / API / USER_GUIDE / SKILLS
 └── .github/workflows/           # ci.yml / release.yml
@@ -195,22 +199,28 @@ resp = await self._client.post(url, json=payload)
 
 | 约定 | 位置 | 说明 |
 |---|---|---|
-| 随机空闲端口 | `src-tauri/src/lib.rs` | 不死绑 8765，避免多开冲突 / 旧进程残留 |
-| 数据目录（便携） | `src-tauri/src/lib.rs` | release：exe 同级 `data/`；dev：`<repo>/data/dev` |
+| 随机空闲端口 | `src-tauri/src/sidecar.rs` | 不死绑 8765，避免多开冲突 / 旧进程残留 |
+| 数据目录（便携） | `src-tauri/src/sidecar.rs` | release：exe 同级 `data/`；dev：`<repo>/data/dev` |
+| sidecar 定位 | `src-tauri/src/sidecar.rs` | Tauri 会**剥掉 target-triple 后缀**，exe 同级目录优先 |
 | 就绪握手 | `backend_ready` command | 前端先等后端 ready 再拉数据，避免首屏 503 |
 | 端口下发 | `get_backend_url` command | 前端**不得硬编码** `127.0.0.1:8765` |
+| 启动失败透传 | `get_backend_error` command | 后端拉不起来时把**真实原因**给前端，不给用户白屏 |
+| 桌面端日志 | `src-tauri/src/logging.rs` | release 无控制台 → 写 `data/logs/desktop.log` |
 | 流式直连 | `api/streams.ts` | 流式**不经过 Rust**（`invoke` 是一次性调用，做不了流式转发） |
 | sidecar | `tauri.conf.json` → `externalBin` | Python 后端由 PyInstaller 打成 exe 随包分发 |
 | 打包入口 | `server/run_server.py` | **必须用绝对 import**（`src/main.py` 的相对 import 在 `__main__` 下会失败） |
+| 孤儿进程防护 | `core/watchdog.py` | 桌面端传 `--parent-pid`；父进程没了后端自己退出 |
+| 打包版 CLI | `src/main.py::run_from_cli` | dev 与打包版**共用**一份 argparse（`run_server.py` 不自己解析参数） |
 
 ### 5.3 打包流程
 
 ```bash
-# 1. 构建 sidecar（自动读 target triple 并放到 Tauri 期望的位置）
-powershell -ExecutionPolicy Bypass -File scripts/build_sidecar.ps1
+# 1. 一键出独立版（推荐）—— 产物在 dist\Book Soul\，整个文件夹拷走就能用
+powershell -ExecutionPolicy Bypass -File scripts/build_standalone.ps1
 
-# 2. 完整打包（beforeBuildCommand 会自动跑第 1 步）
-cd apps/desktop && pnpm tauri build
+# 2. 手动分步
+powershell -ExecutionPolicy Bypass -File scripts/build_sidecar.ps1   # PyInstaller 打后端
+cd apps/desktop && pnpm tauri build                                # 前端 + Rust + 打包
 ```
 
 **打包前必须自检**：
@@ -222,6 +232,18 @@ cd apps/desktop && pnpm tauri build
 
 打包后没有 `pyproject.toml`，向上找目录必然失败。
 **所有路径必须走 `core/paths.py`**，它处理 `sys._MEIPASS`（PyInstaller 解包目录）。
+
+### 5.5 启动器
+
+| 脚本 | 用途 |
+|---|---|
+| `scripts/build_standalone.ps1` | 一键构建独立版到 `dist/Book Soul/` |
+| `scripts/launcher.vbs` | 零控制台入口（被快捷方式调用） |
+| `scripts/launcher_hidden.ps1` | 优先跑独立版 exe；没有则退回开发模式 |
+| `scripts/dev.ps1` | 开发模式（可见控制台，看日志） |
+| `scripts/install_shortcut.ps1` | 建桌面/开始菜单快捷方式，**优先指向独立版 exe** |
+
+> 启动器**不硬编码端口**。端口由 Rust 侧分配随机空闲端口。
 
 ---
 
@@ -317,6 +339,28 @@ prompt: |
 - 一律用 `loguru`，不用 `print`
 - `setup_logging()` 会 `logger.remove()` 掉默认 handler —— **不要重复添加 sink**
   （否则每条日志输出两遍，打包成 sidecar 后尤其明显）
+
+### 8.5 PowerShell 脚本必须带 UTF-8 BOM
+
+Windows 上的 PowerShell **5.1**（系统自带那个）读 `.ps1` 文件时：
+- 有 BOM → 按 UTF-8 解码 ✅
+- 无 BOM → **按系统 ANSI 代码页解码**（中文机器上是 GBK）→ 中文全乱码，
+  更糟的是乱码后的字节序列可能提前终止 here-string（`@"..."@`），
+  导致脚本"看起来跑完了"但内容写空。
+
+**铁律**：`scripts\*.ps1` 一律存成 **UTF-8 with BOM**。
+新增或修改 `.ps1` 后，提交前用这个命令自检：
+
+```powershell
+Get-ChildItem scripts\*.ps1 | ForEach-Object {
+  $b = [IO.File]::ReadAllBytes($_.FullName)
+  "{0}: BOM={1}" -f $_.Name, ($b[0] -eq 0xEF)
+}
+```
+
+> 这不是洁癖：2026-10 就是因为 `build_standalone.ps1` 没带 BOM，
+> README.txt 被写成了 0 字节，而且中文全是乱码。
+> 同理，**含中文的 `.ps1` 一定要带 BOM**；纯 ASCII 脚本建议也带，避免以后加中文踩坑。
 
 ---
 
