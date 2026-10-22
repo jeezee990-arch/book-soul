@@ -17,6 +17,7 @@ const DEV_FALLBACK = "http://127.0.0.1:8765";
 
 let cachedUrl: string | null = null;
 let cachedDataDir: string | null = null;
+let cachedError: string | null | undefined = undefined;
 
 /** 取后端根地址（带缓存）。 */
 export async function getBackendUrl(): Promise<string> {
@@ -28,6 +29,21 @@ export async function getBackendUrl(): Promise<string> {
     cachedUrl = DEV_FALLBACK;
   }
   return cachedUrl;
+}
+
+/**
+ * 取后端启动错误原因。
+ *
+ * @returns 错误描述字符串；null = 后端正常启动；undefined = 未知（取不到）。
+ */
+export async function getBackendError(): Promise<string | null | undefined> {
+  if (cachedError !== undefined) return cachedError;
+  try {
+    cachedError = await invoke<string | null>("get_backend_error");
+  } catch {
+    cachedError = undefined;
+  }
+  return cachedError;
 }
 
 /** 取数据目录（便携模式下是 exe 同级 data/）。取不到返回空串。 */
