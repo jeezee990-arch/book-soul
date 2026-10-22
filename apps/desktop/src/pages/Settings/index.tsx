@@ -129,7 +129,10 @@ export default function Settings() {
       const updated = await settingsApi.setApiKey(llmProvider, apiKey.trim());
       setSettings(updated);
       setApiKey("");
-      toast.success(`${llmProvider} 的 API Key 已保存到 Keyring`);
+      toast.success(`${llmProvider} 的 API Key 已加密保存`, {
+        description:
+          "已用 Windows DPAPI 加密后写入数据目录，明文不落盘，也不会进 GitHub。",
+      });
     } catch (e) {
       toast.error("保存失败", {
         description: e instanceof ApiError ? e.message : String(e),
@@ -252,11 +255,20 @@ export default function Settings() {
         <CardHeader>
           <CardTitle className="text-base">API Key</CardTitle>
           <CardDescription>
-            优先使用环境变量（.env）；在此页保存则用 Windows DPAPI 加密后存进
-            应用数据目录（明文不落盘）。
+            在此页保存 → 用 Windows DPAPI 加密后存进应用数据目录
+            （<code className="text-[11px]">data/secrets/keys.json</code>，明文永不落盘，
+            且该目录已在 .gitignore 内，不会进 GitHub）。
+            系统凭据管理器（Keyring）只作为降级路径。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {keySource === "env" && (
+            <p className="rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
+              ⚠️ 当前 key 来自<b>环境变量</b>（.env / 系统变量），而环境变量优先级最高 ——
+              在这里保存新 key <b>不会生效</b>。要让新 key 生效，请先清掉 .env 里的
+              对应那一行（或删掉系统环境变量），再回来保存。
+            </p>
+          )}
           <div className="flex items-center gap-3 flex-wrap">
             <span className="text-sm text-neutral-500 w-20">Provider</span>
             <span className="text-sm font-mono">{llmProvider}</span>
@@ -290,7 +302,7 @@ export default function Settings() {
               disabled={saving || !apiKey.trim()}
               size="sm"
             >
-              保存到 Keyring
+              加密保存
             </Button>
             {settings?.api_key_configured[llmProvider] && (
               <Button
