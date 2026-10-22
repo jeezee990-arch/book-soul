@@ -70,6 +70,10 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
 
+      - name: Test
+        run: pnpm test
+        working-directory: apps/desktop
+
       - name: Build
         run: pnpm build
         working-directory: apps/desktop
