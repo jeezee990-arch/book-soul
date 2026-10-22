@@ -61,9 +61,12 @@ next-env.d.ts
 
 # ===== Tauri / Rust =====
 apps/desktop/src-tauri/target/
-apps/desktop/src-tauri/Cargo.lock
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/WixTools/
+# sidecar 构建产物（由 scripts/build_sidecar.ps1 生成，不入库）
+apps/desktop/src-tauri/binaries/
+# 注意：Cargo.lock **必须提交** —— Rust 依赖不锁定，构建随时可能坏掉
+# （2026-10 修正：原先误加入 ignore 列表）
 
 # ===== IDE =====
 .idea/
@@ -94,7 +97,11 @@ Thumbs.db
 *.seed
 *.pid.lock
 coverage/
-.nyc_output/
+coverage.xml
+.server.coverage.xml
+htmlcov/
+.pytest_cache/
+*.nyc_output/
 
 # ===== 项目特定 =====
 # 用户上传的待扫描小说

@@ -24,16 +24,33 @@ jobs:
         run: pip install uv
 
       - name: Sync deps
-        run: uv sync
+        run: uv sync --extra dev
         working-directory: server
 
       - name: Lint
         run: uv run ruff check .
         working-directory: server
 
-      - name: Test
-        run: uv run pytest
+      - name: Format check
+        run: uv run ruff format --check .
         working-directory: server
+
+      - name: Test
+        run: uv run pytest --cov=src --cov-report=term-missing --cov-report=xml
+        working-directory: server
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: server/coverage.xml
+        if: always()
+
+      # mypy 先只警告不阻塞（范围限定在 core/ + services/）
+      - name: Type check (non-blocking)
+        run: uv run mypy src/core src/services
+        working-directory: server
+        continue-on-error: true
 
   frontend:
     name: Frontend (Tauri)
@@ -70,3 +87,70 @@ jobs:
       - name: Cargo check
         run: cargo check
         working-directory: apps/desktop/src-tauri
+
+  # 打包冒烟测试：真实构建 sidecar exe → 启动 → 探活 → 检查数据目录
+  # 这条能抓住"能编译但跑不起来"的问题（比如路径解析在打包态失效）
+  packaging-smoke:
+    name: Packaging smoke (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync deps
+        run: uv sync --extra dev
+        working-directory: server
+
+      - name: Build sidecar
+        shell: pwsh
+        run: ../scripts/build_sidecar.ps1
+        working-directory: server
+
+      - name: Smoke test the packaged backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Resolve-Path 'server/dist/book-soul-server.exe'
+          $dataDir = Join-Path $env:RUNNER_TEMP 'bs-smoke-data'
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+
+          $env:BOOK_SOUL_DATA_DIR = $dataDir
+          $proc = Start-Process -FilePath $exe `
+            -ArgumentList '--port', '8791', '--host', '127.0.0.1' `
+            -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput (Join-Path $dataDir 'out.log') `
+            -RedirectStandardError (Join-Path $dataDir 'err.log')
+
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 2
+              try {
+                $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8791/ping' -TimeoutSec 3 -UseBasicParsing
+                if ($r.StatusCode -eq 200) { $ok = $true; break }
+              } catch { }
+            }
+            if (-not $ok) {
+              Write-Error '--- backend log ---'
+              if (Test-Path (Join-Path $dataDir 'err.log')) {
+                Get-Content (Join-Path $dataDir 'err.log') -Tail 60
+              }
+              throw 'packaged backend did not become ready'
+            }
+            Write-Host "ping ok: $($r.Content)"
+
+            # 数据目录必须被创建（便携模式）
+            if (-not (Test-Path (Join-Path $dataDir 'book-soul.db'))) {
+              throw "data dir not used: no book-soul.db in $dataDir"
+            }
+            Write-Host "data dir ok: $dataDir"
+          }
+          finally {
+            if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit() }
+          }
