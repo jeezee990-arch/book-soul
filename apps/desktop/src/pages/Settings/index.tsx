@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { settingsApi, type Settings, type LLMProvider, type UITheme } from "@/api/settings";
+import { settingsApi, type Settings, type LLMProvider, type UITheme, type ApiKeySource } from "@/api/settings";
 import { ApiError } from "@/api";
 import {
   Card,
@@ -34,6 +34,14 @@ const THEMES: { value: UITheme; label: string }[] = [
   { value: "light", label: "浅色" },
 ];
 
+/** API Key 来源标签 */
+const KEY_SOURCE_LABEL: Record<ApiKeySource, string> = {
+  env: "环境变量",
+  secret_store: "加密文件",
+  keyring: "系统凭据",
+  none: "未配置",
+};
+
 /** 设置 —— LLM Provider / API Key / 数据目录 / 主题 / 加密 */
 export default function Settings() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -50,6 +58,8 @@ export default function Settings() {
   const [theme, setTheme] = useState<UITheme>("dark");
   // 加密
   const [encryption, setEncryption] = useState(false);
+  // 当前 provider 的 key 来源
+  const keySource: ApiKeySource = settings?.api_key_source?.[llmProvider] ?? "none";
 
   // 加载
   useEffect(() => {
@@ -242,7 +252,8 @@ export default function Settings() {
         <CardHeader>
           <CardTitle className="text-base">API Key</CardTitle>
           <CardDescription>
-            保存到系统 Keyring（Windows = Credential Locker），不入配置文件。
+            优先使用环境变量（.env）；在此页保存则用 Windows DPAPI 加密后存进
+            应用数据目录（明文不落盘）。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -256,6 +267,11 @@ export default function Settings() {
             ) : (
               <span className="text-[10px] uppercase tracking-wider text-neutral-400 border border-neutral-200 dark:border-neutral-800 rounded px-1.5 py-0.5">
                 未配置
+              </span>
+            )}
+            {keySource !== "none" && (
+              <span className="text-[10px] uppercase tracking-wider text-sky-500 border border-sky-500/30 rounded px-1.5 py-0.5">
+                来源：{KEY_SOURCE_LABEL[keySource]}
               </span>
             )}
           </div>

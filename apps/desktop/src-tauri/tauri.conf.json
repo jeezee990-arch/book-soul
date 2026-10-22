@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm backend:dev && pnpm dev",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "powershell -ExecutionPolicy Bypass -File ../../scripts/build_sidecar.ps1 && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -43,7 +43,7 @@
     "publisher": "Book Soul Team",
     "homepage": "https://github.com/jeezee990-arch/book-soul",
     "resources": [],
-    "externalBin": [],
+    "externalBin": ["binaries/book-soul-server"],
     "copyright": "Copyright © 2026 Book Soul Team",
     "licenseFile": "",
     "macOS": {

@@ -8,6 +8,8 @@
  * 本模块把 ReadableStream 切成行，逐行解析成对象。
  */
 
+import { getBackendUrl } from "./backend";
+
 export interface StreamDelta {
   text: string;
 }
@@ -38,12 +40,32 @@ function absUrl(path: string, baseUrl?: string): string {
   const base = baseUrl ?? "http://127.0.0.1:8765";
   return `${base.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
 }
-
 export interface StreamOptions {
   method?: "GET" | "POST";
   body?: unknown;
   signal?: AbortSignal;
   baseUrl?: string;
+}
+
+/** 构造 ``readNdjsonStream`` 可直接用的 stream 请求对象（避免业务代码重复 ``method/body``）。 */
+export interface StreamRequest {
+  url: string;
+  method: "GET" | "POST";
+  body?: unknown;
+  signal?: AbortSignal;
+}
+
+/** 把 ``StreamRequest`` + ``baseUrl`` 合并成 ``StreamOptions``。 */
+export function streamRequestToOptions(
+  req: StreamRequest,
+  baseUrl?: string,
+): StreamOptions {
+  return {
+    method: req.method,
+    body: req.body,
+    signal: req.signal,
+    baseUrl,
+  };
 }
 
 /** 从后端 ndjson 流读取事件，逐个 yield。
@@ -61,7 +83,9 @@ export async function* readNdjsonStream(
   path: string,
   options: StreamOptions = {},
 ): AsyncGenerator<StreamEvent> {
-  const url = absUrl(path, options.baseUrl);
+  // baseUrl 不传时向 Rust 要真实地址（桌面版是随机端口，不能硬编码）
+  const base = options.baseUrl ?? (await getBackendUrl());
+  const url = absUrl(path, base);
   const init: RequestInit = {
     method: options.method ?? "POST",
     headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },

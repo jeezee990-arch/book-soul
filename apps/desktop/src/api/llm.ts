@@ -5,6 +5,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { callApi } from "./index";
 
 export interface LlmTestRequest {
   prompt?: string;
@@ -33,4 +34,20 @@ export async function testLlm(req: LlmTestRequest = {}): Promise<LlmTestResponse
     maxTokens: req.max_tokens ?? 200,
     system: req.system ?? null,
   });
+}
+
+/** 各 provider 的健康状态 */
+export type ProviderHealthMap = Record<
+  string,
+  { ok: boolean; message: string }
+>;
+
+/**
+ * 探活所有 provider（走普通 API 代理 → Python /llm/health）。
+ *
+ * 用途：设置页显示"云端模型可达 / 本地 Ollama 未启动"这类可操作提示，
+ * 免得用户等 30 秒超时后只看到一个裸 ConnectError。
+ */
+export async function getProviderHealth(): Promise<ProviderHealthMap> {
+  return callApi<ProviderHealthMap>("GET", "/llm/health");
 }
