@@ -43,6 +43,23 @@ export type SettingsUpdate = Partial<{
   security: SecurityConfig;
 }>;
 
+/**
+ * 某个 provider 的模型清单（GET /llm/models）。
+ *
+ * models —— 实时列表 ∪ 配置登记列表（下拉框用这个）
+ * live_models —— 服务端此刻真实支持的
+ * configured_models —— config/llm.yaml 里登记的
+ */
+export interface ProviderModels {
+  provider: LLMProvider;
+  models: string[];
+  live_models: string[];
+  configured_models: string[];
+  default_model: string;
+  reachable: boolean;
+  message: string;
+}
+
 export const settingsApi = {
   get: () => callApi<Settings>("GET", "/settings"),
   update: (data: SettingsUpdate) => callApi<Settings>("PUT", "/settings", data),
@@ -50,4 +67,11 @@ export const settingsApi = {
     callApi<Settings>("POST", `/settings/api-key/${provider}`, { key }),
   deleteApiKey: (provider: LLMProvider) =>
     callApi<Settings>("DELETE", `/settings/api-key/${provider}`),
+};
+
+/** LLM 相关端点（模型清单等） */
+export const llmApi = {
+  /** 实时拉取 provider 支持的模型列表（设置页下拉框） */
+  listModels: (provider: LLMProvider) =>
+    callApi<ProviderModels>("GET", `/llm/models?provider=${provider}`),
 };

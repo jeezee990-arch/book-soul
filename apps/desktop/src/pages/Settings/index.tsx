@@ -1,6 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { settingsApi, type Settings, type LLMProvider, type UITheme, type ApiKeySource } from "@/api/settings";
+import {
+  settingsApi,
+  llmApi,
+  type Settings,
+  type LLMProvider,
+  type UITheme,
+  type ApiKeySource,
+  type ProviderModels,
+} from "@/api/settings";
 import { ApiError } from "@/api";
 import {
   Card,
@@ -42,6 +50,19 @@ const KEY_SOURCE_LABEL: Record<ApiKeySource, string> = {
   none: "未配置",
 };
 
+/**
+ * 把当前选中的模型名"对齐"到服务端实际支持的列表。
+ *
+ * 为什么要这一步：服务端会下线模型（mimo 的 mimo-v2.5-pro 就是这么消失的），
+ * 配置里留着一个服务端不认的模型名 → 生成时直接 400。
+ * 对齐到默认模型 = 自动自愈，不用用户自己去猜该用哪个。
+ */
+function alignModel(current: string, info: ProviderModels | null): string {
+  if (!info || info.models.length === 0) return current;
+  if (current && info.models.includes(current)) return current;
+  return info.default_model || info.models[0] || current;
+}
+
 /** 设置 —— LLM Provider / API Key / 数据目录 / 主题 / 加密 */
 export default function Settings() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -51,7 +72,12 @@ export default function Settings() {
 
   // LLM 字段临时值
   const [llmProvider, setLlmProvider] = useState<LLMProvider>("mimo");
-  const [llmModel, setLlmModel] = useState("mimo-v2.5-pro");
+  const [llmModel, setLlmModel] = useState("");
+  // 当前 provider 的模型清单（实时从服务端 /models 拉）
+  const [modelInfo, setModelInfo] = useState<ProviderModels | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  // 用 ref 存最新清单：设置加载与模型加载两个异步流程会互相影响
+  const modelInfoRef = useRef<ProviderModels | null>(null);
   // API Key 临时值（每次保存后清空）
   const [apiKey, setApiKey] = useState("");
   // 主题
@@ -72,7 +98,7 @@ export default function Settings() {
         if (!cancelled) {
           setSettings(s);
           setLlmProvider(s.llm.provider);
-          setLlmModel(s.llm.model);
+          setLlmModel(() => alignModel(s.llm.model, modelInfoRef.current));
           setTheme(s.ui.theme);
           setEncryption(s.security.encryption_enabled);
         }
@@ -92,6 +118,33 @@ export default function Settings() {
     };
   }, []);
 
+  // 换 provider → 实时拉该 provider 支持的模型
+  useEffect(() => {
+    let cancelled = false;
+    setModelsLoading(true);
+    llmApi
+      .listModels(llmProvider)
+      .then((info) => {
+        if (cancelled) return;
+        modelInfoRef.current = info;
+        setModelInfo(info);
+        setLlmModel((cur) => alignModel(cur, info));
+      })
+      .catch(() => {
+        // 拉不到就退回手填，不挡路
+        if (!cancelled) {
+          modelInfoRef.current = null;
+          setModelInfo(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setModelsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [llmProvider]);
+
   // theme 即时切换（不动 settings 持久化状态）
   useEffect(() => {
     if (theme === "dark") {
@@ -109,7 +162,9 @@ export default function Settings() {
         llm: { provider: llmProvider, model: llmModel },
       });
       setSettings(updated);
-      toast.success("LLM 设置已保存");
+      toast.success("LLM 设置已保存", {
+        description: `之后的生成都会走 ${updated.llm.provider} / ${updated.llm.model}`,
+      });
     } catch (e) {
       toast.error("保存失败", {
         description: e instanceof ApiError ? e.message : String(e),
@@ -133,6 +188,12 @@ export default function Settings() {
         description:
           "已用 Windows DPAPI 加密后写入数据目录，明文不落盘，也不会进 GitHub。",
       });
+      // 提醒：光配 Key 不会自动切换生成用的 provider
+      if (updated.llm.provider !== llmProvider) {
+        toast.warning("当前生成仍走 " + updated.llm.provider, {
+          description: `想用 ${llmProvider} 生成，请在上方把 Provider 选成 ${llmProvider} 再点保存。`,
+        });
+      }
     } catch (e) {
       toast.error("保存失败", {
         description: e instanceof ApiError ? e.message : String(e),
@@ -212,7 +273,10 @@ export default function Settings() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">LLM Provider</CardTitle>
-          <CardDescription>选择当前使用的 LLM 与模型名。</CardDescription>
+          <CardDescription>
+            选择当前使用的 LLM 与模型名。模型列表是从服务端实时拉的 ——
+            服务端下线旧模型后这里会自动更新，不会再出现"配了个不存在的模型"。
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-3 flex-wrap">
@@ -236,14 +300,85 @@ export default function Settings() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <span className="text-sm text-neutral-500 w-20">Model</span>
-            <Input
-              value={llmModel}
-              onChange={(e) => setLlmModel(e.target.value)}
-              disabled={saving}
-              className="w-64"
-              placeholder="mimo-v2.5-pro"
-            />
+            {modelInfo && modelInfo.models.length > 0 ? (
+              <Select
+                value={llmModel}
+                onValueChange={setLlmModel}
+                disabled={saving || modelsLoading}
+              >
+                <SelectTrigger className="w-72">
+                  <SelectValue placeholder="选择模型" />
+                </SelectTrigger>
+                <SelectContent>
+                  {modelInfo.models.map((m) => {
+                    const offline = !modelInfo.live_models.includes(m);
+                    return (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                        {offline ? "（服务端已下线）" : ""}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                value={llmModel}
+                onChange={(e) => setLlmModel(e.target.value)}
+                disabled={saving}
+                className="w-72"
+                placeholder={modelsLoading ? "正在拉取模型列表…" : "模型名"}
+              />
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setModelsLoading(true);
+                llmApi
+                  .listModels(llmProvider)
+                  .then((info) => {
+                    modelInfoRef.current = info;
+                    setModelInfo(info);
+                    setLlmModel((cur) => alignModel(cur, info));
+                    toast.success("模型列表已刷新", { description: info.message });
+                  })
+                  .catch((e: unknown) =>
+                    toast.error("刷新失败", {
+                      description: e instanceof ApiError ? e.message : String(e),
+                    }),
+                  )
+                  .finally(() => setModelsLoading(false));
+              }}
+              disabled={saving || modelsLoading}
+            >
+              刷新列表
+            </Button>
           </div>
+
+          {/* 当前生效的组合（= 已保存的设置） */}
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            当前生效：<b className="font-mono">{settings?.llm.provider}</b> /{" "}
+            <b className="font-mono">{settings?.llm.model}</b>
+            {llmProvider !== settings?.llm.provider && (
+              <span className="ml-2 text-amber-600 dark:text-amber-400">
+                （上方改动尚未保存）
+              </span>
+            )}
+          </p>
+
+          {/* 服务端不认识当前模型时的提醒 */}
+          {modelInfo &&
+            modelInfo.live_models.length > 0 &&
+            llmModel &&
+            !modelInfo.live_models.includes(llmModel) && (
+              <p className="rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
+                ⚠️ 服务端当前不支持模型 <b>{llmModel}</b>，生成时会报错。
+                请在上方下拉框里换一个可用模型（服务端实时支持：
+                {modelInfo.live_models.join("、")}）。
+              </p>
+            )}
+
           <Button onClick={handleSaveLLM} disabled={saving} size="sm">
             保存
           </Button>
@@ -323,9 +458,11 @@ export default function Settings() {
         <CardHeader>
           <CardTitle className="text-base">数据目录</CardTitle>
           <CardDescription>
-            由环境变量 <code className="font-mono text-xs">BOOK_SOUL_DATA_DIR</code> 决定（默认{" "}
-            <code className="font-mono text-xs">~/Documents/BookSoul</code>）。
-            修改后重启服务生效。
+            打包版：exe 同级的 <code className="font-mono text-xs">data/</code>{" "}
+            （便携模式，整个文件夹拷走就是完整迁移）；
+            开发模式：仓库下的 <code className="font-mono text-xs">data/dev</code>。
+            由启动时的环境变量 <code className="font-mono text-xs">BOOK_SOUL_DATA_DIR</code>{" "}
+            决定。
           </CardDescription>
         </CardHeader>
         <CardContent>
