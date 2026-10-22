@@ -1,4 +1,5 @@
 import { callApi } from "./index";
+import type { StreamRequest } from "./streams";
 import type { Outline } from "@/lib/types";
 
 export type OutlineCreate = Omit<
@@ -16,6 +17,7 @@ export interface OutlineGenerationRequest {
   keywords?: string[];
   novel_name?: string;
   outline_type?: "complete" | "freedom";
+  user_extra?: string;
 }
 
 export interface OutlineGenerationResponse {
@@ -45,4 +47,12 @@ export const outlinesApi = {
       "/novels/outlines/generate",
       data,
     ),
+
+  /** 流式大纲生成（ndjson；前端按行解析）。 */
+  generateStream: (data: OutlineGenerationRequest, signal?: AbortSignal): StreamRequest => ({
+    url: "/novels/outlines/generate/stream",
+    method: "POST",
+    body: data,
+    signal,
+  }),
 };

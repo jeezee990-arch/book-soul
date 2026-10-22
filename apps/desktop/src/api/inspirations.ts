@@ -1,4 +1,5 @@
 import { callApi } from "./index";
+import type { StreamRequest } from "./streams";
 import type { Inspiration } from "@/lib/types";
 
 export type InspirationCreate = Omit<
@@ -25,6 +26,7 @@ export interface PlotGenerationRequest {
   genre: string;
   keywords: string[];
   n_versions?: number;
+  user_extra?: string;
 }
 
 export interface CharacterSummary {
@@ -88,4 +90,12 @@ export const inspirationsApi = {
   /** 调 LLM 生成 n 个简要剧情版本（不入库，由前端决定是否保存）。 */
   generatePlot: (data: PlotGenerationRequest) =>
     callApi<PlotGenerationResponse>("POST", "/inspirations/generate-plot", data),
+
+  /** 流式生成简要剧情（ndjson；前端按行解析）。 */
+  generatePlotStream: (data: PlotGenerationRequest, signal?: AbortSignal): StreamRequest => ({
+    url: "/inspirations/generate-plot/stream",
+    method: "POST",
+    body: data,
+    signal,
+  }),
 };

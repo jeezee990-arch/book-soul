@@ -1,4 +1,5 @@
 import { callApi } from "./index";
+import type { StreamRequest } from "./streams";
 import type {
   Character,
   CharacterGrowthEvent,
@@ -24,6 +25,7 @@ export type CharacterUpdate = Partial<Omit<CharacterCreate, "novel_id">> & {
 export interface CharacterGenerationRequest {
   outline: Record<string, unknown>;
   genre?: string;
+  user_extra?: string;
 }
 
 export interface CharacterGenerationResponse {
@@ -61,6 +63,17 @@ export const charactersApi = {
       `/novels/${novelId}/characters/generate-from-outline`,
       data,
     ),
+  /** 流式版：逐张卡实时推送 + 入库 */
+  generateFromOutlineStream: (
+    novelId: number,
+    data: CharacterGenerationRequest,
+    signal?: AbortSignal,
+  ): StreamRequest => ({
+    url: `/novels/${novelId}/characters/generate-from-outline/stream`,
+    method: "POST",
+    body: data,
+    signal,
+  }),
   /** 记录一次性格/状态变化（自动追加 growth_arc + 新版本） */
   recordGrowth: (id: number, data: CharacterGrowthEvent) =>
     callApi<CharacterVersion>("POST", `/characters/${id}/growth`, data),

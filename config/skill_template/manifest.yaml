@@ -1,0 +1,10 @@
+name: my_custom_skill
+description: 一句话描述这个 skill 做什么
+version: 1.0
+type: post_process          # pre_process | post_process | both
+triggers:                   # 在哪些场景自动调用（多个场景会同时触发）
+  - scene:plot_generation   # 剧情生成完成后
+  - scene:chapter_generation # 章节正文生成完成后
+  # 也支持:
+  # - all                     # 命中所有 scene
+enabled: true               # 设为 false 可以临时关掉

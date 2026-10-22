@@ -16,9 +16,15 @@ export interface NovelEditorHandle {
   getText: () => string;
   /** 替换整个内容（用于切换章节） */
   setContent: (html: string) => void;
-  /** 在末尾追加文本（流式生成用，批处理 + ProseMirror 事务） */
+  /** 在末尾追加文本（流式生成用，批处理 + ProseMirror 事务）。
+   *  适用于章节生成末尾追加场景。 */
   appendText: (text: string) => void;
-  /** 替换指定 range（选区重写用） */
+  /** 选区重写入口：首次调用删掉 [from, originalTo] 选区，后续 delta 累加。
+   *  - 每次传 **delta**（新增 chunk），不是累计全文
+   *  - 内部用 rAF 批 flush（~60fps），不卡顿
+   */
+  replaceSelection: (from: number, originalTo: number, deltaText: string) => void;
+  /** 替换指定 range（deprecated：见 replaceSelection） */
   replaceRange: (from: number, to: number, text: string) => void;
   /** 选中指定 range（高亮） */
   focus: () => void;
@@ -119,12 +125,11 @@ const NovelEditor = forwardRef<NovelEditorHandle, Props>(function NovelEditor(
 
     const { view } = editor;
     if (!view) return;
-    const { from } = buf;
-    const to = from + buf.text.length;
-    // 单次事务：替换 range
+    const { from, text } = buf;
+    const to = from + text.length;
+    // 单次事务：替换 range（注意：此处的 text 是 LLM 流式累计后的新文本）
     const tr = view.state.tr
-      .insertText(buf.text, from, to)
-      // 强制同步 lastContentRef 给 onUpdate 触发
+      .insertText(text, from, to)
       .setMeta("addToHistory", false);
     view.dispatch(tr);
   };
@@ -147,22 +152,27 @@ const NovelEditor = forwardRef<NovelEditorHandle, Props>(function NovelEditor(
         }
       },
       replaceRange: (from: number, to: number, text: string) => {
+        // 兼容旧调用：text 当作完整新文本替换（会整体替换，性能差）
         if (!editor || !text) return;
-        // 累加：每次 chunk 替换 [from, from + text.length]
-        // 初次调用建 buffer，后续 chunk 直接替换扩展
+        const { view } = editor;
+        if (!view) return;
+        const tr = view.state.tr
+          .insertText(text, from, to)
+          .setMeta("addToHistory", false);
+        view.dispatch(tr);
+      },
+      replaceSelection: (from: number, originalTo: number, deltaText: string) => {
+        if (!editor || !deltaText) return;
+        // 首次调用：删原选区、建 buffer
         if (!rewriteBufferRef.current) {
-          rewriteBufferRef.current = { text, from };
-        } else {
-          // 同一段选区：保留 from，扩展 text
-          rewriteBufferRef.current.text += text;
-        }
-        // 移除原选区内容：把 [from, to] 替换为新 text
-        if (rewriteBufferRef.current.text === text) {
-          // 首次：删 [from, to]
+          rewriteBufferRef.current = { text: deltaText, from };
           const { view } = editor;
           if (view) {
-            view.dispatch(view.state.tr.delete(from, to));
+            view.dispatch(view.state.tr.delete(from, originalTo));
           }
+        } else {
+          // 后续：把新 delta 累加到 buffer（只插入 delta，不替换整段）
+          rewriteBufferRef.current.text += deltaText;
         }
         if (rewriteTimerRef.current === null) {
           rewriteTimerRef.current = window.setTimeout(flushRewrite, FLUSH_INTERVAL_MS);
