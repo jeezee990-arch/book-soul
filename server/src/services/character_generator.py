@@ -34,6 +34,7 @@ from ..core.llm.formatting import (
     strip_thinking,
 )
 from ..core.paths import prompts_dir
+from ..core.queue_merge import merge_queue_events
 from ..core.skills import manager as skill_manager
 from ._character_helpers import (
     CharacterGenerationError,
@@ -475,18 +476,8 @@ class CharacterGenerator:
 
         handles = [await card_runner(item) for item in extracted]
         try:
-            finished = 0
-            while finished < len(handles):
-                get_tasks = [asyncio.create_task(h.q.get()) for h in handles]
-                done, _ = await asyncio.wait(get_tasks, return_when=asyncio.FIRST_COMPLETED)
-                for t in done:
-                    payload = t.result()
-                    if payload is None:
-                        finished += 1
-                    else:
-                        yield payload
-                    for pending in _:
-                        pending.cancel()
+            async for payload in merge_queue_events([h.q for h in handles]):
+                yield payload
         finally:
             await asyncio.gather(*(h.task for h in handles), return_exceptions=True)
             if owns_client:

@@ -10,10 +10,12 @@
 - _load_prompt 缓存命中
 - _load_prompt 缺失文件 → PlotGenerationError
 - clear_prompt_cache 工作
+- stream_generate() 每个版本都完成 + 流正常结束（2026-10-23 回归）
 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -295,6 +297,103 @@ async def test_generate_raises_if_only_thinking(mock_llm: AsyncMock) -> None:
     with pytest.raises(_svc.PlotGenerationError) as exc_info:
         await svc.generate("修仙", ["x"], n_versions=1)
     assert "empty" in str(exc_info.value).lower()
+
+
+# ===== 流式生成（2026-10-23 回归）=====
+
+
+class _StreamMockLLM:
+    """支持 ``chat(..., stream=True)`` 的 mock 客户端。"""
+
+    provider = "mock"
+    model = "mock-model"
+
+    def __init__(self, chunks: list[str] | None = None) -> None:
+        self._chunks = chunks or ["主角", "历经", "苦难"]
+        self.chat_calls = 0
+
+    async def chat(self, messages: list[ChatMessage], **kwargs: object):
+        self.chat_calls += 1
+        if kwargs.get("stream"):
+            chunks = self._chunks
+
+            async def gen():
+                for c in chunks:
+                    await asyncio.sleep(0)
+                    yield c
+
+            return gen()
+        return ChatResponse(content="".join(self._chunks), model="mock-model")
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_delivers_all_versions_and_terminates() -> None:
+    """回归：3 个版本必须**全部**完成，流必须**正常结束**。
+
+    2026-10-23 修的真实 bug：``version_runner(i + 1)`` 配 ``queues[idx]``，
+    1 起的下标去取 0 起的列表 → 最后一个版本 IndexError。
+    异常发生在 try 之外 → 那个 runner 直接死掉、**结束哨兵永远不 put** →
+    主协程一直等 → 流式端点永久挂死（客户端看着像"卡住了"）。
+
+    这里的 ``wait_for`` 是保险：旧代码会在这里超时失败，而不是卡住整个测试。
+    """
+    llm = _StreamMockLLM()
+    svc = PlotService(llm_client=llm)
+    events: list[dict] = []
+
+    async def run() -> None:
+        async for ev in svc.stream_generate("修仙", ["逆袭"], n_versions=3):
+            events.append(ev)
+
+    await asyncio.wait_for(run(), timeout=10)
+
+    done = [e for e in events if e["event"] == "version_done"]
+    assert len(done) == 3
+    assert {e["index"] for e in done} == {1, 2, 3}
+    # 每个版本都该有 delta
+    assert len([e for e in events if e["event"] == "delta"]) == 9
+    # 整流以 done 收尾
+    assert events[-1]["event"] == "done"
+    # 3 个版本 = 3 次 LLM 调用
+    assert llm.chat_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_single_version_terminates() -> None:
+    """n_versions=1 同样要正常结束（旧代码这里就越界了）。"""
+    llm = _StreamMockLLM()
+    svc = PlotService(llm_client=llm)
+    events: list[dict] = []
+
+    async def run() -> None:
+        async for ev in svc.stream_generate("都市", ["草根"], n_versions=1):
+            events.append(ev)
+
+    await asyncio.wait_for(run(), timeout=10)
+    assert len([e for e in events if e["event"] == "version_done"]) == 1
+    assert events[-1]["event"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_reports_llm_error_and_terminates() -> None:
+    """LLM 报错时也要吐 error 事件并正常结束（不能挂死）。"""
+
+    class _BoomLLM(_StreamMockLLM):
+        async def chat(self, messages: list[ChatMessage], **kwargs: object):
+            self.chat_calls += 1
+            raise RuntimeError("upstream exploded")
+
+    llm = _BoomLLM()
+    svc = PlotService(llm_client=llm)
+    events: list[dict] = []
+
+    async def run() -> None:
+        async for ev in svc.stream_generate("修仙", ["x"], n_versions=2):
+            events.append(ev)
+
+    await asyncio.wait_for(run(), timeout=10)
+    assert len([e for e in events if e["event"] == "error"]) == 2
+    assert events[-1]["event"] == "done"
 
 
 # 静默 logger 警告（如果有）

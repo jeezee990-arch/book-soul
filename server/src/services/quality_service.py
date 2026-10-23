@@ -32,6 +32,7 @@ from ..core.quality.prompts import (
     load_genre_rules,
     load_quality_prompt,
 )
+from ..core.queue_merge import merge_queue_events
 from ..models.chapter import Chapter, ChapterVersion
 from ..models.character import Character
 from ..models.novel import Novel
@@ -403,36 +404,26 @@ class QualityService:
             asyncio.create_task(dim_runner(i, dim)) for i, dim in enumerate(QUALITY_DIMENSIONS)
         ]
 
-        finished = 0
         all_results: dict[str, DimensionResult] = {}
         try:
-            while finished < len(tasks):
-                get_tasks = [asyncio.create_task(q.get()) for q in queues]
-                done, _ = await asyncio.wait(get_tasks, return_when=asyncio.FIRST_COMPLETED)
-                for t in done:
-                    payload = t.result()
-                    if payload is None:
-                        finished += 1
-                        continue
-                    all_results[payload["dim"]] = DimensionResult(
-                        dimension=payload["dim"],
-                        score=float(payload["score"]),
-                        issues=[
-                            DimensionIssue(
-                                type=i.get("type", ""),
-                                character=i.get("character", ""),
-                                quote=i.get("quote", ""),
-                                problem=i.get("problem", ""),
-                                suggestion=i.get("suggestion", ""),
-                            )
-                            for i in payload["issues"]
-                        ],
-                        suggestions=payload["suggestions"],
-                        error=payload["error"],
-                    )
-                    yield payload
-                    for pending in _:
-                        pending.cancel()
+            async for payload in merge_queue_events(queues):
+                all_results[payload["dim"]] = DimensionResult(
+                    dimension=payload["dim"],
+                    score=float(payload["score"]),
+                    issues=[
+                        DimensionIssue(
+                            type=i.get("type", ""),
+                            character=i.get("character", ""),
+                            quote=i.get("quote", ""),
+                            problem=i.get("problem", ""),
+                            suggestion=i.get("suggestion", ""),
+                        )
+                        for i in payload["issues"]
+                    ],
+                    suggestions=payload["suggestions"],
+                    error=payload["error"],
+                )
+                yield payload
         finally:
             await asyncio.gather(*tasks, return_exceptions=True)
 

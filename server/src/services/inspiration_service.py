@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
 from ..core.paths import prompts_dir
+from ..core.queue_merge import merge_queue_events
 from ..core.skills import manager as skill_manager
 from ..models.inspiration import INSPIRATION_TYPES, Inspiration
 from ..models.novel import Novel
@@ -386,9 +387,16 @@ class PlotService:
             asyncio.Queue() for _ in range(n_versions)
         ]
 
-        async def version_runner(idx: int) -> None:
-            """单版本流式 LLM 调用，结果塞到自己的 queue。"""
-            q = queues[idx]
+        async def version_runner(idx: int, q: asyncio.Queue) -> None:
+            """单版本流式 LLM 调用，结果塞到 ``q``。
+
+            :param idx: 1 起的版本号（跟事件里的 ``index`` 一致，前端按 1 开始数）
+            :param q: 该版本专属的事件队列（**由调用方按下标取好传进来**）
+
+            ⚠️ 队列由外部传入，不要在这里做 ``queues[idx]`` 这种下标换算 ——
+            1 起的 idx 配 0 起的列表会越界，而异常发生在 try 之外时，
+            **结束哨兵永远不会 put**，主协程会一直等 → 流式端点挂死。
+            """
             full_text = ""
             try:
                 stream = await llm.chat(
@@ -418,26 +426,15 @@ class PlotService:
             finally:
                 await q.put(None)  # 哨兵
 
-        tasks = [asyncio.create_task(version_runner(i + 1)) for i in range(n_versions)]
+        # 每个版本一个 task；队列按下标取好传进去（别在 task 里换算下标）
+        tasks = [asyncio.create_task(version_runner(i + 1, queues[i])) for i in range(n_versions)]
         # 先发所有 version_start
         for i in range(n_versions):
             yield {"event": "version_start", "index": i + 1}
         # 轮询所有 queue，按事件实际到达顺序透出
-        finished = 0
         try:
-            while finished < n_versions:
-                # 并发等待下一个事件
-                get_tasks = [asyncio.create_task(q.get()) for q in queues]
-                done, _ = await asyncio.wait(get_tasks, return_when=asyncio.FIRST_COMPLETED)
-                for t in done:
-                    payload = t.result()
-                    if payload is None:
-                        finished += 1
-                    else:
-                        yield payload
-                    # 取消未完成的 get 任务
-                    for pending in _:
-                        pending.cancel()
+            async for payload in merge_queue_events(queues):
+                yield payload
         finally:
             # 等待所有 runner 退出
             await asyncio.gather(*tasks, return_exceptions=True)
