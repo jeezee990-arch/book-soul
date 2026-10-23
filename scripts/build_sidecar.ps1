@@ -15,6 +15,12 @@
 #>
 $ErrorActionPreference = 'Stop'
 
+# uv 可能不在 PATH 里（装在 ~\.local\bin）—— 非交互式 shell 尤其容易缺
+$uvBin = Join-Path $env:USERPROFILE '.local\bin'
+if ((-not (Get-Command uv -ErrorAction SilentlyContinue)) -and (Test-Path (Join-Path $uvBin 'uv.exe'))) {
+    $env:PATH = "$uvBin;$env:PATH"
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $serverDir = Join-Path $repoRoot 'server'
 $tauriDir = Join-Path $repoRoot 'apps/desktop/src-tauri'

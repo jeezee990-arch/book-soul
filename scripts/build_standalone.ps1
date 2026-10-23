@@ -21,6 +21,8 @@
              └─ tauri bundler（打包）
         3. 收集产物到 dist\Book Soul\
 
+    ⚠️ **重建不会动 data\** —— 用户的数据库、API Key、日志都留在原地。
+
     耗时参考：首次约 5-8 分钟（Rust release 编译最慢），之后约 1-2 分钟。
 
 .EXAMPLE
@@ -37,16 +39,25 @@ $bundleApp  = Join-Path $releaseDir 'bundle\app'
 $distDir    = Join-Path $repoRoot 'dist\Book Soul'
 
 # ===== 1. 环境自检 =====
+# uv / cargo 都可能不在 PATH 里（uv 装在 ~\.local\bin，cargo 在 ~\.cargo\bin），
+# 非交互式 shell（CI、agent 跑的 PowerShell）尤其容易缺。
+# 先把它们补进 PATH，再做缺失检查。
+$extraBins = @(
+    (Join-Path $env:USERPROFILE '.local\bin'),
+    (Join-Path $env:USERPROFILE '.cargo\bin')
+)
+foreach ($bin in $extraBins) {
+    if ((Test-Path $bin) -and ($env:PATH -notlike "*$bin*")) {
+        $env:PATH = "$bin;$env:PATH"
+    }
+}
+
 $missing = $false
 foreach ($tool in @('uv', 'pnpm', 'cargo', 'rustc')) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
         Write-Host "[X] $tool not found in PATH" -ForegroundColor Red
         $missing = $true
     }
-}
-$cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
-if ((-not (Get-Command cargo -ErrorAction SilentlyContinue)) -and (Test-Path (Join-Path $cargoBin 'cargo.exe'))) {
-    $env:PATH = "$cargoBin;$env:PATH"
 }
 if ($missing) {
     Write-Host "Fix: install the missing tools, then re-run." -ForegroundColor Yellow
@@ -77,8 +88,11 @@ Write-Host ""
 Write-Host "[2/2] Collecting artifacts..." -ForegroundColor Cyan
 
 # 清掉旧产物，避免残留上一版的文件
-# ⚠️ 先检查有没有人正在用这个目录 —— 应用运行时 exe 和日志文件都被锁着，
-#    删不掉（而且半删的目录比不删更糟）。直接给出明确提示。
+# ⚠️ **只删 exe / README，绝不整个删 dist 目录** ——
+#    便携模式下 ``dist\Book Soul\data\`` 里就是用户的全部数据：
+#    数据库（草稿、章节）、DPAPI 加密的 API Key、日志。
+#    整个目录删掉 = 重建一次，用户写的东西全没了。
+#    （2026-10-23 实测踩到：重建把 data\ 里的 API Key 一起删了。）
 $running = @()
 Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
     if ($_.Path -and $_.Path.StartsWith($distDir, [StringComparison]::OrdinalIgnoreCase)) {
@@ -93,9 +107,16 @@ if ($running.Count -gt 0) {
     exit 1
 }
 if (Test-Path -LiteralPath $distDir) {
-    Remove-Item -LiteralPath $distDir -Recurse -Force
+    # 只清理产物文件；data\ 原样保留
+    Get-ChildItem -LiteralPath $distDir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -eq '.exe' -or $_.Name -eq 'README.txt' } |
+        ForEach-Object {
+            Remove-Item -LiteralPath $_.FullName -Force
+            Write-Host "  removed stale: $($_.Name)"
+        }
+} else {
+    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 }
-New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
 # 候选来源（按优先级）：
 #   1. cargo 产物目录 target\release\ —— **cargo 每次都会重写这里**，
@@ -186,7 +207,7 @@ Book Soul - AI 辅助小说写作
   整个文件夹拷到别的地方也能用 —— 这就是"便携模式"
 
 API Key 怎么配（三种，按优先级）：
-  1. 环境变量（BOOK_SOUL_API_KEY / 对应 provider 的变量名）—— 优先级最高
+  1. 环境变量 —— MIMO_API_KEY / MINIMAX_API_KEY / OPENAI_API_KEY（优先级最高）
   2. 在软件"设置"页里填 —— 用 Windows DPAPI 加密后存在 data\secrets\，明文不落盘
   3. 系统凭据管理器
 
