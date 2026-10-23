@@ -24,6 +24,14 @@ export const GENRE_PRIORITY: readonly GenreDef[] = [
   { id: "yanqing", name: "言情", tier: "P3", emoji: "💕" },
 ] as const;
 
+/** 题材一句话说明（UI 副标题用）。 */
+export const GENRE_DESC: Record<string, string> = {
+  xiuxian: "仙侠 · 修真 · 东方玄幻",
+  dushi: "职场 · 爽文 · 现实",
+  xuanyi: "推理 · 刑侦 · 灵异",
+  yanqing: "古言 · 现言 · 甜宠",
+};
+
 export function getGenreDef(id: string): GenreDef | undefined {
   return GENRE_PRIORITY.find((g) => g.id === id);
 }

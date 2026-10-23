@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
-import { HashRouter, Route, Routes } from "react-router-dom";
-import Layout from "./components/Layout";
+import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
+import AppShell from "./components/app-shell";
 import ErrorBoundary from "./components/ErrorBoundary";
-import Inspiration from "./pages/Inspiration";
-import Creation from "./pages/Creation";
-import QualityCheck from "./pages/QualityCheck";
+import Writing from "./pages/Writing";
+import NewBook from "./pages/NewBook";
 import Library from "./pages/Library";
 import Settings from "./pages/Settings";
-import Skills from "./pages/Skills";
 import { getBackendError, waitBackendReady } from "./api/backend";
 
 /**
@@ -18,6 +16,10 @@ import { getBackendError, waitBackendReady } from "./api/backend";
  *
  * 失败时把 Rust 侧记录的真实原因（缺什么、路径在哪）显示出来，
  * 而不是笼统的"启动失败"让用户自己猜。
+ *
+ * 路由（2026-10 UI 重设计）：6 个平铺页面收敛为 4 个 ——
+ * 写作 / 开新书 / 素材库 / 设置。
+ * 旧路径（/creation /quality /skills）保留重定向，避免书签与历史记录失效。
  */
 export default function App() {
   const [status, setStatus] = useState<"starting" | "ready" | "failed">("starting");
@@ -54,13 +56,16 @@ export default function App() {
     <ErrorBoundary>
       <HashRouter>
         <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<Inspiration />} />
-            <Route path="/creation" element={<Creation />} />
-            <Route path="/quality" element={<QualityCheck />} />
+          <Route element={<AppShell />}>
+            <Route path="/" element={<Writing />} />
+            <Route path="/new" element={<NewBook />} />
             <Route path="/library" element={<Library />} />
-            <Route path="/skills" element={<Skills />} />
             <Route path="/settings" element={<Settings />} />
+            {/* 旧路径兼容 */}
+            <Route path="/creation" element={<Navigate to="/" replace />} />
+            <Route path="/quality" element={<Navigate to="/" replace />} />
+            <Route path="/skills" element={<Navigate to="/settings" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
       </HashRouter>

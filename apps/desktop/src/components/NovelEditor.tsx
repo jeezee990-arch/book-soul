@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Selection } from "@tiptap/extensions";
+import { Placeholder } from "@tiptap/extensions/placeholder";
 
 export interface NovelEditorSelection {
   from: number;
@@ -74,6 +75,7 @@ const NovelEditor = forwardRef<NovelEditorHandle, Props>(function NovelEditor(
         heading: { levels: [1, 2, 3] },
       }),
       Selection.configure({ className: "selection" }),
+      Placeholder.configure({ placeholder }),
     ],
     content: content || "",
     editable,

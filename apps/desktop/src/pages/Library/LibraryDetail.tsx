@@ -17,7 +17,7 @@ import { outlinesApi } from "@/api/outlines";
 import { ApiError } from "@/api";
 import type { Chapter, ChapterVersion, Character, Novel, Outline } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import VersionPanel from "@/pages/Creation/VersionPanel";
+import VersionPanel from "@/components/version-panel";
 
 interface Props {
   open: boolean;

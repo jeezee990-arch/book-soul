@@ -27,6 +27,8 @@ export interface Settings {
    * env（环境变量）/ secret_store（DPAPI 加密文件）/ keyring（系统凭据）/ none
    */
   api_key_source: Record<LLMProvider, ApiKeySource>;
+  /** 当前数据目录的绝对路径（只读） */
+  data_dir: string;
 }
 
 export type ApiKeySource = "env" | "secret_store" | "keyring" | "none";
@@ -60,6 +62,19 @@ export interface ProviderModels {
   message: string;
 }
 
+/**
+ * 把当前选中的模型名"对齐"到服务端实际支持的列表。
+ *
+ * 为什么要这一步：服务端会下线模型（mimo 的 mimo-v2.5-pro 就是这么消失的），
+ * 配置里留着一个服务端不认的模型名 → 生成时直接 400。
+ * 对齐到默认模型 = 自动自愈，不用用户自己去猜该用哪个。
+ */
+export function alignModel(current: string, info: ProviderModels | null): string {
+  if (!info || info.models.length === 0) return current;
+  if (current && info.models.includes(current)) return current;
+  return info.default_model || info.models[0] || current;
+}
+
 export const settingsApi = {
   get: () => callApi<Settings>("GET", "/settings"),
   update: (data: SettingsUpdate) => callApi<Settings>("PUT", "/settings", data),
@@ -69,9 +84,24 @@ export const settingsApi = {
     callApi<Settings>("DELETE", `/settings/api-key/${provider}`),
 };
 
-/** LLM 相关端点（模型清单等） */
+/** LLM 测试端点（POST /llm/test）的响应。 */
+export interface LLMTestResult {
+  provider: string;
+  model: string;
+  content: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+/** LLM 相关端点（模型清单、探活、连通性测试） */
 export const llmApi = {
   /** 实时拉取 provider 支持的模型列表（设置页下拉框） */
   listModels: (provider: LLMProvider) =>
     callApi<ProviderModels>("GET", `/llm/models?provider=${provider}`),
+  /** 探活所有 provider（顶栏模型灯用） */
+  health: () => callApi<ProviderHealth>("GET", "/llm/health"),
+  /** 真实调一次模型验证连通性（设置页「测试连接」按钮） */
+  test: (data?: { prompt?: string; provider?: string; max_tokens?: number }) =>
+    callApi<LLMTestResult>("POST", "/llm/test", data ?? {}),
 };

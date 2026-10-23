@@ -57,3 +57,110 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  /*
+   * 纸面编辑区（2026-10 UI 重设计）
+   * 固定浅色纸感 —— 不随主题切换，长时间写作不刺眼。
+   * 深色主题下：深色外壳 + 浅色纸面（Ulysses / 思源笔记的思路）。
+   */
+  .novel-paper {
+    background: #faf8f3;
+    color: #2b2723;
+    box-shadow:
+      0 10px 34px rgba(0, 0, 0, 0.18),
+      0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+
+  .novel-paper .novel-editor-content {
+    min-height: 60vh;
+    font-family:
+      "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif;
+    font-size: var(--novel-font-size, 16.5px);
+    line-height: 1.95;
+    letter-spacing: 0.01em;
+    text-align: justify;
+    color: #2b2723;
+  }
+
+  .novel-paper .novel-editor-content p {
+    margin-bottom: 0.95em;
+  }
+
+  .novel-paper .novel-editor-content h1 {
+    margin-bottom: 0.5em;
+    font-size: 1.4em;
+    font-weight: 700;
+  }
+
+  .novel-paper .novel-editor-content h2 {
+    margin: 1.2em 0 0.6em;
+    font-size: 1.18em;
+    font-weight: 700;
+  }
+
+  .novel-paper .novel-editor-content h3 {
+    margin: 1em 0 0.5em;
+    font-size: 1.05em;
+    font-weight: 700;
+  }
+
+  .novel-paper .novel-editor-content blockquote {
+    margin: 1em 0;
+    border-left: 3px solid #d8d2c6;
+    padding-left: 0.9em;
+    color: #6b6459;
+  }
+
+  .novel-paper .novel-editor-content ul,
+  .novel-paper .novel-editor-content ol {
+    margin: 0 0 0.95em 1.4em;
+  }
+
+  .novel-paper .novel-editor-content ul {
+    list-style: disc;
+  }
+
+  .novel-paper .novel-editor-content ol {
+    list-style: decimal;
+  }
+
+  .novel-paper .novel-editor-content .selection {
+    background: #e3e8fb;
+  }
+
+  .novel-paper .novel-editor-content p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    color: #a79e91;
+    pointer-events: none;
+  }
+
+  /*
+   * 编辑区配色「跟随主题」模式（设置 → 外观 → 编辑区）。
+   * 默认是固定浅色纸面；用户选"跟随主题"时整块变深色。
+   */
+  .paper-follow-theme .novel-paper {
+    background: hsl(var(--card));
+    color: hsl(var(--foreground));
+    box-shadow:
+      0 10px 34px rgba(0, 0, 0, 0.28),
+      0 1px 2px rgba(0, 0, 0, 0.12);
+  }
+
+  .paper-follow-theme .novel-paper .novel-editor-content {
+    color: hsl(var(--foreground));
+  }
+
+  .paper-follow-theme .novel-paper .novel-editor-content .selection {
+    background: hsl(var(--accent));
+  }
+
+  .paper-follow-theme
+    .novel-paper
+    .novel-editor-content
+    p.is-editor-empty:first-child::before {
+    color: hsl(var(--muted-foreground));
+  }
+}

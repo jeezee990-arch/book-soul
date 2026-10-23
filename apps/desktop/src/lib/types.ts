@@ -88,6 +88,35 @@ export interface Outline {
   updated_at: string;
 }
 
+// ===== 大纲 structure 的 TS 镜像（对齐 server/src/schemas/outline.py）=====
+
+/** complete 结构里的章节节点。 */
+export interface OutlineChapterNode {
+  title: string;
+  summary?: string | null;
+  key_events?: string[];
+}
+
+/** complete 结构里的卷节点。 */
+export interface OutlineVolumeNode {
+  name: string;
+  summary?: string | null;
+  chapters?: OutlineChapterNode[];
+}
+
+/** complete：分卷 > 章 > 关键事件。 */
+export interface CompleteOutlineStructure {
+  volumes?: OutlineVolumeNode[];
+  overall_theme?: string | null;
+}
+
+/** freedom：自由文字 + 关键节拍 + 主题。 */
+export interface FreedomOutlineStructure {
+  summary?: string;
+  key_beats?: string[];
+  themes?: string[];
+}
+
 export interface Inspiration {
   id: number;
   novel_id: number | null;
