@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -161,3 +163,17 @@ def test_api_key_status_in_get(svc: SettingsService) -> None:
         "openai": False,
         "ollama": False,
     }
+
+
+def test_get_includes_data_dir(svc: SettingsService) -> None:
+    """get() 要带上数据目录的绝对路径。
+
+    2026-10 UI 重设计：设置页要显示"数据目录在哪"并支持复制路径，
+    所以后端必须把真实路径告诉前端（只读字段）。
+
+    只断言"绝对路径 + 非空"—— 目录本身可能还没被创建
+    （测试用的是 pytest 隔离目录，没人往里写过东西）。
+    """
+    s = svc.get()
+    assert s.data_dir, "data_dir 不能为空"
+    assert Path(s.data_dir).is_absolute(), "data_dir 必须是绝对路径"

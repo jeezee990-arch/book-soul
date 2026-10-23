@@ -19,7 +19,7 @@ from loguru import logger
 
 from ..core.config import settings as app_settings
 from ..core.security.secret_store import SecretStore, get_secret_store
-from ..core.user_settings import read_settings_yaml
+from ..core.user_settings import data_dir, read_settings_yaml
 from ..schemas.settings import (
     LLM_PROVIDERS,
     UI_THEMES,
@@ -146,6 +146,7 @@ class SettingsService:
             security=security,
             api_key_configured=self._key_status_all(),
             api_key_source=self._key_source_all(),
+            data_dir=str(data_dir()),
         )
 
     def update(self, data: SettingsUpdate) -> SettingsRead:

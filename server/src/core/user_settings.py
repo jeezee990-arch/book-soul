@@ -42,6 +42,17 @@ def _data_dir() -> Path:
     return app_settings.data_dir
 
 
+def data_dir() -> Path:
+    """当前数据目录的绝对路径（公开入口）。
+
+    打包版：exe 同级 ``data/``（便携模式，整个文件夹拷走就是完整迁移）；
+    开发版：``<repo>/data/dev``。由环境变量 ``BOOK_SOUL_DATA_DIR`` 决定。
+
+    settings_service 用它把真实路径告诉前端（设置页要显示"数据目录在哪"）。
+    """
+    return _data_dir()
+
+
 def settings_file_path() -> Path:
     """用户设置文件的绝对路径。"""
     return _data_dir() / SETTINGS_FILENAME

@@ -92,6 +92,11 @@ class SettingsRead(SettingsBase):
         ),
     )
 
+    data_dir: str = Field(
+        default="",
+        description="当前数据目录的绝对路径（只读；由环境变量 BOOK_SOUL_DATA_DIR 决定）",
+    )
+
 
 class SettingsUpdate(BaseModel):
     """部分更新（所有字段可选）。"""
