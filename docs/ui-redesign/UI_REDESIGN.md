@@ -578,15 +578,17 @@ Windows 下渲染又大又花 → 改成**书名首字 + 渐变底**，与顶栏
 | 项 | 结果 |
 |---|---|
 | `tsc -b`（前端类型） | ✅ 0 error |
-| `vitest run`（前端测试） | ✅ 46 passed（新增 32 条：workspace-store 持久化、模型名自愈、落库内容选取、API 传输层、外观偏好持久化） |
+| `vitest run`（前端测试） | ✅ 50 passed（新增 36 条：workspace-store 持久化、模型名自愈、落库内容选取、API 传输层、外观偏好持久化、桌面壳 command） |
 | `vite build` | ✅ built |
-| `ruff check` / `ruff format --check` | ✅ 全过 |
-| `pytest`（后端） | ✅ 552 passed（1 条既有失败见下） |
+| `ruff check` / `ruff format --check` | ✅ 全过（153 files） |
+| `pytest`（后端） | ✅ **567 passed, 0 failed** |
+| `cargo check --release` | ✅ 通过 |
 | 浏览器端到端冒烟 | ✅ 真起后端(8765) + Vite(5173)，无头浏览器实测 4 页真实渲染：作品列表、模型状态灯、设置项、章节树、编辑区、右栏 Tab 全部来自真实 API |
 
-> **既有失败（与本次改动无关）**：`test_factory.py::test_create_llm_client_for_scene_uses_routing`
-> 因仓库根 `.env` 里的 API Key 已被清空而报 `AuthError: empty API key`。
-> 已用 `git stash` 单独验证：把本次后端改动 stash 掉后该测试**仍然失败**。
+> **原先那条"既有失败"已经修掉**：`test_factory.py::test_create_llm_client_for_scene_uses_routing`
+> 之前依赖本机 `.env` 里有没有真 API Key（`src.core.config.settings` 是**导入时**读 env 的
+> 单例，`monkeypatch.delenv` 清不掉它）→ 换台机器立刻挂。
+> 现在改成用 `monkeypatch.setattr` 造一个假 key，测试自洽。
 
 ### 12.5 与设计稿的差异（实现时做的调整）
 
@@ -596,6 +598,46 @@ Windows 下渲染又大又花 → 改成**书名首字 + 渐变底**，与顶栏
 | 质检用雷达图 | 横向评分条 | 332px 窄栏放雷达图看不清 |
 | 大纲步骤显示 JSON 流 | 流式时显示原始片段，**完成后改结构化渲染** | 旧实现从头到尾只显示 JSON |
 | 设置有「打开文件夹」 | 「复制路径」+ 路径展示 | Tauri capabilities 只开了 `core:default`，没有 shell 插件权限；真要打开需改 Rust + 重新编译 |
+
+> 2026-10-24 已补上「在文件夹中显示」：新增 `open_data_dir` Rust command
+> （`explorer.exe`，**不**用 shell 插件，权限面最小），按钮真的会打开资源管理器。
+
+### 12.6 第二轮：功能性与性能修复（2026-10-24）
+
+用户在第一轮交付后实测发现的问题，以及这轮修掉的东西。
+
+#### A. 功能性
+
+| 问题 | 根因 | 修法 |
+|---|---|---|
+| 「在文件夹中显示」点了没反应 | 只弹了个 toast 提示路径，什么都没执行 | 新增 `open_data_dir` Rust command（`explorer.exe`）；纯浏览器下自动降级成"给出路径"提示 |
+| 「刷新列表」刷不出新模型 | `/llm/models` 实时拉取，缓存后就没法强制刷新了 | 加 `?refresh=1`；前端 `llmApi.listModels(provider, refresh)`，刷新按钮传 `true` |
+| 换 API Key / 换 provider 后顶栏灯仍显示旧状态 | 探测结果被缓存住（60s） | `settings_service` 在 `set_api_key` / `delete_api_key` / `update()` 时作废对应缓存 |
+| 模型灯启动时 `/settings` + `/llm/health` 各请求两次 | `useEffect` 依赖 `[provider]`，`setProvider` 触发第二轮重跑；且第二轮用**闭包里的旧 `provider`（还是 null）**才勉强拿到正确结果 | 改用局部变量 `active` 往下传，依赖改成 `[]`，只跑一次 |
+
+#### B. 性能（都是实测数字）
+
+| 项 | 修之前 | 修之后 |
+|---|---|---|
+| 关闭窗口耗时 | UI 线程被同步 `taskkill` 阻塞，窗口僵住 | **0.06s**（杀后端挪到后台线程 + `try_wait` 轮询 2 秒上限） |
+| `/llm/health`（第 2 次起） | ~10 秒（每次都实时探测所有 provider） | **9 ms**（TTL 缓存 60s + stale-while-revalidate） |
+| 探活时 `connect` 超时 | `min(10.0, timeout)` > `probe_timeout=5` → 连接阶段就能拖 10 秒 | `min(3.0, probe_timeout)` → 实测 3.2 秒 |
+| 启动探测轮数 | **2 轮**（预检和 `/llm/health` 各打一轮） | **1 轮**（预检改走 `llm_cache.get_health()`，按 provider 共享任务） |
+| 顶栏灯只关心一个 provider，却要等全部 provider 探完 | 灯白等 ~3 秒 | `GET /llm/health?provider=X` **只探这一个** |
+
+#### C. 关键文件
+
+```
+server/src/core/llm/cache.py       按 provider 粒度的缓存 + 探测任务共享 + SWR
+server/src/core/llm/factory.py     connect 超时修正
+server/src/api/llm.py              /llm/health 走缓存 + provider 参数；/llm/models 加 refresh
+server/src/main.py                 预检改走 llm_cache.get_health()
+server/src/services/settings_service.py  改 key/provider 后作废缓存
+apps/desktop/src/api/desktop.ts    desktopApi.openDataDir
+apps/desktop/src/components/model-status-pill.tsx  定点探活 + 不重复请求
+apps/desktop/src-tauri/src/sidecar.rs  kill 异步化 + kill_backend_child（2s 上限）
+apps/desktop/src-tauri/src/lib.rs      open_data_dir command；Exit 同步 kill 防孤儿
+```
 
 ---
 
@@ -645,12 +687,22 @@ Windows 下渲染又大又花 → 改成**书名首字 + 渐变底**，与顶栏
 - [ ] 4 个分区：LLM 与密钥 / 数据与备份 / AI 增强 / 外观
 - [ ] 「测试连接」→ 显示"连接成功 + 延迟 + token 数"或明确失败原因
 - [ ] 数据目录显示**真实路径**，能复制
+- [ ] 「在文件夹中显示」→ **真的打开资源管理器**（以前只是弹个提示）
 - [ ] AI 增强：开关能切换，改完提示"后续生成会/不会经过"
 - [ ] 外观：主题切换即时生效；编辑区可选"跟随主题"；字号滑块生效
 - [ ] **改完主题 → 重开应用 → 主题还在**（这是修掉的缺陷，重点看）
 - [ ] 编辑区选"跟随主题" → 重开 → 纸面真的跟着主题变（不是只改了按钮状态）
 - [ ] 设置页模型下拉：**没配 Key 时不该把所有模型标成"已下线"**；配好 Key 后
       点「刷新列表」才显示真实的可用/已下线状态
+- [ ] **换 API Key → 顶栏模型灯立刻跟着变**（不用等 60 秒缓存过期）
+
+### 13.6 性能与关窗（2026-10-24 新增）
+
+- [ ] **点右上角 X 关闭 → 窗口立刻消失，不卡顿**（之前会僵住半秒）
+- [ ] 关窗后 `dist\Book Soul\data\` 目录不残留 `book-soul-server.exe` 进程
+- [ ] 启动后**顶栏模型灯很快就有颜色**（不是灰着转圈等好几秒）
+- [ ] 设置页反复进出，模型下拉加载很快（不是每次都卡几秒）
+- [ ] 改完前端源码 → **必须重跑 `scripts\build_standalone.ps1`**，否则看不到新 UI
 
 ---
 

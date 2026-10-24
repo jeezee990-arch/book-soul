@@ -212,6 +212,22 @@ resp = await self._client.post(url, json=payload)
 启动时后台预检（不阻塞），`GET /llm/health` 供设置页展示。
 探活**必须带 API Key**（`/models` 端点需鉴权），否则无法区分"服务挂了"和"key 错了"。
 
+### 4.6 探测超时与缓存（2026-10-24 新增）
+
+健康探测要打**外部网络**，动辄 10 秒。前端顶栏模型灯在启动时就会调
+`GET /llm/health` —— 不处理的话，用户盯着一个转圈的灯干等。
+
+| 铁律 | 位置 | 说明 |
+|---|---|---|
+| `connect_timeout ≤ probe_timeout` | `core/llm/factory.py` | 之前 `min(10.0, timeout)` > `probe_timeout=5`，"网络不通"的 provider 在**连接阶段**就拖满 10 秒（实测 9.8s）。现在 `min(3.0, probe_timeout)` |
+| 探测结果必须走 `core/llm/cache.py` | `api/llm.py` + `main.py` | TTL 缓存（健康 60s / 模型 300s）+ stale-while-revalidate，过期时先返回旧值再后台刷新 —— 前端永远不等网络 |
+| 预检与 `/llm/health` 必须**共享同一个探测任务** | `core/llm/cache.py::_probe_shared` | 直调 `check_all_providers_health()` 会各打一轮网络，前端启动那一下仍要白等一整轮（实测 2.7s）。**启动预检也要走 `llm_cache.get_health()`** |
+| 改 key / provider 后必须作废缓存 | `services/settings_service.py` | `set_api_key` / `delete_api_key` 清该 provider 的模型清单 + 全局健康状态；`update()`（换 provider/model）清全部。不作废的话用户刚换好 key，顶栏还显示着换之前的"Key 无效" |
+| 用户主动要新数据时必须能绕过缓存 | `GET /llm/models?refresh=1` | 设置页「刷新列表」按钮用。前端 `llmApi.listModels(provider, refresh)` |
+
+> 契约测试：`server/tests/test_llm_cache.py`（含"预检与 /llm/health 只探测一次"）。
+> 改坏了这层，`/llm/health` 会立刻退回 10 秒。
+
 ---
 
 ## 5. 桌面化与打包规范（新增，2026-10）
@@ -237,6 +253,10 @@ resp = await self._client.post(url, json=payload)
 | 打包入口 | `server/run_server.py` | **必须用绝对 import**（`src/main.py` 的相对 import 在 `__main__` 下会失败） |
 | 孤儿进程防护 | `core/watchdog.py` | 桌面端传 `--parent-pid`；父进程没了后端自己退出 |
 | 打包版 CLI | `src/main.py::run_from_cli` | dev 与打包版**共用**一份 argparse（`run_server.py` 不自己解析参数） |
+| 关窗不卡顿 | `src-tauri/src/sidecar.rs` | 杀后端**必须放后台线程**，绝不能跑在窗口关闭事件处理器的 UI 线程上（`taskkill` 要 spawn 子进程，200–500ms → 窗口会僵住半秒） |
+| 杀进程不无限等 | `src-tauri/src/sidecar.rs::kill_backend_child` | 轮询 `try_wait`，**2 秒上限**。之前用阻塞的 `child.wait()`，taskkill 一旦失败窗口就永远关不掉 |
+| 异常退出兜底 | `src-tauri/src/lib.rs` (`RunEvent::Exit`) | 走异常退出路径时**同步**杀（slot 非空即说明是异常路径），spawn 线程会随 app 退出被杀掉 → 后端成孤儿 |
+| 打开数据目录 | `src-tauri/src/lib.rs::open_data_dir` | **不要用 shell 插件的通用 `open`**（权限面太大）。只暴露"打开数据目录"这一个固定动作 |
 
 ### 5.3 打包流程
 
@@ -403,6 +423,14 @@ Get-ChildItem scripts\*.ps1 | ForEach-Object {
 > 这不是洁癖：2026-10 就是因为 `build_standalone.ps1` 没带 BOM，
 > README.txt 被写成了 0 字节，而且中文全是乱码。
 > 同理，**含中文的 `.ps1` 一定要带 BOM**；纯 ASCII 脚本建议也带，避免以后加中文踩坑。
+>
+> ⚠️ **2026-10-24 又踩了一次，而且失败模式更隐蔽**：临时测量脚本用无 BOM + 中文注释，
+> GBK 解码后字节错位，**注释行把下一行整行吞掉了** ——
+> 那行 `$x = Measure-Get "..."` 根本没执行，变量保持 `$null`，
+> 脚本却"跑得好好的"，只是那一行的测量值莫名其妙是空。
+> 症状：同一函数的前后两次调用，一次有值一次为空。
+> **判据**：只要 `.ps1` 里有中文，就当它一定会被 GBK 误解码；
+> 临时脚本最省事的做法是**只写 ASCII**（注释也用英文）。
 
 ---
 
