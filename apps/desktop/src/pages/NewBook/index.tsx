@@ -52,14 +52,23 @@ export default function NewBook() {
   // 剧情
   const [plotVersions, setPlotVersions] = useState<PlotVersion[]>([]);
   const [plotStreaming, setPlotStreaming] = useState<Record<number, string>>({});
+  /** index → 模型思考中的文本（<think> 块；用来显示"模型思考中…"） */
+  const [plotThinking, setPlotThinking] = useState<Record<number, string>>({});
   const [plotBusy, setPlotBusy] = useState(false);
   const [chosenPlotIdx, setChosenPlotIdx] = useState<number | null>(null);
   const plotAbortRef = useRef<AbortController | null>(null);
+  /** 本次生成已耗时（秒）—— 让用户看到"还在动" */
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const elapsedRef = useRef<number | null>(null);
 
   // 大纲 + 人物
   const [outlineText, setOutlineText] = useState("");
+  /** 模型思考中的文本（<think> 块）—— 显示"模型思考中…"避免看起来像卡死 */
+  const [outlineThinking, setOutlineThinking] = useState("");
   const [outlineMeta, setOutlineMeta] = useState<NovelState | null>(null);
   const [charProgress, setCharProgress] = useState<CharProgress>(EMPTY_CHAR_PROGRESS);
+  /** 人物卡生成阶段的思考提示 */
+  const [charThinking, setCharThinking] = useState("");
   const [outlinePhase, setOutlinePhase] = useState<
     "outline" | "characters" | "done"
   >("outline");
@@ -72,13 +81,31 @@ export default function NewBook() {
 
   // ===== 步骤 1 → 2：生成剧情 =====
 
+  /** 开始/停止计时器（让用户看到"还在生成"，而不是干等）。 */
+  const startElapsed = useCallback(() => {
+    setElapsedSec(0);
+    if (elapsedRef.current !== null) window.clearInterval(elapsedRef.current);
+    elapsedRef.current = window.setInterval(() => {
+      setElapsedSec((s) => s + 1);
+    }, 1000);
+  }, []);
+
+  const stopElapsed = useCallback(() => {
+    if (elapsedRef.current !== null) {
+      window.clearInterval(elapsedRef.current);
+      elapsedRef.current = null;
+    }
+  }, []);
+
   const startPlotStream = useCallback(async () => {
     if (!genre || keywords.size === 0) return;
     setPlotVersions([]);
     setPlotStreaming({});
+    setPlotThinking({});
     setChosenPlotIdx(null);
     setPlotBusy(true);
     setStep("plot");
+    startElapsed();
 
     const ctrl = new AbortController();
     plotAbortRef.current = ctrl;
@@ -103,6 +130,13 @@ export default function NewBook() {
         const index = obj.index as number | undefined;
         if (event === "version_start") {
           setPlotStreaming((s) => ({ ...s, [index!]: "" }));
+        } else if (event === "thinking") {
+          // 推理模型的思考阶段：不能静默丢掉（否则前端一个字都收不到，
+          // 用户看到的就是"卡住不动"）。存下来显示"模型思考中…"。
+          setPlotThinking((s) => ({
+            ...s,
+            [index!]: (s[index!] ?? "") + (text ?? ""),
+          }));
         } else if (event === "delta" && text) {
           setPlotStreaming((s) => ({
             ...s,
@@ -121,6 +155,7 @@ export default function NewBook() {
             description: (obj.message as string) ?? "未知错误",
           });
           setPlotBusy(false);
+          stopElapsed();
           return;
         }
       }
@@ -131,8 +166,9 @@ export default function NewBook() {
       }
     } finally {
       setPlotBusy(false);
+      stopElapsed();
     }
-  }, [genre, keywords, userExtra]);
+  }, [genre, keywords, userExtra, startElapsed, stopElapsed]);
 
   // ===== 步骤 2 → 3：选剧情 → 生成大纲 =====
 
@@ -142,8 +178,10 @@ export default function NewBook() {
     if (!plot) return;
 
     setOutlineText("");
+    setOutlineThinking("");
     setOutlineMeta(null);
     setCharProgress(EMPTY_CHAR_PROGRESS);
+    setCharThinking("");
     setOutlinePhase("outline");
     setStep("outline");
 
@@ -168,7 +206,10 @@ export default function NewBook() {
       })) {
         const obj = ev as unknown as Record<string, unknown>;
         const event = obj.event as string | undefined;
-        if (event === "delta") {
+        if (event === "thinking") {
+          // 推理模型思考阶段：显示"模型思考中…"，而不是让用户对着空白等待
+          setOutlineThinking((s) => s + ((obj.text as string) ?? ""));
+        } else if (event === "delta") {
           const t = obj.text as string | undefined;
           if (t) setOutlineText((s) => s + t);
         } else if (event === "done") {
@@ -219,7 +260,10 @@ export default function NewBook() {
         })) {
           const obj = ev as unknown as Record<string, unknown>;
           const event = obj.event as string | undefined;
-          if (event === "extract_done") {
+          if (event === "thinking") {
+            // 推理模型思考阶段：给个提示，别让用户以为卡死了
+            setCharThinking((s) => s + ((obj.text as string) ?? ""));
+          } else if (event === "extract_done") {
             setCharProgress((s) => ({
               ...s,
               extracted: (obj.characters as { name: string; role: string }[]) ?? [],
@@ -306,6 +350,10 @@ export default function NewBook() {
       plotAbortRef.current?.abort();
       outlineAbortRef.current?.abort();
       charAbortRef.current?.abort();
+      if (elapsedRef.current !== null) {
+        window.clearInterval(elapsedRef.current);
+        elapsedRef.current = null;
+      }
     };
   }, []);
 
@@ -461,7 +509,9 @@ export default function NewBook() {
                 keywords={keywords}
                 versions={plotVersions}
                 streaming={plotStreaming}
+                thinking={plotThinking}
                 isStreaming={plotBusy}
+                elapsedSec={elapsedSec}
                 chosenIdx={chosenPlotIdx}
                 onChoose={(idx) => {
                   setChosenPlotIdx(idx);
@@ -473,6 +523,7 @@ export default function NewBook() {
                   type="button"
                   onClick={() => {
                     plotAbortRef.current?.abort();
+                    stopElapsed();
                     setStep("seed");
                   }}
                   className="h-9 rounded-lg px-4 text-[13px] text-neutral-500 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
@@ -496,9 +547,11 @@ export default function NewBook() {
             <OutlineStep
               phase={outlinePhase}
               outlineText={outlineText}
+              outlineThinking={outlineThinking}
               outlineStructure={outlineMeta?.outlineStructure ?? null}
               novelMeta={outlineMeta}
               charProgress={charProgress}
+              charThinking={charThinking}
               onFinish={() => void handleFinish()}
               onRestart={() => {
                 setStep("seed");

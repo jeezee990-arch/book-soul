@@ -3,8 +3,18 @@
  *
  * 对应设计稿 s10。三个版本各自独立流式渲染（互不阻塞），
  * 选中的那个作为下一步大纲与人物卡的基准。
+ *
+ * 两个关键修复（2026-10-24，用户实测反馈）：
+ *
+ * 1. **卡片必须能滚动**。之前内容区是固定高 `h-[212px]` + `overflow-hidden` ——
+ *    文字流到 212px 就被裁掉，后面的字渲染了但**看不见**，
+ *    用户看到的就是"生成到一半卡住了"。改成 `max-h` + `overflow-y-auto`。
+ *
+ * 2. **自动跟随最新内容**。流式时把滚动条压到底部，
+ *    用户不用手动拖就能看到"正在写的字"（原来只能盯着开头那一段）。
  */
 
+import { useEffect, useRef } from "react";
 import { Check } from "lucide-react";
 import type { GenreDef } from "@/config/genres";
 import type { PlotVersion } from "./types";
@@ -16,20 +26,46 @@ interface Props {
   versions: PlotVersion[];
   /** index → 流式中的文本 */
   streaming: Record<number, string>;
+  /** index → 模型思考中的文本（<think> 块，用来显示"模型思考中…"） */
+  thinking: Record<number, string>;
   isStreaming: boolean;
+  /** 本次生成已耗时（秒） */
+  elapsedSec: number;
   chosenIdx: number | null;
   onChoose: (idx: number) => void;
 }
+
+const VERSION_IDX = [1, 2, 3];
 
 export default function PlotStep({
   genre,
   keywords,
   versions,
   streaming,
+  thinking,
   isStreaming,
+  elapsedSec,
   chosenIdx,
   onChoose,
 }: Props) {
+  /** 每个卡片内容区的 DOM 引用（用于自动滚到底） */
+  const bodyRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  // 流式内容变化 → 把还在底部的内容区压到底部
+  //
+  // 只在"用户本来就在底部附近"时才自动滚：否则用户想回头看前面写的字，
+  // 会被强行拽回底部（很烦）。
+  useEffect(() => {
+    for (const idx of VERSION_IDX) {
+      const el = bodyRefs.current[idx];
+      if (!el) continue;
+      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distanceToBottom < 48) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+  }, [streaming]);
+
   return (
     <div>
       <div className="mb-5">
@@ -39,16 +75,18 @@ export default function PlotStep({
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-neutral-400">
           {genre?.name} · {keywords.size} 个关键词 ·{" "}
           {isStreaming
-            ? "正在生成，稍等…"
+            ? `正在生成（${elapsedSec}s）…`
             : "点卡片读全文，选中的那个会作为大纲和人物卡的基准"}
         </p>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
-        {[1, 2, 3].map((idx) => {
+        {VERSION_IDX.map((idx) => {
           const v = versions.find((x) => x.index === idx);
           const text = v?.summary ?? streaming[idx] ?? "";
+          const thinkingText = thinking[idx] ?? "";
           const streamingHere = isStreaming && !v;
+          const thinkingNow = streamingHere && !text && thinkingText.length > 0;
           const chosen = chosenIdx === idx;
           return (
             <button
@@ -79,7 +117,7 @@ export default function PlotStep({
                 {streamingHere ? (
                   <span className="ml-auto inline-flex items-center gap-1 text-[10.5px] text-neutral-400">
                     <span className="inline-block h-2.5 w-[2px] bg-violet-500" />
-                    生成中
+                    {thinkingNow ? "模型思考中…" : "生成中"}
                   </span>
                 ) : null}
                 {chosen ? (
@@ -90,11 +128,29 @@ export default function PlotStep({
                 ) : null}
               </div>
 
-              <div className="relative h-[212px] overflow-hidden p-3.5 font-serif text-[13px] leading-[1.85] text-neutral-600 dark:text-neutral-400">
-                {text || (streamingHere ? "…" : "等待生成…")}
-                {streamingHere ? (
-                  <span className="ml-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-violet-500 align-middle" />
-                ) : null}
+              {/*
+                内容区：固定最大高 + **可滚动**（原来 overflow-hidden 会把
+                超出部分裁掉 → 流式看起来"卡住"）。
+              */}
+              <div
+                ref={(el) => {
+                  bodyRefs.current[idx] = el;
+                }}
+                className="relative max-h-[212px] min-h-[120px] overflow-y-auto p-3.5 font-serif text-[13px] leading-[1.85] text-neutral-600 dark:text-neutral-400"
+              >
+                {thinkingNow ? (
+                  <span className="text-neutral-400">
+                    {thinkingText.slice(-40).trim()}
+                    <span className="ml-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-violet-500 align-middle" />
+                  </span>
+                ) : (
+                  <>
+                    {text || (streamingHere ? "…" : "等待生成…")}
+                    {streamingHere ? (
+                      <span className="ml-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-violet-500 align-middle" />
+                    ) : null}
+                  </>
+                )}
               </div>
 
               <div className="border-t border-neutral-200/70 px-3 py-2.5 dark:border-neutral-800/70">
@@ -107,7 +163,7 @@ export default function PlotStep({
                   )}
                 >
                   {streamingHere
-                    ? "生成中…"
+                    ? `生成中… ${elapsedSec}s`
                     : chosen
                       ? "✓ 已选中"
                       : "点击选中"}

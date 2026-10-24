@@ -56,6 +56,59 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /*
+   * 滚动条配色（2026-10-24）
+   * ---------------------------------------------------------
+   * 深色模式下系统默认滚动条是**亮白色**，在深色背景上刺眼得很
+   * （用户反馈：切到深色后右边一条大白杠，太过明显）。
+   *
+   * 这里自己画滚动条：深色模式用**近黑**的滑块，融进背景；
+   * 浅色模式用中性灰。
+   *
+   * Tauri 桌面端是 WebView2（Chromium 内核）→ `::-webkit-scrollbar` 生效；
+   * `scrollbar-color` 是 Firefox 的写法，一并写上做兼容。
+   */
+  :root {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+    background-clip: content-box;
+  }
+
+  .dark {
+    /* 深色模式：黑色为主的滑块（不用中性灰 —— 在深色背景上仍然偏亮） */
+    scrollbar-color: #3f3f46 transparent;
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+    background-clip: content-box;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: #52525b;
+    background-clip: content-box;
+  }
 }
 
 @layer components {

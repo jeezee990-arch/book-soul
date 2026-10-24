@@ -8,6 +8,7 @@
  * 作者一眼能看懂大纲长什么样。
  */
 
+import { useEffect, useRef } from "react";
 import { Check, Loader2 } from "lucide-react";
 import type {
   CharProgress,
@@ -21,10 +22,14 @@ interface Props {
   phase: "outline" | "characters" | "done";
   /** 大纲流式原始文本（JSON 片段） */
   outlineText: string;
+  /** 模型思考中的文本（<think> 块）—— 有值且还没出正文时显示"模型思考中…" */
+  outlineThinking: string;
   /** 大纲完成后的结构（结构化渲染用） */
   outlineStructure: Record<string, unknown> | null;
   novelMeta: NovelState | null;
   charProgress: CharProgress;
+  /** 人物卡阶段的思考提示 */
+  charThinking: string;
   /** 去写第一章 */
   onFinish: () => void;
   /** 再写一本 */
@@ -34,15 +39,32 @@ interface Props {
 export default function OutlineStep({
   phase,
   outlineText,
+  outlineThinking,
   outlineStructure,
   novelMeta,
   charProgress,
+  charThinking,
   onFinish,
   onRestart,
 }: Props) {
   const savedCount = charProgress.cards.filter((c) => c.id).length;
   const structure = outlineStructure as CompleteOutlineStructure | null;
   const volumes = structure?.volumes ?? [];
+
+  /** 流式原文区的 DOM 引用（用于自动滚到底） */
+  const streamRef = useRef<HTMLPreElement | null>(null);
+
+  // 流式内容变化 → 滚到底部看最新
+  //
+  // ⚠️ 只在"用户本来就在底部附近"时自动滚，避免把想回看的人强行拽下去。
+  useEffect(() => {
+    const el = streamRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceToBottom < 48) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [outlineText]);
 
   return (
     <div>
@@ -68,7 +90,7 @@ export default function OutlineStep({
           {phase === "outline" ? (
             <span className="ml-auto inline-flex items-center gap-1.5 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10.5px] text-violet-400">
               <Loader2 className="h-3 w-3 animate-spin" />
-              流式生成中
+              {outlineThinking && !outlineText ? "模型思考中…" : "流式生成中"}
             </span>
           ) : (
             <span className="ml-auto inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10.5px] text-emerald-500">
@@ -80,8 +102,20 @@ export default function OutlineStep({
 
         <div className="p-3.5">
           {phase === "outline" ? (
-            <pre className="max-h-[280px] overflow-hidden font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-neutral-500 dark:text-neutral-400">
-              {outlineText || "…"}
+            /*
+             * ⚠️ 必须是 `overflow-y-auto`（原来写的是 `overflow-hidden`）：
+             *    JSON 原文流到 280px 就被裁掉 → 后面的字渲染了但看不见，
+             *    用户看到的就是"生成到一半不动了"。
+             */
+            <pre
+              ref={streamRef}
+              className="max-h-[280px] overflow-y-auto font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-neutral-500 dark:text-neutral-400"
+            >
+              {outlineText || (
+                <span className="text-neutral-400">
+                  {outlineThinking ? outlineThinking.slice(-60).trim() : "…"}
+                </span>
+              )}
               <span className="ml-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-violet-500 align-middle" />
             </pre>
           ) : (
@@ -167,7 +201,7 @@ export default function OutlineStep({
 
           {charProgress.cards.length === 0 ? (
             <p className="rounded-lg border border-dashed border-neutral-200 px-3 py-3 text-[11.5px] text-neutral-400 dark:border-neutral-800">
-              正在从大纲抽取角色…
+              {charThinking ? `模型思考中… ${charThinking.slice(-40).trim()}` : "正在从大纲抽取角色…"}
             </p>
           ) : (
             <div className="flex flex-wrap gap-2.5">
