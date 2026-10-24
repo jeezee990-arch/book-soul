@@ -254,6 +254,22 @@ cd apps/desktop && pnpm tauri build                                # 前端 + Ru
 - `.env` **绝不能**打进包
 - `server/run_server.py` 是唯一入口
 
+> ⚠️ **改完前端必须重新打包，否则用户看到的还是旧 UI**
+>
+> Tauri 打包版的前端资源是**嵌进 exe 二进制**的（不是运行时读目录）。
+> 改完 React 源码 → 跑 `pnpm dev` 或 `vite build` **都不会**更新
+> `dist\Book Soul\Book Soul.exe` —— 启动器跑的还是那个旧 exe。
+>
+> 改前端 → 想让用户看到效果，必须重新走一遍打包：
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File scripts\build_standalone.ps1
+> ```
+>
+> 排查"我改了 UI 但软件里没变"时，**先看 exe 时间戳**：
+> `dist\Book Soul\Book Soul.exe` 的 `LastWriteTime` 必须晚于
+> `apps\desktop\src` 里最新的源码时间，否则就是没重新打包。
+> （`build_standalone.ps1` 末尾自带新鲜度自检，会打这条警告。）
+
 ### 5.4 打包态路径
 
 打包后没有 `pyproject.toml`，向上找目录必然失败。
