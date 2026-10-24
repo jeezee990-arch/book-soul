@@ -6,8 +6,12 @@
  *   灰点 = 尚未探活 / 未配置 Key
  *
  * 探活策略：**只在挂载时拉一次**，不轮询。
- * `/llm/health` 会真去调各 provider 的 /models 端点，轮询等于无谓地烧配额；
+ * `/llm/health` 会真去调 provider 的 /models 端点，轮询等于无谓地烧配额；
  * 用户想刷新可以点它跳到设置页手动测。
+ *
+ * ⚠️ 只探活**当前生效的**那一个 provider（`/llm/health?provider=X`）：
+ * 灯不关心别的 provider，而"没配的 openai / 没启动的 ollama"不可达时
+ * 会把探测拖到 3 秒 —— 那 3 秒对灯毫无意义。
  */
 
 import { useEffect, useState } from "react";
@@ -35,22 +39,27 @@ export default function ModelStatusPill() {
 
     const probe = async () => {
       // 当前生效的 provider / model
+      //
+      // ⚠️ 用**局部变量** active 往下传，不要用 state 里的 provider ——
+      // state 在本轮闭包里还是 null（setState 不会改变已捕获的值）。
+      // 之前靠 useEffect 依赖 [provider] 触发第二轮才凑巧能用，
+      // 代价是 /settings 和 /llm/health 各被请求了两次。
+      let active: LLMProvider | null = null;
       try {
         const s = await settingsApi.get();
         if (cancelled) return;
-        setProvider(s.llm.provider);
+        active = s.llm.provider;
+        setProvider(active);
         setModel(s.llm.model);
       } catch {
         // 设置读不到不影响启动，灯保持灰色
       }
 
-      // 连通性
+      // 连通性：只探当前这一个 provider
       try {
-        const health = await llmApi.health();
-        if (cancelled) return;
-        const key = provider ?? undefined;
-        if (!key) return;
-        const h = health[key];
+        const health = await llmApi.health(active ?? undefined);
+        if (cancelled || !active) return;
+        const h = health[active];
         if (!h) {
           setState("unknown");
         } else if (h.ok) {
@@ -68,7 +77,7 @@ export default function ModelStatusPill() {
     return () => {
       cancelled = true;
     };
-  }, [provider]);
+  }, []);
 
   const label = provider ? `${provider} / ${model}` : "未连接";
 

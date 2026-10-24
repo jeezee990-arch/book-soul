@@ -65,6 +65,25 @@ fn get_backend_error(state: tauri::State<'_, BackendState>) -> Option<String> {
     state.error.clone()
 }
 
+/// 在系统文件管理器里打开数据目录。
+///
+/// ⚠️ 刻意**不用** shell 插件的通用 `open`：那要放开"能打开任意路径、
+/// 任意程序"的权限面。这里只暴露"打开数据目录"这一个固定动作 —— 权限最小。
+#[tauri::command]
+fn open_data_dir(state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    let dir = &state.data_dir;
+    if !dir.exists() {
+        return Err(format!("数据目录不存在：{}", dir.display()));
+    }
+    let spawn_result = if cfg!(target_os = "windows") {
+        std::process::Command::new("explorer.exe").arg(dir).spawn()
+    } else {
+        std::process::Command::new("open").arg(dir).spawn()
+    };
+    spawn_result.map_err(|e| format!("打开数据目录失败：{e}"))?;
+    Ok(())
+}
+
 /// 等待后端就绪（前端启动时调用，避免首屏就 503）。
 ///
 /// 返回 true = 后端已就绪；false = 超时（前端应显示"启动中/失败"而不是白屏）。
@@ -256,6 +275,7 @@ pub fn run() {
             get_backend_url,
             get_data_dir,
             get_backend_error,
+            open_data_dir,
             backend_ready
         ])
         .build(tauri::generate_context!())
@@ -264,10 +284,16 @@ pub fn run() {
     app.run(|app_handle, event| {
         // 兜底：窗口没走 CloseRequested 就整个退出了（任务管理器强杀 / 崩溃），
         // 也要确保后端不会变孤儿进程。
+        //
+        // ⚠️ 这里必须**同步**杀：正常关窗时 CloseRequested 已经把句柄取走了
+        // （slot = None，这里是 no-op）；走到这里说明是异常退出路径，
+        // 若还 spawn 线程，app 一退出线程就被连带杀掉 → 后端成孤儿。
         if matches!(event, tauri::RunEvent::Exit) {
             if let Some(state) = app_handle.try_state::<BackendProcess>() {
                 if let Ok(mut guard) = state.0.lock() {
-                    sidecar::kill_backend(&mut guard);
+                    if let Some(child) = guard.take() {
+                        sidecar::kill_backend_child(child);
+                    }
                 }
             }
         }

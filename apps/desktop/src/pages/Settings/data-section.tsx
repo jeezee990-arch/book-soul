@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { Copy, FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 import { settingsApi, type Settings } from "@/api/settings";
+import { desktopApi } from "@/api/desktop";
 import { ApiError } from "@/api";
 import BackupPanel from "@/components/BackupPanel";
 import { Switch } from "@/components/ui/switch";
@@ -41,6 +42,19 @@ export default function DataSection() {
       cancelled = true;
     };
   }, []);
+
+  /** 在系统文件管理器里打开数据目录（桌面版专属能力）。 */
+  async function handleOpenFolder() {
+    try {
+      await desktopApi.openDataDir();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // 纯浏览器（vite dev，没起 Tauri）下没有这个能力 → 退化成"给路径让用户自己开"
+      toast.error("无法自动打开文件夹", {
+        description: `${msg}｜路径：${settings?.data_dir ?? "未知"}`,
+      });
+    }
+  }
 
   async function handleSaveSecurity() {
     setSaving(true);
@@ -105,11 +119,7 @@ export default function DataSection() {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() =>
-                toast.info("请到系统文件管理器打开该目录", {
-                  description: settings?.data_dir,
-                })
-              }
+              onClick={() => void handleOpenFolder()}
             >
               <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
               在文件夹中显示

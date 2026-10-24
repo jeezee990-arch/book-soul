@@ -274,7 +274,7 @@ export default function LlmSection() {
           onClick={() => {
             setModelsLoading(true);
             llmApi
-              .listModels(llmProvider)
+              .listModels(llmProvider, true)
               .then((info) => {
                 modelInfoRef.current = info;
                 setModelInfo(info);

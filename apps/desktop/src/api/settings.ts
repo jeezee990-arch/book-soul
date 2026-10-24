@@ -96,11 +96,30 @@ export interface LLMTestResult {
 
 /** LLM 相关端点（模型清单、探活、连通性测试） */
 export const llmApi = {
-  /** 实时拉取 provider 支持的模型列表（设置页下拉框） */
-  listModels: (provider: LLMProvider) =>
-    callApi<ProviderModels>("GET", `/llm/models?provider=${provider}`),
-  /** 探活所有 provider（顶栏模型灯用） */
-  health: () => callApi<ProviderHealth>("GET", "/llm/health"),
+  /**
+   * 取 provider 支持的模型列表（设置页下拉框）。
+   *
+   * @param refresh true = 绕过服务端缓存强制重新拉取（「刷新列表」按钮用）。
+   *   不带这个参数时走缓存 —— 实时拉取在网络差时要等好几秒，
+   *   而设置页每次打开都会调一次。
+   */
+  listModels: (provider: LLMProvider, refresh = false) =>
+    callApi<ProviderModels>(
+      "GET",
+      `/llm/models?provider=${provider}${refresh ? "&refresh=true" : ""}`,
+    ),
+  /**
+   * 探活 provider（顶栏模型灯用）。
+   *
+   * @param provider 只探这一个。灯只关心"当前生效的那个 provider" ——
+   *   如果每次都探全部，"用户用 mimo 但没配的 openai 不可达"会让灯白等 3 秒。
+   *   不传则探全部。
+   */
+  health: (provider?: LLMProvider) =>
+    callApi<ProviderHealth>(
+      "GET",
+      provider ? `/llm/health?provider=${provider}` : "/llm/health",
+    ),
   /** 真实调一次模型验证连通性（设置页「测试连接」按钮） */
   test: (data?: { prompt?: string; provider?: string; max_tokens?: number }) =>
     callApi<LLMTestResult>("POST", "/llm/test", data ?? {}),

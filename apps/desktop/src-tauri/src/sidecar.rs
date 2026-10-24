@@ -303,31 +303,65 @@ pub fn start_backend(app: &tauri::AppHandle, data_dir: &Path) -> BackendStart {
     }
 }
 
-/// 终止后端子进程（幂等）。
+/// 终止后端子进程（幂等，**立即返回**）。
 ///
-/// Windows 上必须**杀整个进程树**：sidecar 是 PyInstaller onefile，
-/// 运行时是「引导进程 → Python 子进程」两层。`Child::kill()` 只杀得掉引导进程，
-/// Python 子进程会变成孤儿（继续占端口 + 锁 SQLite 文件）。
+/// ⚠️ 必须在**后台线程**里做事，不能直接跑在窗口关闭事件处理器上。
+/// 原因：`taskkill` 要 spawn 一个子进程（约 200-500ms），之前这段跑在
+/// Tauri 的 UI 线程上 —— 用户点了 X 之后窗口会**僵住**半秒才消失。
+/// 现在改成：取走子进程句柄，丢后台线程去杀，UI 立即返回，窗口秒关。
 ///
-/// 另有第二层保障：Python 侧的父进程看门狗（`core/watchdog.py`）会在
-/// 桌面端消失时自行退出。两层机制互不依赖，任何一层单独失效都不会留孤儿。
+/// 孤儿兜底：万一 app 在后台线程跑完前就退出了，Python 侧的父进程看门狗
+/// （`core/watchdog.py`）会在 2 秒内让后端自行退出。两层机制互不依赖。
 pub fn kill_backend(slot: &mut Option<Child>) {
-    if let Some(mut child) = slot.take() {
-        let pid = child.id();
-        logging::info(&format!("正在结束后端进程（pid={pid}）"));
+    if let Some(child) = slot.take() {
+        std::thread::spawn(move || kill_backend_child(child));
+    }
+}
 
-        // 杀进程树（Windows 专用；taskkill /T 会连带干掉子孙进程）
-        #[cfg(windows)]
-        {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
+/// 真正执行杀进程（跑在后台线程里）。
+///
+/// 流程：
+/// 1. `taskkill /T /F` 杀**整个进程树** —— sidecar 是 PyInstaller onefile，
+///    运行时是「引导进程 → Python 子进程」两层，`Child::kill()` 只杀得掉引导进程，
+///    Python 子进程会变成孤儿（继续占端口 + 锁 SQLite 文件）。
+/// 2. 轮询 `try_wait` 确认退出。
+/// 3. 超时上限 2 秒 —— 之前用的是**阻塞的 `child.wait()`**，taskkill 万一失败
+///    （权限/被杀不掉）就会永远卡在这里，窗口永远关不掉。
+pub fn kill_backend_child(mut child: Child) {
+    let pid = child.id();
+    logging::info(&format!("正在结束后端进程（pid={pid}）"));
+
+    // 杀进程树（Windows 专用；taskkill /T 会连带干掉子孙进程）
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
+    // 兜底：直接 kill 引导进程
+    let _ = child.kill();
+
+    // 轮询确认退出（不阻塞）。上限 2 秒，超时就撒手 ——
+    // 进程句柄由 Child 的 Drop 关闭，Windows 上不存在 zombie。
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    logging::warn("后端进程未在 2s 内退出，放弃等待");
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                // 注意：logging::warn 只接受 &str，不支持 format 插值
+                logging::warn(&format!("try_wait failed: {e}"));
+                break;
+            }
         }
-
-        // 兜底：直接 kill 引导进程
-        let _ = child.kill();
-        let _ = child.wait();
     }
 }
