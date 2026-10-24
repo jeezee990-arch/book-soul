@@ -15,10 +15,12 @@
 - generate_from_outline 角色非法 → 归到"其他"
 - generate_from_outline YAML 解析失败 → CharacterGenerationError
 - generate_from_outline 角色名 / 主题 / 元信息透传
+- stream_generate_from_outline 并发入库：多张卡必须**全部**入库（2026-10-24 回归）
 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -528,3 +530,106 @@ def test_no_loaded_prompt_at_import_time() -> None:
     # 模块在 sys.modules 里
     assert "src.services.character_generator" in sys.modules
     # 不应自动加载 prompt 文件（无法直接断言；这里只保证模块导入不抛错）
+
+
+# ===== 流式路径：并发入库（2026-10-24 回归）=====
+
+_CARD_BY_NAME = {
+    "韩立": _CARD_HANLI,
+    "南宫婉": _CARD_NANGONG,
+    "墨大夫": _CARD_MO,
+}
+
+
+class _StreamMockLLM:
+    """支持 ``stream=True`` 的 mock LLM。
+
+    ``barrier`` 用于让所有人物卡**在同一时刻**结束 LLM 阶段，
+    从而确定性地触发并发入库的竞态（共用一个 AsyncSession）。
+    """
+
+    def __init__(self, barrier: asyncio.Barrier | None = None) -> None:
+        self.barrier = barrier
+        self.provider = "mock"
+        self.model = "mock-model"
+
+    async def chat(self, messages: list[ChatMessage], **kw: object) -> object:
+        """返回 async generator（与 ``await llm.chat(..., stream=True)`` 匹配）。"""
+        prompt = messages[0].content
+        is_extract = "提取所有人物" in prompt
+        if is_extract:
+            payload = _EXTRACT_JSON
+        else:
+            payload = _CARD_HANLI
+            for name, card in _CARD_BY_NAME.items():
+                if f"姓名：{name}" in prompt:
+                    payload = card
+                    break
+
+        async def _gen() -> object:
+            yield payload
+            # 只在**人物卡阶段**汇合；抽取阶段只有一个调用方，不能占 barrier 名额
+            if self.barrier is not None and not is_extract:
+                # 让所有卡在这里汇合 —— 之后同时进入入库阶段
+                await self.barrier.wait()
+
+        return _gen()
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_saves_all_cards_when_generated_concurrently(
+    db_initialized: Path,
+) -> None:
+    """回归：多张人物卡**并行**生成时，必须**全部**入库。
+
+    2026-10-24 修的真实 bug：``stream_generate_from_outline`` 里每张卡的
+    入库（``CharacterService.create`` → ``session.flush()/commit()``）也是并行的，
+    而所有卡共用同一个 ``AsyncSession`` —— AsyncSession 不是并发安全的，
+    同时 flush 会抛 ``InvalidRequestError: Session is already flushing``，
+    结果是 4 张卡只存进去 1 张（用户看到的"已生成 4 个人物卡"其实是假的）。
+    """
+    from src.models.character import Character
+    from src.models.novel import Novel
+
+    async with _session() as session:
+        novel = Novel(name="并发入库测试", genre="修仙", description="test")
+        session.add(novel)
+        await session.commit()
+        await session.refresh(novel)
+        novel_id = novel.id
+
+    # 3 张卡在 LLM 阶段结束时汇合 → 同时进入入库阶段
+    mock = _StreamMockLLM(barrier=asyncio.Barrier(3))
+
+    events: list[dict] = []
+    async with _session() as session:
+        gen = CharacterGenerator(session, llm_client=mock)
+
+        async def run() -> None:
+            async for ev in gen.stream_generate_from_outline(
+                novel_id=novel_id,
+                outline={"outline_type": "complete", "volumes": []},
+                genre="修仙",
+            ):
+                events.append(ev)
+
+        await asyncio.wait_for(run(), timeout=15)
+
+    # 三张卡都要入库
+    async with _session() as session:
+        from sqlalchemy import select
+
+        stmt = select(Character).where(Character.novel_id == novel_id)
+        rows = (await session.execute(stmt)).scalars().all()
+        assert len(rows) == 3, f"只入库了 {len(rows)} 张卡（并发写 session 的竞态）"
+        assert {r.name for r in rows} == {"韩立", "南宫婉", "墨大夫"}
+        for r in rows:
+            assert r.current_version_id is not None
+
+    # done 事件的 saved_count 必须是**实际入库张数**，不能是"计划张数"
+    done = [e for e in events if e.get("event") == "done"]
+    assert len(done) == 1
+    assert done[0]["saved_count"] == 3
+
+    # 不能有失败事件
+    assert [e for e in events if e.get("event") == "error"] == []

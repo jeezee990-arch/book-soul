@@ -18,6 +18,7 @@ import { useEffect, useRef } from "react";
 import { Check } from "lucide-react";
 import type { GenreDef } from "@/config/genres";
 import type { PlotVersion } from "./types";
+import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -59,10 +60,7 @@ export default function PlotStep({
     for (const idx of VERSION_IDX) {
       const el = bodyRefs.current[idx];
       if (!el) continue;
-      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (distanceToBottom < 48) {
-        el.scrollTop = el.scrollHeight;
-      }
+      if (isNearBottom(el)) scrollToBottom(el);
     }
   }, [streaming]);
 

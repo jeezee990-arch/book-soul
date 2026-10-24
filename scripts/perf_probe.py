@@ -32,8 +32,10 @@
 而 ``test_llm_models_endpoint.py`` 会去探 ollama 端口 → 互相干扰。
 """
 
+# ruff: noqa: T201  # 这是一个 CLI 探针，stdout 就是它的输出渠道
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import socket
@@ -45,6 +47,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from mock_content import extract_prompt_text, pick_content
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "server"))
 
@@ -54,6 +58,12 @@ CHUNK_DELAY_MS = int(os.environ.get("MOCK_DELAY_MS", "50"))
 CHUNK_COUNT = int(os.environ.get("MOCK_CHUNKS", "40"))
 THINK_MS = int(os.environ.get("MOCK_THINK_MS", "0"))  # 模拟"思考"空窗
 CHARS_PER_CHUNK = int(os.environ.get("MOCK_CHARS", "12"))
+# 未知场景的兜底内容长度上限。
+# 为什么需要：后端 ``plot_summary`` 上限 5000 字，超了下一个接口直接 422。
+MAX_FALLBACK_CHARS = int(os.environ.get("MOCK_MAX_CHARS", "4000"))
+
+# 剧情场景的版本轮换计数器（让并行的 3 张剧情卡内容不同，近似真实的多采样）
+_VARIANT_COUNTER = itertools.count()
 
 # ---- mock SSE provider -----------------------------------------------------
 
@@ -114,12 +124,23 @@ class MockHandler(BaseHTTPRequestHandler):
                 b'data: {"choices":[{"delta":{"content":"<think>\\u6211\\u60f3\\u60f3</think>"}}]}\n\n'
             )
 
-        for i in range(CHUNK_COUNT):
+        # 内容按场景选：剧情吐假剧情，大纲/人物卡吐**能被后端解析**的 JSON/YAML
+        # （否则大纲那一步会 parse 失败，向导退回第 2 步，UI 走不到第 3 步）。
+        #
+        # fallback 长度要封顶：未知场景下 ``CHARS_PER_CHUNK * CHUNK_COUNT`` 可能上万，
+        # 而后端 ``plot_summary`` 上限 5000 字 —— 超了下一个接口直接 422，
+        # 向导会卡在第 3 步。封顶后最坏情况也只是"内容短"，不会"接口报错"。
+        fallback = "字" * min(CHARS_PER_CHUNK * CHUNK_COUNT, MAX_FALLBACK_CHARS)
+        content = pick_content(
+            extract_prompt_text(payload),
+            fallback=fallback,
+            variant=next(_VARIANT_COUNTER),
+        )
+        step = max(1, CHARS_PER_CHUNK)
+        pieces = [content[i : i + step] for i in range(0, len(content), step)]
+        for piece in pieces:
             time.sleep(CHUNK_DELAY_MS / 1000)
-            piece = "字" * CHARS_PER_CHUNK
-            line = json.dumps(
-                {"choices": [{"delta": {"content": piece}}]}, ensure_ascii=False
-            )
+            line = json.dumps({"choices": [{"delta": {"content": piece}}]}, ensure_ascii=False)
             write_chunk(f"data: {line}\n\n".encode())
 
         write_chunk(b"data: [DONE]\n\n")
@@ -204,9 +225,7 @@ def main() -> None:
     t0 = time.perf_counter()
     stamps: list[tuple[float, dict]] = []
     with httpx.Client(timeout=300) as client:
-        with client.stream(
-            "POST", f"{base}/inspirations/generate-plot/stream", json=body
-        ) as resp:
+        with client.stream("POST", f"{base}/inspirations/generate-plot/stream", json=body) as resp:
             print(f"HTTP status        : {resp.status_code}")
             print(f"TTFB (headers)     : {(time.perf_counter() - t0) * 1000:.0f} ms")
             for line in resp.iter_lines():
@@ -220,16 +239,14 @@ def main() -> None:
     print(f"total wall time    : {total * 1000:.0f} ms")
     if stamps:
         print(f"first event at     : {stamps[0][0] * 1000:.0f} ms")
-        first_delta = next(
-            (s[0] for s in stamps if s[1].get("event") == "delta"), float("nan")
-        )
+        first_delta = next((s[0] for s in stamps if s[1].get("event") == "delta"), float("nan"))
         print(f"first DELTA at     : {first_delta * 1000:.0f} ms")
 
         # 只看**第一个版本**的 delta 间隔：
         # 其它版本的 delta 在队列里排着（有序合并），会被一口气吐出来，
         # 间隔全是 0，混进来会把统计搅乱。
         dts = [s[0] for s in stamps if s[1].get("event") == "delta" and s[1].get("index") == 1]
-        gaps = [round((b - a) * 1000, 1) for a, b in zip(dts, dts[1:])]
+        gaps = [round((b - a) * 1000, 1) for a, b in zip(dts, dts[1:], strict=False)]
         if gaps:
             print(f"v1 delta count     : {len(dts)}")
             print(f"v1 delta gap median: {statistics.median(gaps):.1f} ms")

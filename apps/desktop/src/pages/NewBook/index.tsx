@@ -18,7 +18,7 @@ import { inspirationsApi } from "@/api/inspirations";
 import { outlinesApi } from "@/api/outlines";
 import { charactersApi } from "@/api/characters";
 import { chaptersApi } from "@/api/chapters";
-import { readNdjsonStream, type StreamRequest } from "@/api/streams";
+import { readNdjsonStream, detectStreamFailure, type StreamRequest } from "@/api/streams";
 import type { GenreDef } from "@/config/genres";
 import { useNovelsStore } from "@/stores/novels-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -125,6 +125,13 @@ export default function NewBook() {
         signal: req.signal,
       })) {
         const obj = ev as unknown as Record<string, unknown>;
+        const failure = detectStreamFailure(ev);
+        if (failure) {
+          toast.error("剧情生成失败", { description: failure.message });
+          setPlotBusy(false);
+          stopElapsed();
+          return;
+        }
         const event = obj.event as string | undefined;
         const text = obj.text as string | undefined;
         const index = obj.index as number | undefined;
@@ -150,13 +157,6 @@ export default function NewBook() {
               { index: index!, summary: obj.summary as string },
             ].sort((a, b) => a.index - b.index);
           });
-        } else if (event === "error") {
-          toast.error("剧情生成失败", {
-            description: (obj.message as string) ?? "未知错误",
-          });
-          setPlotBusy(false);
-          stopElapsed();
-          return;
         }
       }
     } catch (e: unknown) {
@@ -172,9 +172,19 @@ export default function NewBook() {
 
   // ===== 步骤 2 → 3：选剧情 → 生成大纲 =====
 
-  const startOutlineStream = useCallback(async () => {
-    if (chosenPlotIdx === null) return;
-    const plot = plotVersions.find((v) => v.index === chosenPlotIdx);
+  /**
+   * 生成大纲（剧情 → 大纲）。
+   *
+   * ⚠️ `targetIdx` 用来**显式指定**用哪个剧情版本。
+   *    不传时回退到 state 里的 `chosenPlotIdx` —— 但 state 是异步的，
+   *    同一帧里读到的还是旧值：「点了卡片就自动生成」的做法会拿上一张卡的
+   *    剧情去生成大纲（第一次点读到 null 直接 return，第二次点才生效）。
+   *    所以卡片只负责"选中"，真正生成走按钮，传入显式索引。
+   */
+  const startOutlineStream = useCallback(async (targetIdx?: number | null) => {
+    const idx = targetIdx ?? chosenPlotIdx;
+    if (idx === null || idx === undefined) return;
+    const plot = plotVersions.find((v) => v.index === idx);
     if (!plot) return;
 
     setOutlineText("");
@@ -205,6 +215,15 @@ export default function NewBook() {
         signal: req.signal,
       })) {
         const obj = ev as unknown as Record<string, unknown>;
+        const failure = detectStreamFailure(ev);
+        if (failure) {
+          // 失败就退回剧情页 —— 否则界面停在"流式生成中…"永远转圈
+          toast.error("大纲生成失败", { description: failure.message });
+          setOutlineText("");
+          setOutlineThinking("");
+          setStep("plot");
+          return;
+        }
         const event = obj.event as string | undefined;
         if (event === "thinking") {
           // 推理模型思考阶段：显示"模型思考中…"，而不是让用户对着空白等待
@@ -223,12 +242,6 @@ export default function NewBook() {
           setOutlinePhase("characters");
           // 自动触发人物卡生成
           void startCharacterStream(novelId, structure);
-        } else if (event === "error") {
-          toast.error("大纲生成失败", {
-            description: (obj.message as string) ?? "未知错误",
-          });
-          setStep("plot");
-          return;
         }
       }
     } catch (e: unknown) {
@@ -259,6 +272,12 @@ export default function NewBook() {
           signal: req.signal,
         })) {
           const obj = ev as unknown as Record<string, unknown>;
+          const failure = detectStreamFailure(ev);
+          if (failure) {
+            setCharProgress((s) => ({ ...s, error: failure.message }));
+            toast.error("人物卡生成失败", { description: failure.message });
+            return;
+          }
           const event = obj.event as string | undefined;
           if (event === "thinking") {
             // 推理模型思考阶段：给个提示，别让用户以为卡死了
@@ -292,8 +311,6 @@ export default function NewBook() {
               ...s,
               cards: s.cards.map((c) => (c.name === name ? { ...c, id } : c)),
             }));
-          } else if (event === "error") {
-            setCharProgress((s) => ({ ...s, error: obj.message as string }));
           } else if (event === "done") {
             setOutlinePhase("done");
             setStep("done");
@@ -309,6 +326,19 @@ export default function NewBook() {
     },
     [genre, userExtra],
   );
+
+  // 大纲阶段 → 退回剧情页重选（不然选错一条只能整本重开）
+  const handleBackToPlot = useCallback(() => {
+    outlineAbortRef.current?.abort();
+    charAbortRef.current?.abort();
+    setOutlineText("");
+    setOutlineThinking("");
+    setOutlineMeta(null);
+    setCharProgress(EMPTY_CHAR_PROGRESS);
+    setCharThinking("");
+    setOutlinePhase("outline");
+    setStep("plot");
+  }, []);
 
   // ===== 完成 → 自动建第一章 → 跳写作页 =====
 
@@ -514,8 +544,9 @@ export default function NewBook() {
                 elapsedSec={elapsedSec}
                 chosenIdx={chosenPlotIdx}
                 onChoose={(idx) => {
+                  // 只负责"选中"。生成走下面的按钮 —— 按钮显式传索引，
+                  // 避免"点了卡片就自动生成"时读到上一轮的陈旧 state。
                   setChosenPlotIdx(idx);
-                  void startOutlineStream();
                 }}
               />
               <div className="mt-7 flex items-center justify-between">
@@ -533,7 +564,7 @@ export default function NewBook() {
                 {chosenPlotIdx !== null && !plotBusy ? (
                   <button
                     type="button"
-                    onClick={() => void startOutlineStream()}
+                    onClick={() => void startOutlineStream(chosenPlotIdx)}
                     className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-5 text-[13px] font-medium text-white transition-colors hover:bg-violet-700"
                   >
                     用走向 {String.fromCharCode(64 + chosenPlotIdx)} 生成大纲
@@ -553,13 +584,20 @@ export default function NewBook() {
               charProgress={charProgress}
               charThinking={charThinking}
               onFinish={() => void handleFinish()}
+              onBack={handleBackToPlot}
               onRestart={() => {
                 setStep("seed");
                 setGenre(null);
                 setKeywords(new Set());
+                setPlotVersions([]);
+                setPlotStreaming({});
+                setPlotThinking({});
+                setChosenPlotIdx(null);
                 setOutlineText("");
+                setOutlineThinking("");
                 setOutlineMeta(null);
                 setCharProgress(EMPTY_CHAR_PROGRESS);
+                setCharThinking("");
                 setOutlinePhase("outline");
               }}
             />

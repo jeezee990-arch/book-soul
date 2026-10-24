@@ -15,6 +15,7 @@ import type {
   NovelState,
 } from "./types";
 import type { CompleteOutlineStructure } from "@/lib/types";
+import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -32,6 +33,8 @@ interface Props {
   charThinking: string;
   /** 去写第一章 */
   onFinish: () => void;
+  /** 退回剧情页重选一条 */
+  onBack: () => void;
   /** 再写一本 */
   onRestart: () => void;
 }
@@ -45,6 +48,7 @@ export default function OutlineStep({
   charProgress,
   charThinking,
   onFinish,
+  onBack,
   onRestart,
 }: Props) {
   const savedCount = charProgress.cards.filter((c) => c.id).length;
@@ -60,25 +64,32 @@ export default function OutlineStep({
   useEffect(() => {
     const el = streamRef.current;
     if (!el) return;
-    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceToBottom < 48) {
-      el.scrollTop = el.scrollHeight;
-    }
+    if (isNearBottom(el)) scrollToBottom(el);
   }, [outlineText]);
 
   return (
     <div>
-      <div className="mb-5">
-        <h2 className="text-[19px] font-semibold tracking-tight">
-          {phase === "done" ? "作品骨架已就绪" : "正在生成大纲与人物卡"}
-        </h2>
-        <p className="mt-1.5 text-[12.5px] leading-relaxed text-neutral-400">
-          {phase === "outline"
-            ? "大纲会按「卷 → 章 → 关键事件」结构化输出，随后自动抽取角色。"
-            : phase === "characters"
-              ? "大纲已完成，正在从大纲抽取角色并生成人物卡。"
-              : "大纲与人物卡都已入库，可以直接开始写第一章。"}
-        </p>
+      <div className="mb-5 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-[19px] font-semibold tracking-tight">
+            {phase === "done" ? "作品骨架已就绪" : "正在生成大纲与人物卡"}
+          </h2>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-neutral-400">
+            {phase === "outline"
+              ? "大纲会按「卷 → 章 → 关键事件」结构化输出，随后自动抽取角色。"
+              : phase === "characters"
+                ? "大纲已完成，正在从大纲抽取角色并生成人物卡。"
+                : "大纲与人物卡都已入库，可以直接开始写第一章。"}
+          </p>
+        </div>
+        {/* 选错一条还能回头（否则只能整本重开） */}
+        <button
+          type="button"
+          onClick={onBack}
+          className="h-7 shrink-0 rounded-lg px-2.5 text-[12px] text-neutral-500 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          ← 换一条剧情
+        </button>
       </div>
 
       {/* ===== 大纲 ===== */}

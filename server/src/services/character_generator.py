@@ -402,6 +402,13 @@ class CharacterGenerator:
         # Step 2: 并行流式生成每张卡；每个 card 用 queue 透出事件
         yield {"event": "phase", "phase": "cards"}
 
+        # ⚠️ **写库必须串行**。
+        #    所有 card_runner 共用同一个 AsyncSession，而 AsyncSession 不是并发安全的 ——
+        #    两张卡同时 flush/commit 会抛 `InvalidRequestError: Session is already flushing`，
+        #    结果就是"4 张卡只存进去 1 张"（2026-10-24 实测复现）。
+        #    LLM 调用（最耗时的部分）保持并行，只把入库这一小段用锁串起来。
+        db_lock = asyncio.Lock()
+
         async def card_runner(item: dict[str, str]) -> _CardQueueHandle:
             """单卡流式生成 → 解析 → 入库。"""
             q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -466,9 +473,11 @@ class CharacterGenerator:
                     }
                     from ..schemas.character import CharacterCreate
 
-                    character = await char_service.create(
-                        CharacterCreate(novel_id=novel_id, **card)
-                    )
+                    # 入库串行（见上面 db_lock 的说明）：共用一个 AsyncSession 不能并发写
+                    async with db_lock:
+                        character = await char_service.create(
+                            CharacterCreate(novel_id=novel_id, **card)
+                        )
                     await q.put(
                         {
                             "event": "card_done",
@@ -491,8 +500,12 @@ class CharacterGenerator:
             return _CardQueueHandle(name=item["name"], q=q, task=task)
 
         handles = [await card_runner(item) for item in extracted]
+        # saved_count 按**实际存进去的张数**算（失败的卡不能算）
+        saved_count = 0
         try:
             async for payload in merge_queue_events([h.q for h in handles]):
+                if payload.get("event") == "card_done":
+                    saved_count += 1
                 yield payload
         finally:
             await asyncio.gather(*(h.task for h in handles), return_exceptions=True)
@@ -501,7 +514,7 @@ class CharacterGenerator:
 
         yield {
             "event": "done",
-            "saved_count": len(extracted),
+            "saved_count": saved_count,
             "provider": provider,
             "model": model,
         }

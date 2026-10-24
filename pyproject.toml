@@ -13,6 +13,9 @@ members = ["server"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# alembic 自动生成的迁移文件：类型注解是模板产的旧式 Union、import 顺序由模板决定。
+# 不手改（alembic 升级模板时会产生噪音 diff），也不纳入 lint/format 门禁。
+extend-exclude = ["server/alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "DTZ", "T"]

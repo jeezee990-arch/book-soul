@@ -22,6 +22,7 @@ vi.mock("../backend", () => ({
 }));
 
 import {
+  detectStreamFailure,
   isStreamDone,
   isStreamError,
   readNdjsonStream,
@@ -73,6 +74,29 @@ describe("类型守卫", () => {
     expect(isStreamError({ error: "boom" })).toBe(true);
     expect(isStreamError({ error: 123 } as never)).toBe(false);
     expect(isStreamError({ text: "x" })).toBe(false);
+  });
+});
+
+describe("detectStreamFailure", () => {
+  it("HTTP 层错误（{ error }）被识别为 transport 失败", () => {
+    const f = detectStreamFailure({ error: "422 Unprocessable Content" });
+    expect(f).toEqual({ source: "transport", message: "422 Unprocessable Content" });
+  });
+
+  it("后端流内错误帧（{ event: 'error' }）被识别为 server 失败", () => {
+    const f = detectStreamFailure({ event: "error", message: "模型调用失败" } as never);
+    expect(f).toEqual({ source: "server", message: "模型调用失败" });
+  });
+
+  it("流内错误帧缺 message 时给兜底文案，不返回空串", () => {
+    const f = detectStreamFailure({ event: "error" } as never);
+    expect(f).toEqual({ source: "server", message: "未知错误" });
+  });
+
+  it("正常事件不算失败", () => {
+    expect(detectStreamFailure({ text: "x" })).toBeNull();
+    expect(detectStreamFailure({ done: true })).toBeNull();
+    expect(detectStreamFailure({ event: "delta", text: "x" } as never)).toBeNull();
   });
 });
 

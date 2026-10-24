@@ -2,6 +2,16 @@
 
 <!--
 修改记录
+- 2026-10-24：第五轮（真机 UI 走查 + 门禁补漏）。主要变化：
+  · §4.10 流式失败有两类（transport / server），前端必须都认，否则界面永远转圈
+  · 根 pyproject.toml 的 ruff 排除 server/alembic/versions（模板生成文件不手改）
+  · 新增 scripts/mock_provider.py（无 API Key 也能走完"开新书"三步）
+- 2026-10-24：第四轮（用户实测反馈 5 条：深色滚动条 / 生成顺序 / 卡片不可滚 / 假流式 / 性能）。
+  主要变化：
+  · §4.7 流式端点三条铁律（思考不丢 / 容器可滚 / 并行保序）
+  · §4.8 并行 LLM 调用 + 单 Session 写库（AsyncSession 并发写会炸）
+  · §4.9 同一帧里不要读刚 set 的 state（setState 异步 → 选 B 生成 A）
+  · 性能结论写进 §4.7：代码侧开销 +0.5ms/token，慢在模型不在代码
 - 2026-10-22：重构版规范（用户授权全面重设）。主要变化：
   · 删除"单一函数 ≤ 200 行"，改为"单文件 ≤ 500 行 + docstring 必填 + 覆盖率门槛"
   · 删除 ChromaDB（代码里从未落地，RAG 对个人网文收益低、负担重）
@@ -246,6 +256,87 @@ resp = await self._client.post(url, json=payload)
 > 整条流的总开销 ~100ms。**流式链路不是瓶颈 —— 慢在模型。**
 > 所以别再去优化"转发"环节，要优化的是：模型选型、输出长度、思考时长。
 > 埋点：`plot version N: first delta after Xs` / `N deltas, Xs total`（server.log）。
+
+### 4.8 并行 LLM 调用 + 单 Session 写库（2026-10-24 新增）
+
+**并行的是 LLM 调用，串行的是写库。** 这条是 2026-10-24 实测踩出来的。
+
+`AsyncSession` **不是并发安全的**：两个协程同时 `flush()/commit()` 会抛
+`InvalidRequestError: Session is already flushing`。
+
+| 场景 | 正确写法 | 位置 |
+|---|---|---|
+| N 个 LLM 调用并行 | `asyncio.gather(...)` | `services/character_generator.py::generate_from_outline` |
+| N 个结果写同一个 session | **for 循环串行**（非流式路径）／**`asyncio.Lock`**（流式路径） | 同上，`stream_generate_from_outline` 里用 `db_lock` |
+
+> 真实事故：人物卡流式生成时 4 张卡的**入库也是并行的** → 3 张抛
+> `Session is already flushing` → 用户看到的"已生成 4 个人物卡"是假的。
+> 非流式路径一直是对的（先 gather 再串行入库），只有流式路径漏了。
+>
+> **推广规则**：任何"并行拿结果 → 落库"的代码，写库那一段必须有锁或 for 循环。
+> 并行只留给 LLM 调用这种纯网络等待。
+>
+> 契约测试：`server/tests/test_character_generator.py::test_stream_generate_saves_all_cards_when_generated_concurrently`
+> （用 `asyncio.Barrier` 让所有卡同时进入入库阶段，确定性复现竞态）。
+
+### 4.9 同一帧里不要读刚 set 的 state（2026-10-24 新增）
+
+`setState` 是异步的 —— **同一帧里读到的还是旧值**。
+
+```python
+# ❌ 前端同理：React 的 setState 也是异步的
+onChoose={(idx) => {
+  setChosenPlotIdx(idx);
+  void startOutlineStream();   // ← 这里读到的 chosenPlotIdx 还是 null / 上一次的值
+}}
+```
+
+真实事故：点剧情卡本该"选中并生成大纲"，结果第一次点读到 `null` 直接 return
+（点了没反应），第二次点才拿**上一张卡**去生成大纲（选 B 生成 A）。
+
+**修法**：需要用刚设的值时，**显式传参**，不要在回调里回头读 state。
+
+```tsx
+onChoose={(idx) => { setChosenPlotIdx(idx); }}        // 只管"选中"
+onClick={() => void startOutlineStream(chosenPlotIdx)} // 生成时显式传索引
+```
+
+> 这条对 Python 同样适用：`await` 之后再读共享的可变状态，时序一样会骗你。
+
+### 4.10 流式失败有两类，前端必须都认（2026-10-24 新增）
+
+NDJSON 流有两种失败长得**完全不一样**，漏掉任何一类，界面都会**永远转圈**：
+
+| 来源 | 事件形状 | 谁产出 |
+|---|---|---|
+| **transport** | `{ "error": "422 Unprocessable Content" }` | 前端 `readNdjsonStream`（HTTP 非 2xx / 无 body / NDJSON 解析失败） |
+| **server** | `{ "event": "error", "message": "..." }` | 后端流内错误帧（`server/src/api/_stream_helpers.py`） |
+
+**只判断 `event === "error"` 的后果**：HTTP 422/500 时 generator 正常 `return`，
+`for await` 正常退出，**没有任何分支命中** → 不弹错、不回退 → UI 卡在
+"生成中…"无限等待。真实事故：2026-10-24 真机走查，大纲接口 422，
+界面停在"流式生成中 …"什么都不发生。
+
+**铁律**：所有 `readNdjsonStream` 的消费方，第一件事就是调
+`detectStreamFailure(ev)`（`apps/desktop/src/api/streams.ts`），不要自己判 `event`。
+
+```tsx
+const failure = detectStreamFailure(ev);
+if (failure) {
+  toast.error("大纲生成失败", { description: failure.message });
+  setStep("plot");   // 必须回退，不能停在半路
+  return;
+}
+```
+
+> 写作页 `use-chapter-stream.ts` 早就在用 `isStreamError`，
+> 但**开新书页三个流循环（剧情 / 大纲 / 人物卡）都没用** —— 同一种错误，
+> 一个页面处理了，另一个页面没处理。**新增流消费方时照抄写作页，不要照抄邻居。**
+
+契约测试：`apps/desktop/src/api/__tests__/streams.test.ts`
+（`detectStreamFailure` 覆盖 transport / server / 缺 message / 正常事件四类）。
+
+
 
 ---
 

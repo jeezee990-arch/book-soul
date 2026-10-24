@@ -34,6 +34,45 @@ export function isStreamError(e: StreamEvent): e is StreamError {
   return "error" in e && typeof (e as StreamError).error === "string";
 }
 
+/** 流失败的来源。 */
+export type StreamFailureSource = "transport" | "server";
+
+/** 流失败信息（统一两类失败的出口）。 */
+export interface StreamFailure {
+  /** transport = HTTP 层失败（非 2xx / 无 body / 非法 JSON）；server = 后端流内错误帧。 */
+  source: StreamFailureSource;
+  message: string;
+}
+
+/**
+ * 判断一个流事件是否代表失败；不是失败返回 null。
+ *
+ * ⚠️ 两类失败长得完全不一样，**漏掉任何一类都会让界面永远转圈**：
+ *
+ * - **transport**：`{ error: "422 Unprocessable Content" }` ——
+ *   HTTP 非 2xx / 没有 body / NDJSON 解析失败，由 {@link readNdjsonStream} 产出。
+ * - **server**：`{ event: "error", message: "..." }` ——
+ *   后端在流中间发出的错误帧（见 `server/src/api/_stream_helpers.py` 的协议）。
+ *
+ * 只判断 `event === "error"` 的话，HTTP 422/500 会被静默吞掉：
+ * generator 正常结束 → for-await 正常退出 → 没有任何分支命中 →
+ * UI 停在"生成中…"不报错也不回退。这正是 2026-10-24 真机走查抓到的现象。
+ */
+export function detectStreamFailure(e: StreamEvent): StreamFailure | null {
+  if (isStreamError(e)) {
+    return { source: "transport", message: e.error };
+  }
+  const obj = e as unknown as Record<string, unknown>;
+  if (obj.event === "error") {
+    const msg = obj.message;
+    return {
+      source: "server",
+      message: typeof msg === "string" && msg ? msg : "未知错误",
+    };
+  }
+  return null;
+}
+
 /** 把 baseUrl + path 拼成绝对 URL（用于 fetch + 流式 body）。 */
 function absUrl(path: string, baseUrl?: string): string {
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
