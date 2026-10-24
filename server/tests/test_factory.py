@@ -181,11 +181,19 @@ def test_create_llm_client_openai_compat_raises_without_key(monkeypatch):
         factory_mod.create_llm_client("mimo")
 
 
-def test_create_llm_client_for_scene_uses_routing():
-    """create_llm_client_for_scene 应按 routing 选择 provider。"""
-    from src.core.llm.factory import create_llm_client_for_scene
+def test_create_llm_client_for_scene_uses_routing(monkeypatch):
+    """create_llm_client_for_scene 应按 routing 选择 provider。
 
-    client = create_llm_client_for_scene("quality_check")
+    ⚠️ 必须把 key 造出来再跑：``OpenAICompatClient`` 在 key 为空时直接抛
+    ``AuthError``，而 ``src.core.config.settings`` 是**导入时**读 env 的单例
+    —— 也就是说这条测试的成败取决于开发者本机 ``.env`` 里有没有真 key。
+    之前就是靠本机配了 key 才"绿"的，换台机器立刻挂。
+    """
+    from src.core.llm import factory as factory_mod
+
+    monkeypatch.setattr(factory_mod, "_resolve_api_key_for", lambda _: "sk-test-dummy")
+
+    client = factory_mod.create_llm_client_for_scene("quality_check")
     # quality_check 默认跟随设置页 → 没设置时是 default_provider（mimo）
     assert client.provider == "mimo"
 

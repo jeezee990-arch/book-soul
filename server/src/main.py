@@ -77,11 +77,19 @@ async def _preflight_providers() -> None:
 
     背景：配置里多个场景默认路由到本地 Ollama，而 Ollama 经常"没启动"。
     与其让用户等 30 秒超时后看到裸 ConnectError，不如启动时就明确告知。
+
+    ⚠️ 必须走 ``llm_cache.get_health()``，**不能**直接调
+    ``check_all_providers_health()``：
+
+    - 走 cache 才能和前端启动时那次 ``GET /llm/health`` **共用同一个探测任务**。
+      直调的话两边各打一轮外部网络 —— 前端启动那一下要白等一整轮探测
+      （实测 2.7s），而且同一个 provider 被探测两次。
+    - ``get_health()`` 内部会把结果写进缓存，所以顶栏模型灯随后是 0 延迟命中。
     """
-    from .core.llm import check_all_providers_health
+    from .core.llm import cache as llm_cache
 
     try:
-        results = await check_all_providers_health()
+        results = await llm_cache.get_health()
     except Exception as e:  # noqa: BLE001
         logger.warning("provider preflight failed: {}", e)
         return

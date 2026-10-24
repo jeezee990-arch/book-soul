@@ -332,9 +332,13 @@ async def check_provider_health(provider: str) -> tuple[bool, str]:
         return False, f"provider '{provider}' 未配置 base_url"
 
     timeout = float(pc.get("timeout_seconds", 30))
-    connect_timeout = min(10.0, timeout)
     # 探活用短超时：这是"能不能连上"，不是"能不能生成"
     probe_timeout = min(5.0, timeout)
+    # ⚠️ connect 超时**不能大于**总超时。
+    # 之前 connect=min(10, timeout) > probe_timeout=5，导致"网络不通"的 provider
+    # （比如没配的 openai、没启动的 ollama）在**连接阶段**就能拖满 10 秒 ——
+    # /llm/health 一次调用就把顶栏模型灯卡住近 10 秒（实测 9.8s）。
+    connect_timeout = min(3.0, probe_timeout)
 
     # 带 key 探测：/models 端点需要鉴权，不带 key 会一律 401，
     # 那样就无法区分"服务挂了"和"key 错了"

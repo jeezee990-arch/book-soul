@@ -154,7 +154,13 @@ class SettingsService:
         self._validate(data)
         raw = self._read_yaml()
         if data.llm is not None:
-            raw["llm"] = {**self._fill_llm_defaults(data.llm).model_dump()}
+            filled = self._fill_llm_defaults(data.llm)
+            raw["llm"] = {**filled.model_dump()}
+            # ⚠️ 换了 provider / model 之后，缓存的健康状态和模型清单都作废 ——
+            #    不同 provider 的模型清单完全不同（mimo 的模型 minimax 根本不认）。
+            #    不作废的话，设置页下拉框会继续显示上一个 provider 的模型。
+            #    这里清**全部**：旧 provider 的清单同样不该再留在缓存里。
+            self._invalidate_llm_cache()
         if data.ui is not None:
             raw["ui"] = {**data.ui.model_dump()}
         if data.security is not None:
@@ -204,34 +210,59 @@ class SettingsService:
             raise SettingsValidationError(
                 f"Invalid provider: {provider!r}; allowed: {LLM_PROVIDERS}"
             )
-        # 优先 DPAPI 加密文件（打包版默认；明文不落盘）
-        if self._secret_store is not None and self._secret_store.supported:
-            try:
-                self._secret_store.set(provider, key)
-                return
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    f"secret store write failed for {provider}: {e}; fallback to keyring"
+        try:
+            # 优先 DPAPI 加密文件（打包版默认；明文不落盘）
+            if self._secret_store is not None and self._secret_store.supported:
+                try:
+                    self._secret_store.set(provider, key)
+                    return
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        f"secret store write failed for {provider}: {e}; fallback to keyring"
+                    )
+            if self._keyring is None:
+                raise SettingsServiceError(
+                    "No secure key storage available (DPAPI unsupported and system keyring unavailable)"
                 )
-        if self._keyring is None:
-            raise SettingsServiceError(
-                "No secure key storage available (DPAPI unsupported and system keyring unavailable)"
-            )
-        self._keyring.set_password(KEYRING_SERVICE, provider, key)
+            self._keyring.set_password(KEYRING_SERVICE, provider, key)
+        finally:
+            # key 变了，之前探测出来的健康状态 / 模型清单全部作废
+            self._invalidate_llm_cache(provider)
 
     def delete_api_key(self, provider: str) -> None:
         if provider not in LLM_PROVIDERS:
             raise SettingsValidationError(
                 f"Invalid provider: {provider!r}; allowed: {LLM_PROVIDERS}"
             )
-        if self._secret_store is not None:
-            try:
-                self._secret_store.delete(provider)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"secret store delete failed for {provider}: {e}")
-        if self._keyring is None:
-            return  # 幂等
         try:
-            self._keyring.delete_password(KEYRING_SERVICE, provider)
+            if self._secret_store is not None:
+                try:
+                    self._secret_store.delete(provider)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"secret store delete failed for {provider}: {e}")
+            if self._keyring is None:
+                return  # 幂等
+            try:
+                self._keyring.delete_password(KEYRING_SERVICE, provider)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"keyring delete_password failed for {provider}: {e}")
+        finally:
+            self._invalidate_llm_cache(provider)
+
+    @staticmethod
+    def _invalidate_llm_cache(provider: str | None = None) -> None:
+        """key / provider 变了之后，作废 LLM 相关的缓存。
+
+        不作废的话：用户刚换好 key，顶栏模型灯还显示着换之前的"Key 无效"，
+        得等缓存过期（60s）才更新 —— 用户会以为没生效。
+
+        :param provider: 指定 provider 则只清它的模型清单；
+            None（换 provider / model）→ 全部清掉。
+        """
+        try:
+            from src.core.llm import cache as llm_cache
+
+            llm_cache.invalidate_health()
+            llm_cache.invalidate_models(provider)
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"keyring delete_password failed for {provider}: {e}")
+            logger.debug(f"llm cache invalidation failed: {e}")

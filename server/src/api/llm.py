@@ -18,10 +18,10 @@ from ..core.llm import (
     ChatMessage,
     LLMError,
     RateLimitError,
-    check_all_providers_health,
     create_llm_client,
 )
-from ..core.llm.factory import describe_provider_models, get_provider_config
+from ..core.llm import cache as llm_cache
+from ..core.llm.factory import get_provider_config
 
 router = APIRouter(tags=["llm"])
 
@@ -109,17 +109,34 @@ async def test_llm(req: TestLLMRequest) -> TestLLMResponse:
 
 
 @router.get("/llm/health")
-async def llm_health() -> dict:
-    """探活所有 provider（设置页显示用）。
+async def llm_health(
+    provider: str | None = Query(None, description="只探活这一个 provider"),
+) -> dict:
+    """探活 provider（设置页 / 顶栏模型灯用）。
 
     返回 ``{provider: {"ok": bool, "message": str}}``。
+
+    ⚠️ 走缓存（``core/llm/cache.py``）：这个端点会被前端在启动时调用，
+    实时探测要等外部网络（可达性差时 ~3 秒），会把顶栏模型灯卡成"转圈"。
+    缓存命中时是 0 延迟，过期时先返回旧值再后台刷新。
+
+    ⚠️ **带 provider 参数时只探这一个**（顶栏灯用）：
+
+    灯只关心"当前生效的那个 provider"。如果每次都探全部 provider，
+    那么"用户用 mimo，但没配的 openai / 没启动的 ollama 不可达"就会
+    让灯白等 3 秒 —— 那 3 秒对灯毫无意义。
+    不带参数 = 探全部（启动预检用，后台跑，不阻塞任何人）。
     """
-    results = await check_all_providers_health()
+    providers = [provider] if provider else None
+    results = await llm_cache.get_health(providers)
     return {name: {"ok": ok, "message": message} for name, (ok, message) in results.items()}
 
 
 @router.get("/llm/models")
-async def llm_models(provider: str = Query(..., description="provider name")) -> dict:
+async def llm_models(
+    provider: str = Query(..., description="provider name"),
+    refresh: bool = Query(False, description="忽略缓存强制重新拉取"),
+) -> dict:
     """列出某个 provider 支持的模型（设置页下拉框用）。
 
     实时从 provider 的 ``/models`` 端点拉取 —— 服务端下线模型后，
@@ -131,9 +148,13 @@ async def llm_models(provider: str = Query(..., description="provider name")) ->
     - ``configured_models``：``config/llm.yaml`` 登记的
     - ``default_model``：该 provider 的默认模型
     - ``reachable`` / ``message``：连通性
+
+    ⚠️ 带缓存（``core/llm/cache.py``）：设置页每次打开都会调，
+    实时拉取在网络差时要等好几秒。``?refresh=1`` 强制绕过缓存
+    （对应前端「刷新列表」按钮）。
     """
     try:
         get_provider_config(provider)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    return await describe_provider_models(provider)
+    return await llm_cache.get_models(provider, force=refresh)
