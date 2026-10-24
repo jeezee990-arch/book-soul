@@ -228,6 +228,25 @@ resp = await self._client.post(url, json=payload)
 > 契约测试：`server/tests/test_llm_cache.py`（含"预检与 /llm/health 只探测一次"）。
 > 改坏了这层，`/llm/health` 会立刻退回 10 秒。
 
+### 4.7 流式端点的三条铁律（2026-10-24 新增）
+
+用户实测报过三个流式问题，全部归到这三条：
+
+| 铁律 | 说明 | 位置 |
+|---|---|---|
+| **思考内容不能被丢弃** | 推理模型先吐 `<think>...</think>` 再吐正文，思考可能好几秒。旧写法 `if "<think>" in delta: continue` 把这段**全丢了** → 前端一个字都收不到 → 用户看到"卡住不动"。现在用 `core/llm/streaming.py::ThinkSplitter` 拆成两路，思考内容作为 `thinking` 事件转发 | `core/llm/streaming.py` |
+| **流式容器必须能滚动** | 内容区写 `overflow-hidden` + 固定高 → 文字流到边界就被裁掉，后面的字渲染了但**看不见** → 用户看到"生成到一半不动了"，结束时又"一口气全出来"。必须 `max-h-* overflow-y-auto`，并**自动滚到底部** | 前端各流式面板 |
+| **并行的 N 个版本要保序** | 3 个版本并行调用，谁先回是随机的 → 屏幕上是 C→A→B。要"生成 N 个"时用 `merge_queue_events_ordered`（**生产者仍并行**，只改吐事件顺序，总耗时不变） | `core/queue_merge.py` |
+
+> 契约测试：`server/tests/test_think_splitter.py` + `test_queue_merge.py` +
+> `test_plot_generation.py`（顺序 / thinking 事件）。
+>
+> **性能实测结论（2026-10-24，用本地 mock SSE provider 测）**：
+> 代码侧每个 token 只增加 **0.5ms**（实测 40 个 delta，间隔 50.6ms vs mock 的 50ms），
+> 整条流的总开销 ~100ms。**流式链路不是瓶颈 —— 慢在模型。**
+> 所以别再去优化"转发"环节，要优化的是：模型选型、输出长度、思考时长。
+> 埋点：`plot version N: first delta after Xs` / `N deltas, Xs total`（server.log）。
+
 ---
 
 ## 5. 桌面化与打包规范（新增，2026-10）

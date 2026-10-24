@@ -639,9 +639,76 @@ apps/desktop/src-tauri/src/sidecar.rs  kill 异步化 + kill_backend_child（2s 
 apps/desktop/src-tauri/src/lib.rs      open_data_dir command；Exit 同步 kill 防孤儿
 ```
 
----
+### 12.7 第三轮：流式体验 + 性能定位（2026-10-24）
 
-## 13. 用户验证清单
+用户实测报的问题：滚动条刺眼 / 剧情顺序乱 / 选项框看不到后面的内容 /
+流式"卡一下再一口气吐" / 生成慢。逐条定位如下。
+
+#### 1. 深色模式滚动条（刺眼的白条）
+
+深色模式下系统默认滚动条是**亮白色**，在深色背景上很扎眼。
+改为自己画：深色用**近黑**滑块（`#3f3f46` / hover `#52525b`），浅色用中性灰。
+`apps/desktop/src/styles.css`（同时写了 Firefox 的 `scrollbar-color`）。
+
+#### 2. 剧情生成顺序（C → A → B）
+
+三个版本**并行**调用 LLM，谁先回是随机的 → 屏幕上是 C 先出字。
+改用 `merge_queue_events_ordered`：**生产者仍然并行**（总耗时不变），
+只把吐事件的顺序固定成 A → B → C。
+
+#### 3. 选项框看不到后面的内容（**根因**）
+
+内容区写的是 `h-[212px] overflow-hidden`（固定高 + 裁切）：
+
+- 文字流到 212px 就被裁掉 → 后面的字**渲染了但看不见**
+- 结束时 `version_done` 一次性替换全文 → 又变成"一口气全出来"
+
+所以问题 3 和问题 4 是**同一个根因**。改成 `max-h-[212px] overflow-y-auto`
++ **自动滚到底部**（只在用户本来就在底部附近时才自动滚，不打断回看）。
+
+#### 4. 流式"卡住"的另一半：思考期空窗
+
+推理模型先吐 `<think>...</think>` 再吐正文，思考可能好几秒。
+旧代码 `if "<think>" in delta: continue` 把这段**全丢了** →
+那段时间前端一个字都收不到 → 用户看到"卡住不动"。
+
+新增 `core/llm/streaming.py::ThinkSplitter`（状态机，能处理 think 块被拆到
+多个 chunk 的情况），把思考内容作为 **`thinking` 事件**转发给前端 →
+前端显示"模型思考中…"+ 已耗时秒数。
+
+剧情 / 大纲 / 人物卡三处生成器都换成了这个共享实现（原来同样的逻辑抄了 4 遍）。
+
+#### 5. 性能定位：**慢在模型，不是我们的代码**
+
+搭了一个本地 mock OpenAI 兼容 SSE provider（已知吐字节奏），指到真实后端上，
+逐行测量 ndjson：
+
+| 指标 | 实测 | 结论 |
+|---|---|---|
+| TTFB（HTTP 头） | 53 ms | 没有 HTTP 层缓冲 |
+| 第一个事件 | 74 ms | 立即返回 |
+| 每 token 间隔 | 50.6 ms（mock 是 50 ms） | **代码侧开销 +0.5 ms/token** |
+| 整条流总开销 | ~100 ms / 2000 字 | 可忽略 |
+
+**所以流式链路不是瓶颈** —— 总时长 = 模型思考时间 + 输出 token 数 ÷ 模型吐字速度。
+优化路径：
+
+| 手段 | 状态 |
+|---|---|
+| 换更快的模型（`mimo-v2.6-flash` / `ultraspeed` / minimax） | 设置页直接切 |
+| 场景级 `max_tokens` 上限（防模型超写，生成时间与输出长度成正比） | ✅ 已加 `scene_limits.plot_generation` |
+| Ollama base_url `localhost` → `127.0.0.1`（省 250ms 的 IPv6→IPv4 等待） | ✅ 已改 |
+| 思考期不再空窗（`thinking` 事件） | ✅ 已做 |
+| 埋点：日志里直接看 `first delta after Xs` / `N deltas, Xs total` | ✅ 已加 |
+
+> 探针本身也暴露了两个真 bug：
+> ① `Path(pkg.__path__)` —— 包的 `__path__` 是**列表** → `load_all_skills()` 崩 →
+>    **用户自定义 skill 一个都加载不了**（内置的还在，因为它们在
+>    `skills/__init__.py` 里显式注册，所以一直没被发现）。
+> ② `asyncio.to_thread(load_all_skills)` 在线程里跑，app 停得比它快时
+>    会往**已关闭**的 event loop 投递回调 → 线程里抛 "Event loop is closed"。
+
+
 
 ### 13.1 导航与全局状态
 
@@ -702,6 +769,16 @@ apps/desktop/src-tauri/src/lib.rs      open_data_dir command；Exit 同步 kill 
 - [ ] 关窗后 `dist\Book Soul\data\` 目录不残留 `book-soul-server.exe` 进程
 - [ ] 启动后**顶栏模型灯很快就有颜色**（不是灰着转圈等好几秒）
 - [ ] 设置页反复进出，模型下拉加载很快（不是每次都卡几秒）
+- [ ] **深色模式下右侧滚动条是深色的**（不是一条刺眼的白杠）
+
+### 13.7 流式观感（2026-10-24 新增）
+
+- [ ] 点「生成 3 个剧情」→ **A 先出字**，然后 B、然后 C（不是随机顺序）
+- [ ] 剧情卡里**能上下滚动**看完整内容（之前只能看到开头）
+- [ ] 流式时内容区**自动跟随最新文字**（不用手动拖滚动条）
+- [ ] 推理模型思考期间，卡片显示「模型思考中…」+ 已耗时秒数（不是一片空白）
+- [ ] 大纲面板同样能滚动、能自动跟随
+- [ ] 剧情卡一旦生成完就能**立刻点选**（不用等另外两个）
 - [ ] 改完前端源码 → **必须重跑 `scripts\build_standalone.ps1`**，否则看不到新 UI
 
 ---
