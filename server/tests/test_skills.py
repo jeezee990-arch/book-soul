@@ -144,6 +144,23 @@ def test_registry_builtin_auto_register() -> None:
     assert "sensitive_word" in names
 
 
+def test_load_all_skills_does_not_raise() -> None:
+    """回归（2026-10-24）：``load_all_skills()`` 不能抛异常。
+
+    之前 ``_load_builtin_skills`` 里写的是 ``Path(pkg.__path__)``，
+    而包的 ``__path__`` 是**列表** → ``Path(list)`` 抛 TypeError →
+    ``load_all_skills()`` 第一步就中断 → ``_load_user_skills()`` 根本没跑到 →
+    **用户在设置里自定义的 skill 一个都加载不了**。
+
+    内置的 skill 当时还在（它们在 ``skills/__init__.py`` 里显式注册），
+    所以这个 bug 一直没人发现 —— 只有用户自定义 skill 会静默消失。
+    """
+    from src.core.skills.loader import load_all_skills
+
+    n = load_all_skills()
+    assert n >= 12, f"内置 skill 应该全部加载，实际 {n}"
+
+
 # ===== word_counter =====
 
 

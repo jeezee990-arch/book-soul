@@ -127,7 +127,11 @@ providers:
 
   ollama:
     type: ollama               # 走 Ollama /v1 兼容协议
-    base_url: http://localhost:11434/v1
+    # ⚠️ 用 127.0.0.1 而不是 localhost（2026-10-24 实测）：
+    #    Windows 上 localhost 通常**先解析成 ::1**，而 Ollama 默认只监听 IPv4
+    #    → httpx 先连 ::1 秒失败，再等 **250ms**（happy eyeballs 间隔）才试 IPv4。
+    #    这 250ms 纯浪费，而且每次新建连接都要重来一次。
+    base_url: http://127.0.0.1:11434/v1
     api_key_env: ""            # 本地无需 key
     default_model: qwen2.5:14b
     timeout_seconds: 120
@@ -162,6 +166,20 @@ chapter_limits:
   min_chars: 1000
   max_chars: 8000
   min_context_needed: 32000       # 低于此 context_window 不允许生成章节
+
+# 场景级输出上限（防"模型超写"）
+#
+# 为什么要这个：模型的 max_output_tokens 通常是 8192（章节要长），
+# 但"简要剧情"只要 200-400 字。模型偶尔会写飞（上千字），
+# 那就是**白等**——生成速度直接和输出长度成正比。
+#
+# 这里给剧情场景单独设一个上限：正常输出（400 字左右）远够用，
+# 只有超写时才会被截断 → 宁可短一点也别让用户干等。
+#
+# ⚠️ 调太紧会把正文截断在半句上，所以别低于 1024。
+scene_limits:
+  plot_generation:
+    max_tokens: 2048
 
 # 场景路由：每个业务场景用哪个 provider
 #

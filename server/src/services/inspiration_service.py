@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any, Protocol
@@ -23,8 +24,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
+from ..core.llm.streaming import KIND_THINK, ThinkSplitter
 from ..core.paths import prompts_dir
-from ..core.queue_merge import merge_queue_events
+from ..core.queue_merge import merge_queue_events_ordered
 from ..core.skills import manager as skill_manager
 from ..models.inspiration import INSPIRATION_TYPES, Inspiration
 from ..models.novel import Novel
@@ -240,6 +242,14 @@ class PlotGenerationError(Exception):
     """剧情生成失败（含 LLM 错误、prompt 缺失等）。"""
 
 
+# 转发给前端的思考内容上限（字符）。
+#
+# 为什么限量：思考块可能很长；更糟的是上游**没有闭合** ``<think>``，
+# 那后面的正文会全被当成思考内容。不限量的话既浪费带宽，
+# 又会让用户"想了好久"最后收到一个空结果。
+MAX_THINK_CHARS = 600
+
+
 def _strip_thinking(text: str) -> str:
     """剥掉 LLM 输出的 ``<think>...</think>`` 推理块（minimax 推理模型会输出）。
 
@@ -338,6 +348,28 @@ class PlotService:
             )
         return template.format(genre=genre, keywords=", ".join(keywords)) + extra_block
 
+    @staticmethod
+    def _scene_max_tokens() -> int | None:
+        """取剧情场景的输出上限（``config/llm.yaml`` 的 ``scene_limits``）。
+
+        为什么需要：模型的 ``max_output_tokens`` 是给"章节"准备的（8192），
+        而简要剧情只要 200-400 字。模型偶尔写飞 → 生成时间和输出长度成正比，
+        用户就得多等好几倍时间。这里给剧情场景单独设上限（默认 2048），
+        正常输出完全够用，超写时会被截断 —— 宁可短也别让用户干等。
+
+        配置缺失/非法 → 返回 None（不传 max_tokens，由模型规格兜底）。
+        """
+        from ..core.llm.factory import load_llm_config
+
+        try:
+            limits = (load_llm_config().get("scene_limits") or {}).get("plot_generation") or {}
+            value = limits.get("max_tokens")
+            n = int(value)
+            return n if n > 0 else None
+        except Exception as e:  # noqa: BLE001
+            logger.debug("scene_limits.plot_generation 读取失败：{}", e)
+            return None
+
     async def stream_generate(
         self,
         genre: str,
@@ -398,24 +430,68 @@ class PlotService:
             **结束哨兵永远不会 put**，主协程会一直等 → 流式端点挂死。
             """
             full_text = ""
+            delta_count = 0
+            first_delta_at: float | None = None
+            # 思考阶段（<think>...</think>）用状态机拆出来：
+            # 推理模型的思考可能持续好几秒，这段时间如果什么都不往前端发，
+            # 用户看到的就是"卡住不动"（2026-10-24 用户反馈）。
+            # 所以这里把思考内容**转发成 thinking 事件**（前端显示"模型思考中…"），
+            # 而不是直接丢掉。
+            #
+            # ⚠️ 限量转发（MAX_THINK_CHARS）：思考块可能很长，甚至**没有闭合**
+            #    （上游格式异常）——不限量的话会把整段正文都当成思考内容，
+            #    用户看到"想了好久"最后收到一个空结果。
+            think_sent = 0
+            splitter = ThinkSplitter()
+            t0 = time.monotonic()
             try:
                 stream = await llm.chat(
                     [ChatMessage("user", prompt)],
                     temperature=0.8,
+                    max_tokens=self._scene_max_tokens(),
                     stream=True,
                 )
                 # OpenAI 兼容流式：stream 是 ``AsyncIterator[str]``（每个 delta 文本）
                 async for delta in stream:  # type: ignore[union-attr]
                     if not delta:
                         continue
-                    # 过滤跨 chunk 的 <think> 推理块
-                    if "<think>" in delta and "</think>" not in delta:
-                        continue
-                    full_text += delta
-                    await q.put({"event": "delta", "index": idx, "text": delta})
+                    for kind, text in splitter.feed(delta):
+                        if kind == KIND_THINK:
+                            room = MAX_THINK_CHARS - think_sent
+                            if room > 0:
+                                piece = text[:room]
+                                think_sent += len(piece)
+                                await q.put({"event": "thinking", "index": idx, "text": piece})
+                            continue
+                        full_text += text
+                        delta_count += 1
+                        await q.put({"event": "delta", "index": idx, "text": text})
+                    # ⚠️ 埋点只打**第一次** delta —— 每个 delta 都打日志会
+                    #    给流式链路加 I/O 开销（几千个 delta 就能看出差别）。
+                    if first_delta_at is None and delta_count > 0:
+                        first_delta_at = time.monotonic()
+                        logger.info(
+                            "plot version {}: first delta after {:.2f}s", idx, first_delta_at - t0
+                        )
+                logger.info(
+                    "plot version {}: {} deltas, {:.2f}s total",
+                    idx,
+                    delta_count,
+                    time.monotonic() - t0,
+                )
                 raw_summary = _strip_thinking(full_text)
                 if not raw_summary:
-                    await q.put({"event": "error", "message": f"version {idx} empty"})
+                    if splitter.in_think:
+                        # 上游的 <think> 没闭合 → 后面全是思考内容，没有正文
+                        await q.put(
+                            {
+                                "event": "error",
+                                "message": f"version {idx}: 模型只返回了思考内容"
+                                "（<think> 块未闭合），没有正文",
+                            }
+                        )
+                    else:
+                        await q.put({"event": "error", "message": f"version {idx} empty"})
                 else:
                     # 自动调用 scene=plot_generation 的 post-process skills（默认 sensitive_word）
                     cleaned_summary = await skill_manager.apply_post("plot_generation", raw_summary)
@@ -431,9 +507,13 @@ class PlotService:
         # 先发所有 version_start
         for i in range(n_versions):
             yield {"event": "version_start", "index": i + 1}
-        # 轮询所有 queue，按事件实际到达顺序透出
+        # ⚠️ **有序**合并：队列 1（A）消费完才消费队列 2（B）、队列 3（C）。
+        #    三个 LLM 调用仍然是**并行**的（事件先在各自队列里等着），
+        #    所以总耗时不变 —— 只是屏幕上的出场顺序固定为 A → B → C。
+        #    之前按到达顺序吐，C 有时先出字，看起来像"顺序乱了"。
+        t_stream = time.monotonic()
         try:
-            async for payload in merge_queue_events(queues):
+            async for payload in merge_queue_events_ordered(queues):
                 yield payload
         finally:
             # 等待所有 runner 退出
@@ -441,6 +521,9 @@ class PlotService:
             if owns_client:
                 await self._release_llm(llm, owns=True)
 
+        logger.info(
+            "plot stream: {} versions done in {:.2f}s", n_versions, time.monotonic() - t_stream
+        )
         yield {"event": "done", "provider": provider, "model": model}
 
     async def _release_llm(self, llm: _LLMClientLike, owns: bool) -> None:

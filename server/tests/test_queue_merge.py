@@ -21,7 +21,7 @@ import asyncio
 
 import pytest
 
-from src.core.queue_merge import merge_queue_events
+from src.core.queue_merge import merge_queue_events, merge_queue_events_ordered
 
 
 @pytest.mark.asyncio
@@ -104,3 +104,72 @@ async def test_merge_survives_interleaved_producers():
         received.append(ev)
     await asyncio.gather(*tasks, return_exceptions=True)
     assert len(received) == 40
+
+
+# =========================================================================
+# 有序合并（2026-10-24）
+# =========================================================================
+
+
+@pytest.mark.asyncio
+async def test_ordered_merge_emits_in_queue_order():
+    """有序合并：队列 1 的事件必须**全部**先于队列 2。
+
+    "生成 3 个剧情"用这个：用户期望看到 A → B → C 的固定顺序，
+    而不是"哪个模型先回就先出哪个"（并行时顺序是随机的）。
+    """
+    q1: asyncio.Queue = asyncio.Queue()
+    q2: asyncio.Queue = asyncio.Queue()
+    q3: asyncio.Queue = asyncio.Queue()
+
+    async def producer(q: asyncio.Queue, tag: str, n: int, delay: float) -> None:
+        # q3 最快、q1 最慢 —— 如果按到达顺序合并，输出就会是 c,a,b
+        await asyncio.sleep(delay)
+        for i in range(n):
+            await q.put({"tag": tag, "i": i})
+        await q.put(None)
+
+    tasks = [
+        asyncio.create_task(producer(q1, "a", 3, 0.06)),
+        asyncio.create_task(producer(q2, "b", 3, 0.03)),
+        asyncio.create_task(producer(q3, "c", 3, 0.0)),
+    ]
+
+    received: list[dict] = []
+    async for ev in merge_queue_events_ordered([q1, q2, q3]):
+        received.append(ev)
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    tags = [e["tag"] for e in received]
+    assert tags == ["a", "a", "a", "b", "b", "b", "c", "c", "c"], f"顺序不对：{tags}"
+
+
+@pytest.mark.asyncio
+async def test_ordered_merge_keeps_total_time_parallel():
+    """有序合并**不能**让整体变慢：生产者并行跑，总耗时取最大值。
+
+    如果实现退化成"等 A 结束再启动 B"，总耗时会变成三者之和。
+    """
+    q1: asyncio.Queue = asyncio.Queue()
+    q2: asyncio.Queue = asyncio.Queue()
+
+    async def producer(q: asyncio.Queue, tag: str) -> None:
+        await asyncio.sleep(0.2)
+        await q.put({"tag": tag})
+        await q.put(None)
+
+    tasks = [
+        asyncio.create_task(producer(q1, "a")),
+        asyncio.create_task(producer(q2, "b")),
+    ]
+
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    received: list[dict] = []
+    async for ev in merge_queue_events_ordered([q1, q2]):
+        received.append(ev)
+    elapsed = loop.time() - t0
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert [e["tag"] for e in received] == ["a", "b"]
+    assert elapsed < 0.35, f"有序合并不该串行化，耗时 {elapsed:.2f}s（串行会 ≥0.4s）"

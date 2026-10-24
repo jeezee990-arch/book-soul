@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -48,10 +49,19 @@ async def lifespan(_app: FastAPI):
     skills_root.mkdir(parents=True, exist_ok=True)
     init_skill_paths(skills_root)
 
-    skills_task = asyncio.create_task(
-        asyncio.to_thread(load_all_skills),
+    # ⚠️ 用**普通守护线程**而不是 ``asyncio.to_thread``：
+    #    to_thread 会把结果挂到 event loop 的 future 上。技能加载要跑几百毫秒，
+    #    如果 app 停得比它快（测试里很常见），线程结束时就会往**已关闭**的
+    #    loop 上投递回调 → 线程里抛 "Event loop is closed"（pytest 会报成
+    #    PytestUnhandledThreadExceptionWarning）。
+    #    普通线程 + Event 就没有这个耦合。
+    skills_ready = threading.Event()
+    threading.Thread(
+        target=_load_skills_threaded,
+        args=(skills_ready,),
         name="book-soul-skills-load",
-    )
+        daemon=True,
+    ).start()
 
     # provider 预检放后台：不能拖慢启动（探活每个 provider 最多 5s）
     preflight_task = asyncio.create_task(
@@ -62,14 +72,28 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        if not skills_task.done():
-            try:
-                await asyncio.wait_for(skills_task, timeout=2.0)
-            except (TimeoutError, asyncio.CancelledError):
-                skills_task.cancel()
+        # 等技能加载完（最多 2 秒）—— 只是为了让关服日志里有 "Skills loaded: N"
+        for _ in range(40):
+            if skills_ready.is_set():
+                break
+            await asyncio.sleep(0.05)
         if not preflight_task.done():
             preflight_task.cancel()
         logger.info("Shutting down Book Soul server")
+
+
+def _load_skills_threaded(ready: threading.Event) -> None:
+    """在后台线程里加载所有 skill，完成后置位 ``ready``。
+
+    单独抽出来是为了让线程体尽量短 —— 异常也要兜住，
+    不能让线程静默死掉（``ready`` 永远不置位，关服时要多等 2 秒）。
+    """
+    try:
+        load_all_skills()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("skill loading failed: {}", e)
+    finally:
+        ready.set()
 
 
 async def _preflight_providers() -> None:

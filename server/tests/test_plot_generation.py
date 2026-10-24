@@ -396,5 +396,80 @@ async def test_stream_generate_reports_llm_error_and_terminates() -> None:
     assert events[-1]["event"] == "done"
 
 
+# ===== 顺序与思考事件（2026-10-24）=====
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_emits_versions_in_order_a_b_c() -> None:
+    """版本事件必须按 **A → B → C** 的顺序出现。
+
+    三个 LLM 调用是并行的 → 谁先回是随机的。之前按"到达顺序"吐事件，
+    用户就看到 C 先出字、A 还在转圈（2026-10-24 用户反馈）。
+    """
+
+    class _SkewedLLM(_StreamMockLLM):
+        """故意让第 3 个版本最先返回，第 1 个最慢。"""
+
+        async def chat(self, messages: list[ChatMessage], **kwargs: object):
+            self.chat_calls += 1
+            delay = {1: 0.09, 2: 0.05, 3: 0.0}.get(self.chat_calls, 0.0)
+            if kwargs.get("stream"):
+
+                async def gen():
+                    await asyncio.sleep(delay)
+                    for c in self._chunks:
+                        await asyncio.sleep(0)
+                        yield c
+
+                return gen()
+            return ChatResponse(content="".join(self._chunks), model="mock-model")
+
+    llm = _SkewedLLM()
+    svc = PlotService(llm_client=llm)
+    events: list[dict] = []
+
+    async def run() -> None:
+        async for ev in svc.stream_generate("修仙", ["逆袭"], n_versions=3):
+            events.append(ev)
+
+    await asyncio.wait_for(run(), timeout=10)
+
+    done_order = [e["index"] for e in events if e["event"] == "version_done"]
+    assert done_order == [1, 2, 3], f"完成顺序应为 1,2,3，实际 {done_order}"
+
+    # delta 也必须按版本分组（先全是 A 的，再全是 B 的，再全是 C 的）
+    groups: list[int] = []
+    for e in events:
+        if e["event"] == "delta" and (not groups or groups[-1] != e["index"]):
+            groups.append(e["index"])
+    assert groups == [1, 2, 3], f"delta 顺序应为 1,2,3，实际 {groups}"
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_forwards_thinking_as_separate_event() -> None:
+    """``<think>`` 块不能被静默丢掉 —— 要作为 ``thinking`` 事件发出去。
+
+    丢掉的话，推理模型思考的那几秒前端一个字都收不到，
+    用户看到的就是"卡住不动"（2026-10-24 用户反馈）。
+    """
+    llm = _StreamMockLLM(chunks=["<think>", "让我想想", "</think>", "正文", "开始"])
+    svc = PlotService(llm_client=llm)
+    events: list[dict] = []
+
+    async def run() -> None:
+        async for ev in svc.stream_generate("修仙", ["逆袭"], n_versions=1):
+            events.append(ev)
+
+    await asyncio.wait_for(run(), timeout=10)
+
+    thinking = [e for e in events if e["event"] == "thinking"]
+    assert thinking, "思考内容必须以 thinking 事件发出去"
+    assert "".join(e["text"] for e in thinking) == "让我想想"
+
+    # 正文里不能混进思考内容
+    deltas = [e for e in events if e["event"] == "delta"]
+    assert "".join(e["text"] for e in deltas) == "正文开始"
+
+
 # 静默 logger 警告（如果有）
 logger.disable("src.services.inspiration_service")

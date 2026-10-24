@@ -64,7 +64,16 @@ def _load_builtin_skills() -> int:
     pkg = sys.modules.get(builtin_pkg)
     if pkg is None:
         return 0
-    pkg_path = Path(getattr(pkg, "__path__", []))
+    # ⚠️ 包的 ``__path__`` 是**列表**（不是 str）——
+    #    ``Path(list)`` 会抛 TypeError（2026-10-24 实测）。
+    #    之前这里直接崩 → ``load_all_skills()`` 整个中断 →
+    #    ``_load_user_skills()`` 根本没机会执行 →
+    #    **用户在设置里自定义的 skill 一个都加载不了**（只有内置的还在，
+    #    因为它们是在 ``skills/__init__.py`` 里显式注册的）。
+    pkg_paths = list(getattr(pkg, "__path__", []) or [])
+    if not pkg_paths:
+        return 0
+    pkg_path = Path(pkg_paths[0])
     for f in sorted(pkg_path.glob("*.py")):
         if f.name.startswith("_") or f.name == "__init__.py":
             continue

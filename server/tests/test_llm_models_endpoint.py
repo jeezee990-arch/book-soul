@@ -130,9 +130,13 @@ async def test_llm_models_endpoint_returns_configured_models():
     assert data["provider"] == "ollama"
     assert "qwen2.5:14b" in data["configured_models"]
     assert data["default_model"] == "qwen2.5:14b"
-    # 本机没跑 Ollama → reachable=False，但接口不能挂
-    assert data["reachable"] is False
-    assert data["message"]
+    # ⚠️ 不要假设 "本机没跑 Ollama → reachable=False"：
+    #    开发者本机可能正跑着 Ollama（或者像性能探针那样有个 mock 监听 11434），
+    #    那样 reachable 会是 True —— 断言环境而不是断言行为，必然偶发挂。
+    #    这里只断言"接口不挂"这个真正的契约。
+    assert isinstance(data["reachable"], bool)
+    if not data["reachable"]:
+        assert data["message"], "不可达时要说明原因"
 
 
 @pytest.mark.asyncio

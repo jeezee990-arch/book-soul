@@ -33,6 +33,7 @@ from ..core.llm.formatting import (
     extract_yaml_block,
     strip_thinking,
 )
+from ..core.llm.streaming import KIND_THINK, ThinkSplitter
 from ..core.paths import prompts_dir
 from ..core.queue_merge import merge_queue_events
 from ..core.skills import manager as skill_manager
@@ -351,6 +352,9 @@ class CharacterGenerator:
                 extra_block = f"\n\n【作者个人想法（请在生成时参考）】\n{user_extra.strip()}\n"
             extract_prompt = template.format(outline=outline_str) + extra_block
             full_text = ""
+            # 思考阶段用状态机拆出来 —— 思考期间不能一个字都不发
+            # （前端会显示"模型思考中…"而不是"卡住不动"）。
+            splitter = ThinkSplitter()
             stream = await llm.chat(
                 [ChatMessage("user", extract_prompt)],
                 temperature=0.5,
@@ -359,10 +363,12 @@ class CharacterGenerator:
             async for delta in stream:  # type: ignore[union-attr]
                 if not delta:
                     continue
-                if "<think>" in delta and "</think>" not in delta:
-                    continue
-                full_text += delta
-                yield {"event": "extract_delta", "text": delta}
+                for kind, text in splitter.feed(delta):
+                    if kind == KIND_THINK:
+                        yield {"event": "thinking", "phase": "extract", "text": text}
+                        continue
+                    full_text += text
+                    yield {"event": "extract_delta", "text": text}
             cleaned = strip_thinking(full_text)
             if cleaned:
                 arr = extract_json_array(cleaned)
@@ -404,6 +410,7 @@ class CharacterGenerator:
                 try:
                     await q.put({"event": "card_start", "name": item["name"], "role": item["role"]})
                     full_text = ""
+                    splitter = ThinkSplitter()
                     stream = await llm.chat(
                         [
                             ChatMessage(
@@ -423,16 +430,25 @@ class CharacterGenerator:
                     async for delta in stream:  # type: ignore[union-attr]
                         if not delta:
                             continue
-                        if "<think>" in delta and "</think>" not in delta:
-                            continue
-                        full_text += delta
-                        await q.put(
-                            {
-                                "event": "card_delta",
-                                "name": item["name"],
-                                "text": delta,
-                            }
-                        )
+                        for kind, text in splitter.feed(delta):
+                            if kind == KIND_THINK:
+                                await q.put(
+                                    {
+                                        "event": "thinking",
+                                        "phase": "card",
+                                        "name": item["name"],
+                                        "text": text,
+                                    }
+                                )
+                                continue
+                            full_text += text
+                            await q.put(
+                                {
+                                    "event": "card_delta",
+                                    "name": item["name"],
+                                    "text": text,
+                                }
+                            )
                     # 解析 + 入库
                     cleaned = strip_thinking(full_text)
                     # 自动调用 scene=character_generation 的 post-process skills

@@ -34,7 +34,7 @@ import asyncio
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
-__all__ = ["merge_queue_events"]
+__all__ = ["merge_queue_events", "merge_queue_events_ordered"]
 
 
 async def merge_queue_events(
@@ -74,3 +74,35 @@ async def merge_queue_events(
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def merge_queue_events_ordered(
+    queues: Sequence[asyncio.Queue[Any]],
+) -> AsyncIterator[Any]:
+    """把多个队列**按顺序**合并成一条事件流：队列 1 消费完，才消费队列 2。
+
+    什么时候用
+    ----------
+    "生成 3 个剧情"这种**并列展示**的场景：用户期望看到的顺序是
+    **A → B → C**，而不是"哪个模型先回就先出哪个"。
+
+    并行调用时哪个先回是随机的 —— 用户会看到 C 先出字、A 还在转圈，
+    像是坏了。所以这里改成"按序号排队吐事件"。
+
+    为什么不会让整体变慢
+    ------------------
+    **生产者依然是并行的**：三个 LLM 调用同时在跑，事件先进各自的队列里
+    等着。本函数只是**改变吐事件的顺序**，不改变任何一个调用的开始时间。
+
+    所以总耗时 = max(三个调用的耗时)，和并行乱序时完全一样 ——
+    只是屏幕上 A 先动起来。
+
+    约定：每个生产者任务结束时往自己的队列 ``put(None)`` 作为结束哨兵。
+    """
+    for queue in queues:
+        while True:
+            payload = await queue.get()
+            if payload is None:
+                # 该队列的结束哨兵：换下一个队列
+                break
+            yield payload

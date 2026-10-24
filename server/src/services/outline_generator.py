@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
 from ..core.llm.formatting import extract_json_object, strip_thinking
+from ..core.llm.streaming import KIND_THINK, ThinkSplitter
 from ..core.paths import prompts_dir
 from ..core.skills import manager as skill_manager
 from ..models.novel import Novel
@@ -280,6 +281,10 @@ class OutlineGenerator:
         yield {"event": "start", "phase": "outline", "outline_type": outline_type}
 
         full_text = ""
+        # 思考阶段用状态机拆出来 —— 思考可能持续好几秒，
+        # 直接丢掉的话前端这段时间一个字都收不到（用户看到"卡住不动"）。
+        # 这里转发成 "thinking" 事件，前端显示"模型思考中…"。
+        splitter = ThinkSplitter()
         try:
             stream = await llm.chat(
                 [ChatMessage("user", full_prompt)],
@@ -289,10 +294,12 @@ class OutlineGenerator:
             async for delta in stream:  # type: ignore[union-attr]
                 if not delta:
                     continue
-                if "<think>" in delta and "</think>" not in delta:
-                    continue
-                full_text += delta
-                yield {"event": "delta", "text": delta}
+                for kind, text in splitter.feed(delta):
+                    if kind == KIND_THINK:
+                        yield {"event": "thinking", "text": text}
+                        continue
+                    full_text += text
+                    yield {"event": "delta", "text": text}
         except Exception as e:  # noqa: BLE001
             logger.error("outline LLM stream failed: {}", describe_llm_error(e))
             yield {"event": "error", "message": describe_llm_error(e)}
