@@ -20,7 +20,6 @@ from src.core.outline_scale import (
     parse_scale_from_text,
 )
 
-
 # ===== 分卷计算 =====
 
 
@@ -166,9 +165,7 @@ def test_parse_returns_none_when_nothing_found() -> None:
 
 def test_parse_multi_line_ideas() -> None:
     """多个想法拼成的多行文本也要能解析。"""
-    scale = parse_scale_from_text(
-        "不要系统流\n主角是废柴\n共100章\n每卷10章\n每章3000字"
-    )
+    scale = parse_scale_from_text("不要系统流\n主角是废柴\n共100章\n每卷10章\n每章3000字")
     assert scale is not None
     assert scale.total_chapters == 100
     assert scale.chapters_per_volume == 10

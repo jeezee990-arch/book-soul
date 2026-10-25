@@ -45,6 +45,17 @@ export interface OutlineGenerationResponse {
   model: string;
 }
 
+/** AI 辅助续写大纲的请求（2026-10-25 新增）。 */
+export interface OutlineContinueRequest {
+  /** 新增几卷（1-5） */
+  volume_count?: number;
+  /** 每卷章数；缺省取已有大纲的平均值 */
+  chapters_per_volume?: number;
+  words_per_chapter?: number;
+  keywords?: string[];
+  user_extra?: string;
+}
+
 export const outlinesApi = {
   list: (novelId: number) =>
     callApi<Outline[]>("GET", `/novels/${novelId}/outlines`),
@@ -66,6 +77,23 @@ export const outlinesApi = {
   /** 流式大纲生成（ndjson；前端按行解析）。 */
   generateStream: (data: OutlineGenerationRequest, signal?: AbortSignal): StreamRequest => ({
     url: "/novels/outlines/generate/stream",
+    method: "POST",
+    body: data,
+    signal,
+  }),
+
+  /**
+   * 流式**续写**大纲（ndjson）。
+   *
+   * 基于已有大纲 + 已写章节，生成后续卷章并**追加**到原大纲末尾。
+   */
+  continueStream: (
+    novelId: number,
+    outlineId: number,
+    data: OutlineContinueRequest,
+    signal?: AbortSignal,
+  ): StreamRequest => ({
+    url: `/novels/${novelId}/outlines/${outlineId}/continue/stream`,
     method: "POST",
     body: data,
     signal,

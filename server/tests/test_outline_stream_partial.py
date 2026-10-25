@@ -20,7 +20,7 @@ import pytest
 
 from src.core.llm.base import ChatMessage, ChatResponse
 from src.models.outline import OUTLINE_TYPES
-from src.services.outline_generator import OutlineGenerator, _load_outline_prompt
+from src.services.outline_generator import OutlineGenerator
 
 
 class _FakeStreamLLM:

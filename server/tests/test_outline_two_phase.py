@@ -24,7 +24,6 @@ from src.services.outline_two_phase import (
     sanitize_skeleton,
 )
 
-
 # ===== 假 LLM =====
 
 
@@ -78,9 +77,7 @@ def _skeleton_json(volumes: int = 2, chapters: int = 3) -> str:
             {
                 "name": f"第{i + 1}卷 测试",
                 "summary": f"第{i + 1}卷概要。",
-                "chapters": [
-                    {"title": f"第{i + 1}卷 第{j + 1}章"} for j in range(chapters)
-                ],
+                "chapters": [{"title": f"第{i + 1}卷 第{j + 1}章"} for j in range(chapters)],
             }
             for i in range(volumes)
         ],
@@ -126,7 +123,12 @@ def test_sanitize_drops_chapters_without_title() -> None:
 
 def test_sanitize_drops_empty_volumes() -> None:
     out = sanitize_skeleton(
-        {"volumes": [{"name": "空卷", "chapters": []}, {"name": "第一卷", "chapters": [{"title": "A"}]}]}
+        {
+            "volumes": [
+                {"name": "空卷", "chapters": []},
+                {"name": "第一卷", "chapters": [{"title": "A"}]},
+            ]
+        }
     )
     assert len(out["volumes"]) == 1
 
@@ -195,7 +197,9 @@ async def test_builder_emits_skeleton_then_volume_done() -> None:
 @pytest.mark.asyncio
 async def test_builder_details_run_in_parallel() -> None:
     """各卷并行（总耗时 ≈ 最慢的那一卷，而不是各卷之和）。"""
-    llm = _ScriptedLLM([_skeleton_json(4, 2), _detail_json(2), _detail_json(2), _detail_json(2), _detail_json(2)])
+    llm = _ScriptedLLM(
+        [_skeleton_json(4, 2), _detail_json(2), _detail_json(2), _detail_json(2), _detail_json(2)]
+    )
     builder = TwoPhaseOutlineBuilder(
         llm,
         genre="修仙",

@@ -9,12 +9,17 @@
  * - 把大纲里的章节一键创建成正文章节（打通"大纲 → 正文"）
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Loader2, Pencil, Plus, ScrollText, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Loader2, Pencil, Plus, ScrollText, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { outlinesApi } from "@/api/outlines";
 import { chaptersApi } from "@/api/chapters";
 import { ApiError } from "@/api";
+import {
+  detectStreamFailure,
+  parseOutlineStreamEvent,
+  readNdjsonStream,
+} from "@/api/streams";
 import type { Chapter, Novel, Outline } from "@/lib/types";
 import { HintBar, SectionLabel } from "../ui";
 import { Button } from "@/components/ui/button";
@@ -269,6 +274,9 @@ function OutlineBlock({
         </HintBar>
       ) : null}
 
+      {/* AI 辅助续写：接着已有大纲 + 已写章节往下生成 */}
+      <ContinuePanel novelId={novelId} outline={outline} onDone={onSaved} />
+
       {volumes.map((v) => {
         const volKey = `${outline.id}:${v.name}`;
         return (
@@ -383,6 +391,223 @@ function OutlineBlock({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ===== AI 辅助续写后续卷 =====
+
+/**
+ * 续写面板（2026-10-25 新增）。
+ *
+ * 对应需求：「半开放式还差一半 —— 后续由作者自行创作或 **AI 辅助生成后续大纲**」。
+ *
+ * 续写不是重新规划：后端会把**已有大纲 + 已写章节**喂给模型，
+ * 让新卷自然接在作者写到的位置后面。
+ */
+function ContinuePanel({
+  novelId,
+  outline,
+  onDone,
+}: {
+  novelId: number;
+  outline: Outline;
+  onDone: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [volumeCount, setVolumeCount] = useState(1);
+  /** 每卷章数；空字符串 = 由后端按已有大纲平均值推断 */
+  const [cpv, setCpv] = useState("");
+  const [extra, setExtra] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [newVolumes, setNewVolumes] = useState<string[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
+
+  const start = useCallback(async () => {
+    setBusy(true);
+    setStatus("正在构思后续卷章…");
+    setNewVolumes([]);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const req = outlinesApi.continueStream(
+      novelId,
+      outline.id,
+      {
+        volume_count: volumeCount,
+        chapters_per_volume: cpv.trim() === "" ? undefined : Number(cpv),
+        user_extra: extra.trim() || undefined,
+      },
+      ctrl.signal,
+    );
+    try {
+      for await (const ev of readNdjsonStream(req.url, {
+        method: req.method,
+        body: req.body,
+        signal: ctrl.signal,
+      })) {
+        // ⚠️ transport 与 server 两类失败都要认（AGENTS.md §4.10）
+        const failure = detectStreamFailure(ev);
+        if (failure) {
+          toast.error("续写失败", { description: failure.message });
+          setStatus("");
+          return;
+        }
+        const parsed = parseOutlineStreamEvent(ev);
+        if (parsed.kind === "error") {
+          toast.error("续写失败", { description: parsed.message });
+          setStatus("");
+          return;
+        }
+        if (parsed.kind === "volume_start") {
+          setStatus(`正在细化《${parsed.name}》…`);
+        } else if (parsed.kind === "volume_done") {
+          const name = String(parsed.volume.name ?? "");
+          setNewVolumes((s) => (name ? [...s, name] : s));
+        } else if (parsed.kind === "volume_error") {
+          // 单卷失败不影响其它卷
+          setStatus("有一卷没生成出来，其余卷已写入");
+        } else if (parsed.kind === "done") {
+          toast.success(`已续写 ${parsed.volumeCount ?? newVolumes.length} 卷`, {
+            description: "新卷已追加到大纲末尾",
+          });
+          setStatus("");
+          onDone();
+        }
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes("abort")) {
+        toast.error("续写中断", { description: msg });
+      }
+      setStatus("");
+    } finally {
+      setBusy(false);
+    }
+  }, [novelId, outline.id, volumeCount, cpv, extra, onDone, newVolumes.length]);
+
+  if (!open) {
+    return (
+      <Button
+        size="sm"
+        variant="ghost"
+        className="mt-2 h-7 w-full border border-dashed border-neutral-300 px-2 text-[11.5px] text-neutral-500 dark:border-neutral-700 dark:text-neutral-400"
+        onClick={() => setOpen(true)}
+      >
+        <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+        AI 续写后续卷章
+      </Button>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-xl border border-violet-500/30 bg-violet-500/5 p-2.5">
+      <div className="mb-2 flex items-center gap-1.5">
+        <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+        <span className="text-[12px] font-semibold">AI 续写后续卷章</span>
+        <button
+          type="button"
+          className="ml-auto rounded p-0.5 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+          onClick={() => {
+            if (!busy) setOpen(false);
+          }}
+          title="收起"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+
+      <p className="mb-2 text-[11px] leading-relaxed text-neutral-400">
+        会读取已有大纲和已写章节，新卷接在后面追加，原有内容不动。
+      </p>
+
+      <div className="flex items-center gap-2">
+        <label className="flex items-center gap-1 text-[11px] text-neutral-400">
+          新增
+          <input
+            type="number"
+            min={1}
+            max={5}
+            value={volumeCount}
+            disabled={busy}
+            onChange={(e) =>
+              setVolumeCount(Math.max(1, Math.min(5, Number(e.target.value) || 1)))
+            }
+            className="w-12 rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[11.5px] outline-none dark:border-neutral-700 dark:bg-neutral-900"
+          />
+          卷
+        </label>
+        <label className="flex items-center gap-1 text-[11px] text-neutral-400">
+          每卷
+          <input
+            type="number"
+            min={1}
+            max={100}
+            placeholder="沿用"
+            value={cpv}
+            disabled={busy}
+            onChange={(e) => setCpv(e.target.value)}
+            className="w-16 rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[11.5px] outline-none placeholder:text-neutral-400 dark:border-neutral-700 dark:bg-neutral-900"
+          />
+          章
+        </label>
+      </div>
+
+      <textarea
+        value={extra}
+        rows={2}
+        disabled={busy}
+        onChange={(e) => setExtra(e.target.value)}
+        placeholder="特别要求（可选）：下一卷主角要面对宿敌的复仇…"
+        className="mt-2 w-full resize-none rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-[11.5px] leading-relaxed outline-none placeholder:text-neutral-400 focus:border-violet-400 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-900"
+      />
+
+      {status ? (
+        <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-violet-400">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {status}
+        </p>
+      ) : null}
+
+      {newVolumes.length > 0 ? (
+        <ul className="mt-1.5 space-y-0.5">
+          {newVolumes.map((v, i) => (
+            <li key={`${v}-${i}`} className="flex items-center gap-1 text-[11px] text-emerald-500">
+              <Check className="h-3 w-3" />
+              {v}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="mt-2.5 flex justify-end gap-1.5">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-[10.5px]"
+          disabled={busy}
+          onClick={() => setOpen(false)}
+        >
+          取消
+        </Button>
+        <Button
+          size="sm"
+          className="h-6 bg-violet-600 px-2 text-[10.5px] text-white hover:bg-violet-700"
+          disabled={busy}
+          onClick={() => void start()}
+        >
+          {busy ? (
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+          ) : (
+            <Sparkles className="mr-1 h-3 w-3" />
+          )}
+          开始续写
+        </Button>
+      </div>
     </div>
   );
 }

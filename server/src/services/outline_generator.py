@@ -373,9 +373,7 @@ class OutlineGenerator:
             raise OutlineGenerationError("LLM returned empty content")
         # 自动调用 scene=outline_generation 的 post-process skills
         # （仅作用于 LLM 原始输出；skill 应是 JSON-safe 的）
-        post_cleaned = await skill_manager.apply_post(
-            "outline_generation", strip_thinking(raw)
-        )
+        post_cleaned = await skill_manager.apply_post("outline_generation", strip_thinking(raw))
         try:
             return extract_json_object(post_cleaned)
         except ValueError as e:
@@ -387,9 +385,7 @@ class OutlineGenerator:
         try:
             validated = outline_service._validate_structure(outline_type, structure)  # noqa: SLF001
         except Exception as e:  # noqa: BLE001
-            raise OutlineGenerationError(
-                f"LLM output structure invalid: {e}"
-            ) from e
+            raise OutlineGenerationError(f"LLM output structure invalid: {e}") from e
         validated["outline_type"] = outline_type
         return validated
 
@@ -408,9 +404,7 @@ class OutlineGenerator:
         try:
             return await outline_service.create(outline_payload)
         except OutlineTypeConflictError:
-            existing = await outline_service.list_all(
-                novel_id=novel_id, outline_type=outline_type
-            )
+            existing = await outline_service.list_all(novel_id=novel_id, outline_type=outline_type)
             for o in existing:
                 await outline_service.delete(o.id)
             return await outline_service.create(outline_payload)

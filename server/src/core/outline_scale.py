@@ -131,17 +131,11 @@ def normalize_scale(
         MAX_TOTAL_CHAPTERS,
     )
     cpv = (
-        int(chapters_per_volume)
-        if chapters_per_volume is not None
-        else DEFAULT_CHAPTERS_PER_VOLUME
+        int(chapters_per_volume) if chapters_per_volume is not None else DEFAULT_CHAPTERS_PER_VOLUME
     )
     cpv = _clamp(cpv, MIN_CHAPTERS_PER_VOLUME, MAX_CHAPTERS_PER_VOLUME)
     cpv = min(cpv, total)
-    wpc = (
-        int(words_per_chapter)
-        if words_per_chapter is not None
-        else DEFAULT_WORDS_PER_CHAPTER
-    )
+    wpc = int(words_per_chapter) if words_per_chapter is not None else DEFAULT_WORDS_PER_CHAPTER
     wpc = _clamp(wpc, MIN_WORDS_PER_CHAPTER, MAX_WORDS_PER_CHAPTER)
     return OutlineScale(
         total_chapters=total,
@@ -212,9 +206,7 @@ _RE_TOTAL_CHAPTERS = re.compile(rf"({_NUM})\s*[章回]")
 # 总字数："30万字" / "30w字" / "共30万字"
 _RE_TOTAL_WORDS_WAN = re.compile(rf"({_NUM})\s*[wW万]\s*字")
 _RE_TOTAL_WORDS_QIAN = re.compile(rf"({_NUM})\s*[kK千]\s*字")
-_RE_TOTAL_WORDS_PLAIN = re.compile(
-    rf"(?:共|全书|总字|总计|完本|整本|大约|约)\s*({_NUM})\s*字"
-)
+_RE_TOTAL_WORDS_PLAIN = re.compile(rf"(?:共|全书|总字|总计|完本|整本|大约|约)\s*({_NUM})\s*字")
 
 # 出现在数字**紧前面**的这些词，说明这个数字**不是**总量
 # （"每卷 10 章"里的 10 是每卷章数，"第 10 章"里的 10 是章节序号）
@@ -319,11 +311,7 @@ def parse_scale_from_text(text: str) -> OutlineScale | None:
     if per_chapter_words is None and total_words is not None and total_chapters:
         per_chapter_words = max(1, round(total_words / total_chapters))
 
-    if (
-        total_chapters is None
-        and per_volume_chapters is None
-        and per_chapter_words is None
-    ):
+    if total_chapters is None and per_volume_chapters is None and per_chapter_words is None:
         return None
 
     scale = normalize_scale(

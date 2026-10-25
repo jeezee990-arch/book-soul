@@ -84,9 +84,7 @@ async def stream_single_phase(
     kw_str = ", ".join(keywords or []) if keywords else "（无）"
     extra_block = ""
     if user_extra.strip():
-        extra_block = (
-            f"\n\n【作者个人想法（请在生成时参考，但不要照搬）】\n{user_extra.strip()}\n"
-        )
+        extra_block = f"\n\n【作者个人想法（请在生成时参考，但不要照搬）】\n{user_extra.strip()}\n"
     full_prompt = (
         prompt_template.format(genre=genre, plot=plot_summary, keywords=kw_str) + extra_block
     )
@@ -154,7 +152,5 @@ async def stream_single_phase(
     yield {
         "event": "structure_ready",
         "structure": structure,
-        "first_delta_sec": (
-            round(first_delta_at - t0, 2) if first_delta_at is not None else None
-        ),
+        "first_delta_sec": (round(first_delta_at - t0, 2) if first_delta_at is not None else None),
     }

@@ -253,6 +253,7 @@ class TwoPhaseOutlineBuilder:
         scale: OutlineScale,
         outline_type: str = "complete",
         user_extra: str = "",
+        continue_context: dict[str, str] | None = None,
     ) -> None:
         self._llm = llm
         self._genre = genre
@@ -261,12 +262,35 @@ class TwoPhaseOutlineBuilder:
         self._scale = scale
         self._outline_type = outline_type
         self._user_extra = user_extra or ""
+        # 续写模式：带上"已有大纲 + 已写章节"的上下文，骨架 prompt 换一份
+        self._continue_context = continue_context
 
     # ===== 阶段一：骨架 =====
 
     def _skeleton_prompt(self) -> str:
-        """拼装阶段一 prompt。"""
+        """拼装阶段一 prompt。
+
+        续写模式（``continue_context`` 有值）用另一份模板：必须承接已有剧情。
+        """
         kw = ", ".join(self._keywords) if self._keywords else "（无）"
+        extra = self._user_extra.strip()
+        extra_block = extra if extra else "（无）"
+
+        if self._continue_context is not None:
+            ctx = self._continue_context
+            return _load_phase_prompt("continue_skeleton").format(
+                genre=self._genre,
+                plot=self._plot_summary,
+                keywords=kw,
+                existing_context=ctx.get("existing_context", "（无）"),
+                written_context=ctx.get("written_context", "（暂无已写章节）"),
+                last_volume_name=ctx.get("last_volume_name", "已有卷"),
+                volume_count=self._scale.volume_count,
+                chapters_per_volume=self._scale.chapters_per_volume,
+                words_per_chapter=self._scale.words_per_chapter,
+                user_extra=extra_block,
+            )
+
         mode_block = ""
         if self._outline_type == "semi_open":
             mode_block = (
@@ -274,8 +298,6 @@ class TwoPhaseOutlineBuilder:
                 "JSON 里额外给出 `suspense_hook`（悬念钩子，20-50字），"
                 "说明后续可以从哪里继续。\n"
             )
-        extra = self._user_extra.strip()
-        extra_block = extra if extra else "（无）"
         return _load_phase_prompt("skeleton").format(
             genre=self._genre,
             plot=self._plot_summary,
@@ -331,9 +353,7 @@ class TwoPhaseOutlineBuilder:
                         last_parse_at = now
                         partial = parse_partial_json(full_text)
                         if partial:
-                            cleaned = sanitize_skeleton(
-                                partial, outline_type=self._outline_type
-                            )
+                            cleaned = sanitize_skeleton(partial, outline_type=self._outline_type)
                             if cleaned != last_partial:
                                 last_partial = cleaned
                                 yield {
@@ -401,9 +421,7 @@ class TwoPhaseOutlineBuilder:
             words_per_chapter=self._scale.words_per_chapter,
         )
 
-    async def stream_details(
-        self, skeleton: dict[str, Any]
-    ) -> AsyncIterator[dict[str, Any]]:
+    async def stream_details(self, skeleton: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
         """阶段二：各卷**并行**补章概要与关键事件。
 
         产出：``volume_start`` / ``thinking``（带 index）/ ``volume_done`` / ``volume_error``。
@@ -430,15 +448,11 @@ class TwoPhaseOutlineBuilder:
                         }
                     )
                     detail = await self._detail_volume(index, volume, queue)
-                    await queue.put(
-                        {"event": "volume_done", "index": index, "volume": detail}
-                    )
+                    await queue.put({"event": "volume_done", "index": index, "volume": detail})
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001
-                logger.error(
-                    "outline volume {} detail failed: {}", index, describe_llm_error(e)
-                )
+                logger.error("outline volume {} detail failed: {}", index, describe_llm_error(e))
                 await queue.put(
                     {
                         "event": "volume_error",
@@ -451,9 +465,7 @@ class TwoPhaseOutlineBuilder:
                 if remaining == 0:
                     await queue.put(None)
 
-        tasks = [
-            asyncio.create_task(worker(i, v)) for i, v in enumerate(volumes)
-        ]
+        tasks = [asyncio.create_task(worker(i, v)) for i, v in enumerate(volumes)]
         try:
             while True:
                 event = await queue.get()
@@ -486,9 +498,7 @@ class TwoPhaseOutlineBuilder:
                 continue
             for kind, text in splitter.feed(delta):
                 if kind == KIND_THINK:
-                    await queue.put(
-                        {"event": "thinking", "index": index, "text": text}
-                    )
+                    await queue.put({"event": "thinking", "index": index, "text": text})
                     continue
                 full_text += text
         cleaned = strip_thinking(full_text)
@@ -557,9 +567,7 @@ class TwoPhaseOutlineBuilder:
             enriched[index] = result
         return merge_volume_details(skeleton, enriched)
 
-    async def _detail_volume_nonstream(
-        self, index: int, volume: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _detail_volume_nonstream(self, index: int, volume: dict[str, Any]) -> dict[str, Any]:
         """非流式细化一卷。"""
         prompt = self._detail_prompt(index, volume)
         chapters = volume.get("chapters") or []
@@ -578,9 +586,7 @@ class TwoPhaseOutlineBuilder:
         except ValueError:
             raw = parse_partial_json(cleaned)
             if raw is None:
-                raise TwoPhaseOutlineError(
-                    f"第 {index + 1} 卷 JSON 解析失败"
-                ) from None
+                raise TwoPhaseOutlineError(f"第 {index + 1} 卷 JSON 解析失败") from None
         detail = raw.get("chapters") if isinstance(raw, dict) else None
         if not isinstance(detail, list):
             detail = []

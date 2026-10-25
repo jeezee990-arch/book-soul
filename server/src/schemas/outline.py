@@ -237,3 +237,32 @@ class OutlineGenerationResponse(BaseModel):
     structure: dict[str, Any]
     provider: str
     model: str = ""
+
+
+class OutlineContinueRequest(BaseModel):
+    """AI 辅助续写大纲的请求。
+
+    续写的是**已有大纲的后面**：基于已有卷 + 已写章节，生成后续卷章并追加。
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "volume_count": 1,
+                "chapters_per_volume": 10,
+                "words_per_chapter": 3000,
+                "user_extra": "下一卷主角要面对宿敌的复仇",
+            }
+        }
+    )
+
+    volume_count: int = Field(default=1, ge=1, le=5, description="新增几卷")
+    chapters_per_volume: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="每卷章数；缺省取已有大纲的平均值",
+    )
+    words_per_chapter: int = Field(default=3000, ge=500, le=20000, description="每章字数")
+    keywords: list[str] = Field(default_factory=list, max_length=50)
+    user_extra: str = Field(default="", max_length=2000, description="作者特别要求")

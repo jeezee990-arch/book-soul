@@ -23,12 +23,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas.outline import (
+    OutlineContinueRequest,
     OutlineCreate,
     OutlineGenerationRequest,
     OutlineGenerationResponse,
     OutlineRead,
     OutlineUpdate,
 )
+from ..services.outline_continuation import OutlineContinuationService
 from ..services.outline_generator import (
     OutlineGenerationError,
     OutlineGenerator,
@@ -158,6 +160,49 @@ async def delete_outline(
     if outline.novel_id != novel_id:
         return  # 不属于该作品 → 幂等 204
     await service.delete(outline_id)
+
+
+# ===== AI 辅助续写大纲（基于已有大纲 + 已写章节）=====
+
+
+@router.post(
+    "/{outline_id}/continue/stream",
+    summary="AI 辅助续写大纲（ndjson；新增卷追加到原大纲末尾）",
+)
+async def continue_outline_stream(
+    novel_id: int,
+    outline_id: int,
+    payload: OutlineContinueRequest,
+    session: AsyncSession = Depends(get_db),
+):
+    """续写已有大纲：接着已写章节往下生成后续卷章。
+
+    ⚠️ 前置校验放在**开流之前** —— 流一旦开始，HTTP 状态码就锁死了，
+    错误只能塞进流内（前端要能区分"请求没发出去"和"生成到一半失败"）。
+    """
+    from ..models.outline import Outline
+
+    outline = await session.get(Outline, outline_id)
+    if outline is None or outline.novel_id != novel_id:
+        raise HTTPException(status_code=404, detail=f"Outline {outline_id} not found")
+    if outline.outline_type == "freedom":
+        raise HTTPException(status_code=422, detail="创作型大纲（freedom）不支持续写")
+
+    service = OutlineContinuationService(session)
+
+    async def gen():
+        async for event in service.stream_continue(
+            novel_id,
+            outline_id,
+            volume_count=payload.volume_count,
+            chapters_per_volume=payload.chapters_per_volume,
+            words_per_chapter=payload.words_per_chapter,
+            keywords=payload.keywords,
+            user_extra=payload.user_extra,
+        ):
+            yield ndjson_line(event)
+
+    return ndjson_response(gen())
 
 
 # ===== Phase 3.4：基于剧情生成大纲（自动建 novel）=====
