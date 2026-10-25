@@ -24,6 +24,15 @@ export interface OutlineGenerationRequest {
    */
   outline_type?: "complete" | "semi_open" | "freedom";
   user_extra?: string;
+  /**
+   * 规模参数（2026-10-25 新增）。
+   *
+   * ⚠️ 以前规模写死在 prompt 里（20-40 章），作者写的"100 章"被无视。
+   * 现在这三个数是**硬指标**，后端会写进 prompt 要求模型照做。
+   */
+  total_chapters?: number;
+  chapters_per_volume?: number;
+  words_per_chapter?: number;
 }
 
 export interface OutlineGenerationResponse {

@@ -20,9 +20,16 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import type { GenreDef } from "@/config/genres";
 import type { CharProgress, GenStats, NovelState, PlotVersion } from "@/pages/NewBook/types";
 import type { OutlineMode } from "@/pages/NewBook/outline-mode-picker";
+import {
+  DEFAULT_OUTLINE_SCALE,
+  type OutlineScale,
+} from "@/lib/outline-scale";
 
 /** 向导步骤。 */
 export type NewBookStep = "seed" | "plot" | "outline" | "done";
+
+/** 某一卷的细化状态（阶段二）。 */
+export type OutlineVolumeStatus = "running" | "done" | "error";
 
 interface NewBookState {
   /** 当前步骤 */
@@ -39,6 +46,20 @@ interface NewBookState {
   chosenPlotIdx: number | null;
   /** 大纲模式（完整 / 半开放式） */
   outlineMode: OutlineMode;
+  /**
+   * 大纲规模（总章数 / 每卷章数 / 每章字数）。
+   *
+   * ⚠️ 2026-10-25 新增：以前规模写死在 prompt 里（20-40 章），作者写的
+   *    "100 章"被无视。现在是显式参数，会随请求发给后端。
+   */
+  outlineScale: OutlineScale;
+  /**
+   * 作者是否**手动**改过规模。
+   *
+   * 用来决定"想法里识别到新数字"时要不要自动覆盖 ——
+   * 作者手填的值不该被自动识别冲掉。
+   */
+  outlineScaleTouched: boolean;
   /** 已生成的大纲（作品 id + 结构） */
   outlineMeta: NovelState | null;
   /** 人物卡进度 */
@@ -69,6 +90,12 @@ interface NewBookState {
   outlinePartial: Record<string, unknown> | null;
   /** 流式过程中已完成的章节数 */
   outlineChaptersDone: number;
+  /**
+   * 卷下标 → 阶段二细化状态（2026-10-25 两阶段大纲）。
+   *
+   * 骨架阶段结束后，各卷**并行**补细节 —— 用户要能看到"哪一卷好了"。
+   */
+  outlineVolumeStatus: Record<number, OutlineVolumeStatus>;
   /** 大纲阶段的思考文本 */
   outlineThinking: string;
   /** 人物卡阶段的思考文本 */
@@ -104,6 +131,16 @@ interface NewBookState {
   ) => void;
   setChosenPlotIdx: (idx: number | null) => void;
   setOutlineMode: (mode: OutlineMode) => void;
+  /** 设置大纲规模（并标记为"手动改过"） */
+  setOutlineScale: (scale: OutlineScale) => void;
+  /**
+   * 自动填充规模（从想法里识别出来的）。
+   *
+   * 已经手动改过就**不覆盖** —— 返回 true 表示确实填了。
+   */
+  autoFillOutlineScale: (scale: OutlineScale) => boolean;
+  /** 取消"手动改过"标记（下次自动识别可以覆盖了） */
+  resetOutlineScaleTouched: () => void;
   setOutlineMeta: (meta: NovelState | null) => void;
   /** 设置人物卡进度（同样支持函数式更新） */
   setCharProgress: (
@@ -122,8 +159,19 @@ interface NewBookState {
     s: Record<number, string> | ((prev: Record<number, string>) => Record<number, string>),
   ) => void;
   setPlotBusy: (busy: boolean) => void;
-  setOutlinePartial: (s: Record<string, unknown> | null) => void;
+  setOutlinePartial: (
+    s:
+      | Record<string, unknown>
+      | null
+      | ((prev: Record<string, unknown> | null) => Record<string, unknown> | null),
+  ) => void;
   setOutlineChaptersDone: (n: number) => void;
+  /** 设置各卷细化状态（支持函数式更新） */
+  setOutlineVolumeStatus: (
+    s:
+      | Record<number, OutlineVolumeStatus>
+      | ((prev: Record<number, OutlineVolumeStatus>) => Record<number, OutlineVolumeStatus>),
+  ) => void;
   setOutlineThinking: (t: string | ((prev: string) => string)) => void;
   setCharThinking: (t: string | ((prev: string) => string)) => void;
   setOutlinePhase: (p: "outline" | "characters" | "done") => void;
@@ -152,6 +200,8 @@ export function createNewBookStore(storage?: StateStorage) {
         plotVersions: [],
         chosenPlotIdx: null,
         outlineMode: "complete",
+        outlineScale: DEFAULT_OUTLINE_SCALE,
+        outlineScaleTouched: false,
         outlineMeta: null,
         charProgress: EMPTY_CHAR_PROGRESS,
         plotStats: null,
@@ -163,6 +213,7 @@ export function createNewBookStore(storage?: StateStorage) {
         plotBusy: false,
         outlinePartial: null,
         outlineChaptersDone: 0,
+        outlineVolumeStatus: {},
         outlineThinking: "",
         charThinking: "",
         outlinePhase: "outline",
@@ -191,6 +242,18 @@ export function createNewBookStore(storage?: StateStorage) {
           })),
         setChosenPlotIdx: (chosenPlotIdx) => set({ chosenPlotIdx }),
         setOutlineMode: (outlineMode) => set({ outlineMode }),
+        setOutlineScale: (outlineScale) =>
+          set({ outlineScale, outlineScaleTouched: true }),
+        autoFillOutlineScale: (outlineScale) => {
+          let filled = false;
+          set((s) => {
+            if (s.outlineScaleTouched) return s;
+            filled = true;
+            return { ...s, outlineScale };
+          });
+          return filled;
+        },
+        resetOutlineScaleTouched: () => set({ outlineScaleTouched: false }),
         setOutlineMeta: (outlineMeta) => set({ outlineMeta }),
         setCharProgress: (charProgress) =>
           set((s) => ({
@@ -222,9 +285,22 @@ export function createNewBookStore(storage?: StateStorage) {
               typeof plotErrors === "function" ? plotErrors(s.plotErrors) : plotErrors,
           })),
         setPlotBusy: (plotBusy) => set({ plotBusy }),
-        setOutlinePartial: (outlinePartial) => set({ outlinePartial }),
+        setOutlinePartial: (outlinePartial) =>
+          set((s) => ({
+            outlinePartial:
+              typeof outlinePartial === "function"
+                ? outlinePartial(s.outlinePartial)
+                : outlinePartial,
+          })),
         setOutlineChaptersDone: (outlineChaptersDone) =>
           set({ outlineChaptersDone }),
+        setOutlineVolumeStatus: (outlineVolumeStatus) =>
+          set((s) => ({
+            outlineVolumeStatus:
+              typeof outlineVolumeStatus === "function"
+                ? outlineVolumeStatus(s.outlineVolumeStatus)
+                : outlineVolumeStatus,
+          })),
         setOutlineThinking: (outlineThinking) =>
           set((s) => ({
             outlineThinking:
@@ -250,6 +326,8 @@ export function createNewBookStore(storage?: StateStorage) {
             plotVersions: [],
             chosenPlotIdx: null,
             outlineMode: "complete",
+            outlineScale: DEFAULT_OUTLINE_SCALE,
+            outlineScaleTouched: false,
             outlineMeta: null,
             charProgress: EMPTY_CHAR_PROGRESS,
             plotStats: null,
@@ -261,6 +339,7 @@ export function createNewBookStore(storage?: StateStorage) {
             plotBusy: false,
             outlinePartial: null,
             outlineChaptersDone: 0,
+            outlineVolumeStatus: {},
             outlineThinking: "",
             charThinking: "",
             outlinePhase: "outline",
@@ -278,6 +357,8 @@ export function createNewBookStore(storage?: StateStorage) {
           plotVersions: s.plotVersions,
           chosenPlotIdx: s.chosenPlotIdx,
           outlineMode: s.outlineMode,
+          outlineScale: s.outlineScale,
+          outlineScaleTouched: s.outlineScaleTouched,
           outlineMeta: s.outlineMeta,
           charProgress: s.charProgress,
           plotStats: s.plotStats,

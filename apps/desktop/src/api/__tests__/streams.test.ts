@@ -111,7 +111,46 @@ describe("detectStreamFailure", () => {
 describe("parseOutlineStreamEvent", () => {
   it("thinking 事件 → kind=thinking", () => {
     const r = parseOutlineStreamEvent({ event: "thinking", text: "先想想" } as never);
-    expect(r).toEqual({ kind: "thinking", text: "先想想" });
+    // ⚠️ 2026-10-25 两阶段大纲：thinking 可能带 index（某卷的思考）
+    expect(r).toEqual({ kind: "thinking", text: "先想想", index: null });
+  });
+
+  it("thinking 事件带 index（某卷的思考）", () => {
+    const r = parseOutlineStreamEvent({
+      event: "thinking",
+      index: 2,
+      text: "在编第二卷",
+    } as never);
+    expect(r).toEqual({ kind: "thinking", text: "在编第二卷", index: 2 });
+  });
+
+  it("skeleton 事件 → 结构 + 章节数（阶段一完成）", () => {
+    const structure = { volumes: [{ name: "第一卷" }] };
+    const r = parseOutlineStreamEvent({
+      event: "skeleton",
+      structure,
+      chapters_done: 12,
+    } as never);
+    expect(r).toEqual({ kind: "skeleton", structure, chaptersDone: 12 });
+  });
+
+  it("volume_done 事件 → 卷下标 + 细化后的卷", () => {
+    const volume = { name: "第一卷", chapters: [{ summary: "概要" }] };
+    const r = parseOutlineStreamEvent({
+      event: "volume_done",
+      index: 0,
+      volume,
+    } as never);
+    expect(r).toEqual({ kind: "volume_done", index: 0, volume });
+  });
+
+  it("volume_error 事件 → 卷下标 + 错误信息", () => {
+    const r = parseOutlineStreamEvent({
+      event: "volume_error",
+      index: 1,
+      message: "超时",
+    } as never);
+    expect(r).toEqual({ kind: "volume_error", index: 1, message: "超时" });
   });
 
   it("partial 事件 → 结构 + 已完成章节数", () => {
@@ -152,7 +191,28 @@ describe("parseOutlineStreamEvent", () => {
       model: "MiniMax-M3.1-Flash",
       elapsedSec: 12.34,
       firstDeltaSec: 1.5,
+      skeletonSec: null,
+      totalChapters: null,
+      volumeCount: null,
     });
+  });
+
+  it("done 事件带两阶段耗时与规模", () => {
+    const r = parseOutlineStreamEvent({
+      event: "done",
+      novel_id: 1,
+      elapsed_sec: 40,
+      first_delta_sec: 2,
+      skeleton_sec: 18,
+      total_chapters: 100,
+      volume_count: 10,
+    } as never);
+    expect(r.kind).toBe("done");
+    if (r.kind === "done") {
+      expect(r.skeletonSec).toBe(18);
+      expect(r.totalChapters).toBe(100);
+      expect(r.volumeCount).toBe(10);
+    }
   });
 
   it("done 事件缺耗时字段 → null（不编造数字）", () => {

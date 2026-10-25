@@ -15,8 +15,9 @@
  */
 
 import { useEffect, useRef } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, TriangleAlert } from "lucide-react";
 import type { CharProgress, GenStats, NovelState } from "./types";
+import type { OutlineVolumeStatus } from "@/stores/newbook-store";
 import OutlineStructureView from "./outline-structure-view";
 import type { OutlineMode } from "./outline-mode-picker";
 import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
@@ -29,6 +30,12 @@ interface Props {
   outlinePartial: Record<string, unknown> | null;
   /** 流式过程中已完成的章节数 */
   outlineChaptersDone: number;
+  /**
+   * 各卷细化状态（两阶段大纲的阶段二）。
+   *
+   * 骨架完成后各卷**并行**补细节 —— 用户要能看到"哪一卷好了"。
+   */
+  outlineVolumeStatus: Record<number, OutlineVolumeStatus>;
   /** 模型思考中的文本（<think> 块）—— 有值且还没出正文时显示"模型思考中…" */
   outlineThinking: string;
   /** 大纲完成后的结构（结构化渲染用） */
@@ -57,6 +64,7 @@ export default function OutlineStep({
   phase,
   outlinePartial,
   outlineChaptersDone,
+  outlineVolumeStatus,
   outlineThinking,
   outlineStructure,
   novelMeta,
@@ -85,6 +93,22 @@ export default function OutlineStep({
   }, [outlinePartial]);
 
   const modeLabel = outlineMode === "semi_open" ? "半开放式大纲" : "完整大纲";
+
+  /**
+   * 各卷名称（阶段二并行补细节时显示"哪一卷好了"）。
+   *
+   * 只在有状态数据时才渲染 —— 骨架还没出来时没必要占地方。
+   */
+  const volumeRows = (() => {
+    const status = outlineVolumeStatus;
+    if (Object.keys(status).length === 0) return [];
+    const volumes = (outlinePartial?.volumes ?? []) as { name?: string }[];
+    return volumes.map((v, i) => ({
+      index: i,
+      name: v.name ?? `第 ${i + 1} 卷`,
+      status: status[i],
+    }));
+  })();
 
   return (
     <div>
@@ -161,6 +185,35 @@ export default function OutlineStep({
             <OutlineStructureView structure={outlineStructure} />
           )}
         </div>
+
+        {/* 阶段二：各卷并行补细节的进度（哪一卷好了） */}
+        {volumeRows.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-neutral-200/70 px-3.5 py-2 dark:border-neutral-800/70">
+            <span className="text-[10.5px] text-neutral-400">细化各卷</span>
+            {volumeRows.map((v) => (
+              <span
+                key={v.index}
+                className={cn(
+                  "inline-flex max-w-[180px] items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px]",
+                  v.status === "done"
+                    ? "bg-emerald-500/15 text-emerald-500"
+                    : v.status === "error"
+                      ? "bg-rose-500/15 text-rose-500"
+                      : "bg-violet-500/15 text-violet-400",
+                )}
+              >
+                {v.status === "done" ? (
+                  <Check className="h-2.5 w-2.5 shrink-0" />
+                ) : v.status === "error" ? (
+                  <TriangleAlert className="h-2.5 w-2.5 shrink-0" />
+                ) : (
+                  <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
+                )}
+                <span className="truncate">{v.name}</span>
+              </span>
+            ))}
+          </div>
+        ) : null}
 
         {/* 生成信息：模型 + 耗时 */}
         {phase !== "outline" && outlineStats ? (

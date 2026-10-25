@@ -26,8 +26,11 @@ import SeedStep from "./seed-step";
 import PlotStep from "./plot-step";
 import OutlineStep from "./outline-step";
 import OutlineModePicker from "./outline-mode-picker";
+import OutlineScaleBar from "./outline-scale-bar";
 import IdeaChips from "./idea-chips";
 import { EMPTY_CHAR_PROGRESS } from "./types";
+import { parseScaleFromText } from "@/lib/outline-scale";
+import { mergeVolumeIntoStructure } from "@/lib/outline-merge";
 import { cn } from "@/lib/utils";
 
 const STEPS: { key: NewBookStep; label: string }[] = [
@@ -70,6 +73,11 @@ export default function NewBook() {
   const setChosenPlotIdx = useNewBookStore((s) => s.setChosenPlotIdx);
   const outlineMode = useNewBookStore((s) => s.outlineMode);
   const setOutlineMode = useNewBookStore((s) => s.setOutlineMode);
+  /** 大纲规模（总章数 / 每卷章数 / 每章字数）——硬指标，后端写进 prompt */
+  const outlineScale = useNewBookStore((s) => s.outlineScale);
+  const setOutlineScale = useNewBookStore((s) => s.setOutlineScale);
+  const autoFillOutlineScale = useNewBookStore((s) => s.autoFillOutlineScale);
+  const outlineScaleTouched = useNewBookStore((s) => s.outlineScaleTouched);
   const outlineMeta = useNewBookStore((s) => s.outlineMeta);
   const setOutlineMeta = useNewBookStore((s) => s.setOutlineMeta);
   const charProgress = useNewBookStore((s) => s.charProgress);
@@ -120,6 +128,9 @@ export default function NewBook() {
   /** 流式过程中已完成的章节数 */
   const outlineChaptersDone = useNewBookStore((s) => s.outlineChaptersDone);
   const setOutlineChaptersDone = useNewBookStore((s) => s.setOutlineChaptersDone);
+  /** 各卷细化状态（阶段二并行补细节时显示"哪一卷好了"） */
+  const outlineVolumeStatus = useNewBookStore((s) => s.outlineVolumeStatus);
+  const setOutlineVolumeStatus = useNewBookStore((s) => s.setOutlineVolumeStatus);
   /** 模型思考中的文本（<think> 块）—— 显示"模型思考中…"避免看起来像卡死 */
   const outlineThinking = useNewBookStore((s) => s.outlineThinking);
   const setOutlineThinking = useNewBookStore((s) => s.setOutlineThinking);
@@ -134,6 +145,16 @@ export default function NewBook() {
 
   /** 发给后端的"作者个人想法"——把词条拼成多行文本 */
   const userExtra = useMemo(() => ideas.join("\n"), [ideas]);
+
+  // ===== 规模自动识别 =====
+  //
+  // 作者在想法里写"共100章""每章3000字" → 自动填进规模设置。
+  // ⚠️ 作者**手动改过**之后就不再自动覆盖（手填的值更权威）。
+  const detectedScale = useMemo(() => parseScaleFromText(userExtra), [userExtra]);
+
+  useEffect(() => {
+    if (detectedScale) autoFillOutlineScale(detectedScale);
+  }, [detectedScale, autoFillOutlineScale]);
 
   // ===== 步骤 1 → 2：生成剧情 =====
 
@@ -270,6 +291,7 @@ export default function NewBook() {
 
     setOutlinePartial(null);
     setOutlineChaptersDone(0);
+    setOutlineVolumeStatus({});
     setOutlineThinking("");
     setOutlineMeta(null);
     setOutlineStats(null);
@@ -290,6 +312,10 @@ export default function NewBook() {
         novel_name: undefined,
         outline_type: outlineMode,
         user_extra: userExtra,
+        // 规模是**硬指标**：写进 prompt 要求模型照做
+        total_chapters: outlineScale.totalChapters,
+        chapters_per_volume: outlineScale.chaptersPerVolume,
+        words_per_chapter: outlineScale.wordsPerChapter,
       },
       ctrl.signal,
     );
@@ -316,6 +342,21 @@ export default function NewBook() {
           // 前端只管渲染中文剧情，不用解析半截 JSON。
           setOutlinePartial(parsed.structure);
           setOutlineChaptersDone(parsed.chaptersDone);
+        } else if (parsed.kind === "skeleton") {
+          // 阶段一完成：全书卷章结构齐了
+          setOutlinePartial(parsed.structure);
+          setOutlineChaptersDone(parsed.chaptersDone);
+        } else if (parsed.kind === "volume_start") {
+          setOutlineVolumeStatus((s) => ({ ...s, [parsed.index]: "running" }));
+        } else if (parsed.kind === "volume_done") {
+          // 某一卷的细节补齐 → 按下标替换那一卷
+          setOutlinePartial((prev) =>
+            mergeVolumeIntoStructure(prev, parsed.index, parsed.volume),
+          );
+          setOutlineVolumeStatus((s) => ({ ...s, [parsed.index]: "done" }));
+        } else if (parsed.kind === "volume_error") {
+          // 单卷失败不影响其它卷
+          setOutlineVolumeStatus((s) => ({ ...s, [parsed.index]: "error" }));
         } else if (parsed.kind === "done") {
           setOutlineMeta({
             id: parsed.novelId,
@@ -339,7 +380,16 @@ export default function NewBook() {
       }
       setStep("plot");
     }
-  }, [chosenPlotIdx, plotVersions, genre, keywords, userExtra, outlineMode, startElapsed]);
+  }, [
+    chosenPlotIdx,
+    plotVersions,
+    genre,
+    keywords,
+    userExtra,
+    outlineMode,
+    outlineScale,
+    startElapsed,
+  ]);
 
   // ===== 步骤 3：从大纲生成人物卡 =====
 
@@ -645,6 +695,16 @@ export default function NewBook() {
                     onChange={setOutlineMode}
                     disabled={plotBusy}
                   />
+                  {/* 规模设置：作者明确写死的章数/字数（以前被 prompt 里的
+                      "20-40 章"无视 —— 现在是硬指标） */}
+                  <div className="mt-3">
+                    <OutlineScaleBar
+                      value={outlineScale}
+                      onChange={setOutlineScale}
+                      canRedetect={Boolean(detectedScale) && !outlineScaleTouched}
+                      disabled={plotBusy}
+                    />
+                  </div>
                   <div className="mt-4 flex items-center justify-between">
                     <button
                       type="button"
@@ -690,6 +750,7 @@ export default function NewBook() {
               phase={outlinePhase}
               outlinePartial={outlinePartial}
               outlineChaptersDone={outlineChaptersDone}
+              outlineVolumeStatus={outlineVolumeStatus}
               outlineThinking={outlineThinking}
               outlineStructure={outlineMeta?.outlineStructure ?? null}
               novelMeta={outlineMeta}

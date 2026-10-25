@@ -213,9 +213,23 @@ def test_semi_open_is_valid_outline_type() -> None:
     assert "semi_open" in OUTLINE_TYPES
 
 
-def test_semi_open_prompt_exists_and_mentions_suspense() -> None:
-    """半开放式 prompt 要存在，且要明确要求"留悬念"。"""
-    prompt = _load_outline_prompt("semi_open")
+def test_semi_open_prompt_requires_suspense_hook() -> None:
+    """半开放式必须要求模型给出 ``suspense_hook``（悬念钩子）。
+
+    ⚠️ 2026-10-25 起 semi_open 走**两阶段**模板，"只写前期 + 留悬念"的要求
+    由 :meth:`TwoPhaseOutlineBuilder._skeleton_prompt` 的 mode_block 注入。
+    """
+    from src.core.outline_scale import normalize_scale
+    from src.services.outline_two_phase import TwoPhaseOutlineBuilder
+
+    builder = TwoPhaseOutlineBuilder(
+        _FakeStreamLLM([]),
+        genre="悬疑",
+        plot_summary="主角发现父亲留下的账本。",
+        scale=normalize_scale(12, 6, 3000),
+        outline_type="semi_open",
+    )
+    prompt = builder._skeleton_prompt()  # noqa: SLF001
     assert "suspense_hook" in prompt
     assert "悬念" in prompt
 
@@ -271,12 +285,24 @@ async def test_generate_semi_open_saves_structure(db_initialized: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_semi_open_rejects_unknown_fields(db_initialized: Path) -> None:
-    """半开放式结构里有未知字段 → 校验失败（别让脏数据进库）。"""
+async def test_semi_open_strips_unknown_fields(db_initialized: Path) -> None:
+    """半开放式结构里的未知字段 → **剥离**（别让脏数据进库）。
+
+    ⚠️ 2026-10-25 行为变更：两阶段骨架会先做字段白名单清洗（模型爱多吐字段，
+    比如 ``main_characters``），再交给 Pydantic 校验。未知字段被丢弃而不是报错 ——
+    大纲照常生成，脏数据不入库。
+    """
     from src.db import SessionLocal
+    from src.models.outline import Outline
 
     payload = {
-        "volumes": [],
+        "volumes": [
+            {
+                "name": "第一卷 暗流",
+                "summary": "主角发现父亲留下的账本。",
+                "chapters": [{"title": "第一章 旧账本"}],
+            }
+        ],
         "overall_theme": "主题",
         "suspense_hook": "钩子",
         "unexpected_field": "不该出现",
@@ -291,11 +317,16 @@ async def test_semi_open_rejects_unknown_fields(db_initialized: Path) -> None:
 
     async with SessionLocal() as session:
         gen = OutlineGenerator(session, llm_client=_BadLLM())
-        with pytest.raises(Exception) as exc_info:
-            await gen.generate(
-                genre="悬疑",
-                plot_summary="剧情足够长，描述完整具体。",
-                novel_name="脏数据测试",
-                outline_type="semi_open",
-            )
-    assert "unexpected_field" in str(exc_info.value)
+        result = await gen.generate(
+            genre="悬疑",
+            plot_summary="剧情足够长，描述完整具体。",
+            novel_name="脏数据测试",
+            outline_type="semi_open",
+        )
+
+    assert "unexpected_field" not in result["structure"]
+    async with SessionLocal() as session:
+        outline = await session.get(Outline, result["outline_id"])
+        assert outline is not None
+        assert "unexpected_field" not in outline.structure
+        assert outline.structure["suspense_hook"] == "钩子"

@@ -169,6 +169,13 @@ class OutlineGenerationRequest(BaseModel):
     - ``novel_name`` 可选（缺省用 "{genre}新作"）
     - ``outline_type`` 取值 ``complete``（分卷/章，完整写到全书结束）、
       ``semi_open``（半开放式：只写前期并留悬念）或 ``freedom``（散文+节拍）
+
+    **规模参数**（2026-10-25 新增）：以前 prompt 把"20-40 章"写死，
+    作者在想法里写的"100 章"会被无视。现在规模是显式参数：
+
+    - ``total_chapters``      全书总章数
+    - ``chapters_per_volume`` 每卷章数（目标值）
+    - ``words_per_chapter``   每章字数
     """
 
     model_config = ConfigDict(
@@ -179,6 +186,9 @@ class OutlineGenerationRequest(BaseModel):
                 "keywords": ["废柴逆袭", "秘境"],
                 "novel_name": "灵根重塑",
                 "outline_type": "complete",
+                "total_chapters": 100,
+                "chapters_per_volume": 10,
+                "words_per_chapter": 3000,
             }
         }
     )
@@ -196,6 +206,25 @@ class OutlineGenerationRequest(BaseModel):
         ),
     )
     user_extra: str = Field(default="", max_length=2000, description="作者个人想法，会拼进 prompt")
+    # ===== 规模参数（硬指标：写进 prompt，模型必须照做）=====
+    total_chapters: int = Field(
+        default=30,
+        ge=1,
+        le=500,
+        description="全书总章数（硬指标）。",
+    )
+    chapters_per_volume: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="每卷章数（目标值；总章数不能整除时按均分+前几卷多 1 章分配）。",
+    )
+    words_per_chapter: int = Field(
+        default=3000,
+        ge=500,
+        le=20000,
+        description="每章字数。",
+    )
 
 
 class OutlineGenerationResponse(BaseModel):

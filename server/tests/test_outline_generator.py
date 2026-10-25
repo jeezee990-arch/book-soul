@@ -98,11 +98,27 @@ def _clear_caches() -> None:
 
 
 def test_load_outline_prompt_returns_str() -> None:
-    for t in ("complete", "freedom"):
+    # ⚠️ 2026-10-25 起 complete / semi_open 走**两阶段**模板
+    #    （outline_skeleton.yaml + outline_volume_detail.yaml），
+    #    只有 freedom 还是单阶段模板。
+    for t in ("freedom",):
         p = _load_outline_prompt(t)
         assert isinstance(p, str)
         assert "{genre}" in p
         assert "{plot}" in p
+
+
+def test_two_phase_prompt_templates_exist() -> None:
+    """两阶段模板必须存在，且带齐规模参数占位符。"""
+    from src.services.outline_two_phase import _load_phase_prompt
+
+    skeleton = _load_phase_prompt("skeleton")
+    for ph in ("{genre}", "{plot}", "{total_chapters}", "{volume_count}", "{volume_plan}"):
+        assert ph in skeleton, f"骨架模板缺少占位符 {ph}"
+
+    detail = _load_phase_prompt("volume_detail")
+    for ph in ("{genre}", "{plot}", "{volume_index}", "{chapters_json}"):
+        assert ph in detail, f"细节模板缺少占位符 {ph}"
 
 
 def test_load_outline_prompt_missing_raises() -> None:

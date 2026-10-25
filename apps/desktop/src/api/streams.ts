@@ -77,8 +77,11 @@ export function detectStreamFailure(e: StreamEvent): StreamFailure | null {
  * 大纲流事件的分类结果（2026-10-25 新增）。
  *
  * 后端大纲流协议（见 `server/src/services/outline_generator.py`）：
- * - `{"event": "thinking", "text": "..."}` —— 模型思考中
+ * - `{"event": "start", "phase": "outline", "total_chapters": N, "volume_count": M, ...}`
+ * - `{"event": "thinking", "text": "..."}` —— 模型思考中（带 `index` 的是某卷的思考）
  * - `{"event": "partial", "structure": {...}, "chapters_done": N}` —— **结构化**增量
+ * - `{"event": "skeleton", "structure": {...}, "chapters_done": N}` —— 阶段一骨架完成
+ * - `{"event": "volume_start" | "volume_done" | "volume_error", "index": i, ...}` —— 阶段二逐卷进度
  * - `{"event": "done", "novel_id": ..., "structure": {...}, "model": ..., "elapsed_sec": ...}`
  * - `{"event": "error", "message": "..."}`
  *
@@ -87,8 +90,12 @@ export function detectStreamFailure(e: StreamEvent): StreamFailure | null {
  * 改成发已解析好的 `partial`。
  */
 export type OutlineStreamEvent =
-  | { kind: "thinking"; text: string }
+  | { kind: "thinking"; text: string; index: number | null }
   | { kind: "partial"; structure: Record<string, unknown>; chaptersDone: number }
+  | { kind: "skeleton"; structure: Record<string, unknown>; chaptersDone: number }
+  | { kind: "volume_start"; index: number; name: string }
+  | { kind: "volume_done"; index: number; volume: Record<string, unknown> }
+  | { kind: "volume_error"; index: number; message: string }
   | {
       kind: "done";
       novelId: number;
@@ -98,6 +105,9 @@ export type OutlineStreamEvent =
       model: string;
       elapsedSec: number | null;
       firstDeltaSec: number | null;
+      skeletonSec: number | null;
+      totalChapters: number | null;
+      volumeCount: number | null;
     }
   | { kind: "error"; message: string }
   | { kind: "unknown" };
@@ -116,21 +126,51 @@ export function parseOutlineStreamEvent(ev: StreamEvent): OutlineStreamEvent {
   const obj = ev as unknown as Record<string, unknown>;
   const event = obj.event as string | undefined;
   if (event === "thinking") {
-    return { kind: "thinking", text: (obj.text as string) ?? "" };
+    const idx = obj.index as number | undefined;
+    return {
+      kind: "thinking",
+      text: (obj.text as string) ?? "",
+      index: typeof idx === "number" ? idx : null,
+    };
   }
-  if (event === "partial") {
+  if (event === "partial" || event === "skeleton") {
     const structure = obj.structure as Record<string, unknown> | undefined;
     if (!structure) return { kind: "unknown" };
     const done = obj.chapters_done as number | undefined;
     return {
-      kind: "partial",
+      kind: event === "skeleton" ? "skeleton" : "partial",
       structure,
       chaptersDone: typeof done === "number" ? done : 0,
+    };
+  }
+  if (event === "volume_start") {
+    return {
+      kind: "volume_start",
+      index: (obj.index as number) ?? 0,
+      name: (obj.name as string) ?? "",
+    };
+  }
+  if (event === "volume_done") {
+    const volume = obj.volume as Record<string, unknown> | undefined;
+    return {
+      kind: "volume_done",
+      index: (obj.index as number) ?? 0,
+      volume: volume ?? {},
+    };
+  }
+  if (event === "volume_error") {
+    return {
+      kind: "volume_error",
+      index: (obj.index as number) ?? 0,
+      message: (obj.message as string) ?? "未知错误",
     };
   }
   if (event === "done") {
     const elapsed = obj.elapsed_sec as number | undefined;
     const first = obj.first_delta_sec as number | null | undefined;
+    const skeleton = obj.skeleton_sec as number | null | undefined;
+    const totalChapters = obj.total_chapters as number | undefined;
+    const volumeCount = obj.volume_count as number | undefined;
     return {
       kind: "done",
       novelId: (obj.novel_id as number) ?? 0,
@@ -140,6 +180,9 @@ export function parseOutlineStreamEvent(ev: StreamEvent): OutlineStreamEvent {
       model: (obj.model as string) ?? "",
       elapsedSec: typeof elapsed === "number" ? elapsed : null,
       firstDeltaSec: typeof first === "number" ? first : null,
+      skeletonSec: typeof skeleton === "number" ? skeleton : null,
+      totalChapters: typeof totalChapters === "number" ? totalChapters : null,
+      volumeCount: typeof volumeCount === "number" ? volumeCount : null,
     };
   }
   return { kind: "unknown" };

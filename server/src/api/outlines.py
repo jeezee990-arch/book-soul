@@ -186,6 +186,10 @@ async def generate_outline(
             keywords=payload.keywords or [],
             novel_name=payload.novel_name,
             outline_type=payload.outline_type,
+            user_extra=payload.user_extra,
+            total_chapters=payload.total_chapters,
+            chapters_per_volume=payload.chapters_per_volume,
+            words_per_chapter=payload.words_per_chapter,
         )
     except OutlineGenerationError as e:
         # LLM 失败 / 结构错 → 500（业务可重试）；参数错由 Pydantic 422 拦
@@ -214,6 +218,9 @@ async def generate_outline_stream(
             novel_name=payload.novel_name,
             outline_type=payload.outline_type,
             user_extra=payload.user_extra,
+            total_chapters=payload.total_chapters,
+            chapters_per_volume=payload.chapters_per_volume,
+            words_per_chapter=payload.words_per_chapter,
         ):
             yield ndjson_line(event)
 
