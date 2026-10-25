@@ -16,7 +16,8 @@ import { cn } from "@/lib/utils";
 interface Props {
   genre: GenreDef | null;
   onSelectGenre: (g: GenreDef | null) => void;
-  keywords: Set<string>;
+  /** 已选词条（字符串数组；持久化在 newbook-store 里） */
+  keywords: string[];
   onToggleKeyword: (kw: string) => void;
   onRemoveKeyword: (kw: string) => void;
   onClearKeywords: () => void;
@@ -71,7 +72,7 @@ export default function SeedStep({
         genre.id,
         categories.length > 0 ? categories : [],
         10,
-        keywords,
+        new Set(keywords),
       );
       setCandidates(words);
     } catch (e: unknown) {
@@ -130,10 +131,10 @@ export default function SeedStep({
             <h3 className="flex items-baseline gap-2 text-[12.5px] font-semibold">
               已选词条
               <span className="text-[11.5px] font-normal text-neutral-400">
-                {keywords.size} 个 · 会写进每个 prompt
+                {keywords.length} 个 · 会写进每个 prompt
               </span>
             </h3>
-            {keywords.size > 0 ? (
+            {keywords.length > 0 ? (
               <button
                 type="button"
                 onClick={onClearKeywords}
@@ -143,13 +144,13 @@ export default function SeedStep({
               </button>
             ) : null}
           </div>
-          {keywords.size === 0 ? (
+          {keywords.length === 0 ? (
             <p className="rounded-lg border border-dashed border-neutral-200 px-3 py-3 text-[11.5px] text-neutral-400 dark:border-neutral-800">
               还没选词条 —— 从下方候选池点选，或在底部输入框直接输入
             </p>
           ) : (
             <div className="flex min-h-[62px] flex-wrap gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/[0.06] p-3">
-              {Array.from(keywords).map((kw) => (
+              {keywords.map((kw) => (
                 <span
                   key={kw}
                   className="inline-flex h-[27px] items-center gap-1.5 rounded-full border border-indigo-500/40 bg-indigo-500/10 pr-1.5 pl-3 text-[12px] text-indigo-600 dark:text-indigo-300"
@@ -199,7 +200,7 @@ export default function SeedStep({
               </span>
             ) : (
               candidates.map((kw) => {
-                const on = keywords.has(kw);
+                const on = keywords.includes(kw);
                 return (
                   <button
                     key={kw}

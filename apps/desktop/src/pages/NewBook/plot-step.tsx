@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import { Check, X } from "lucide-react";
+import { Check, Square, X } from "lucide-react";
 import type { GenreDef } from "@/config/genres";
 import type { GenStats, PlotVersion } from "./types";
 import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   genre: GenreDef | null;
-  keywords: Set<string>;
+  keywords: string[];
   versions: PlotVersion[];
   /** index → 流式中的文本 */
   streaming: Record<number, string>;
@@ -38,6 +38,8 @@ interface Props {
   stats: GenStats | null;
   chosenIdx: number | null;
   onChoose: (idx: number) => void;
+  /** 停止生成（用户主动中断） */
+  onStop?: () => void;
 }
 
 const VERSION_IDX = [1, 2, 3];
@@ -54,6 +56,7 @@ export default function PlotStep({
   stats,
   chosenIdx,
   onChoose,
+  onStop,
 }: Props) {
   /** 每个卡片内容区的 DOM 引用（用于自动滚到底） */
   const bodyRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -73,22 +76,37 @@ export default function PlotStep({
   return (
     <div>
       <div className="mb-5">
-        <h2 className="text-[19px] font-semibold tracking-tight">
-          挑一个你更想写的走向
-        </h2>
-        <p className="mt-1.5 text-[12.5px] leading-relaxed text-neutral-400">
-          {genre?.name} · {keywords.size} 个关键词 ·{" "}
-          {isStreaming ? (
-            `正在生成（${elapsedSec}s）…`
-          ) : stats ? (
-            <span className="text-neutral-500 dark:text-neutral-300">
-              {stats.model || "当前模型"} · 用时 {stats.elapsedSec}s
-              {stats.firstDeltaSec != null ? ` · 首字 ${stats.firstDeltaSec}s` : ""}
-            </span>
-          ) : (
-            "点卡片读全文，选中的那个会作为大纲和人物卡的基准"
-          )}
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-[19px] font-semibold tracking-tight">
+              挑一个你更想写的走向
+            </h2>
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-neutral-400">
+              {genre?.name} · {keywords.length} 个关键词 ·{" "}
+              {isStreaming ? (
+                `正在生成（${elapsedSec}s）…`
+              ) : stats ? (
+                <span className="text-neutral-500 dark:text-neutral-300">
+                  {stats.model || "当前模型"} · 用时 {stats.elapsedSec}s
+                  {stats.firstDeltaSec != null ? ` · 首字 ${stats.firstDeltaSec}s` : ""}
+                </span>
+              ) : (
+                "点卡片读全文，选中的那个会作为大纲和人物卡的基准"
+              )}
+            </p>
+          </div>
+          {/* 停止生成（切页面不会中断了，要停得手动点） */}
+          {isStreaming && onStop ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-neutral-200 px-2.5 text-[12px] text-neutral-500 transition-colors hover:border-rose-300 hover:text-rose-500 dark:border-neutral-800 dark:hover:border-rose-500/50 dark:hover:text-rose-400"
+            >
+              <Square className="h-3 w-3" />
+              停止
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">

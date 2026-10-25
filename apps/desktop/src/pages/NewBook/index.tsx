@@ -19,109 +19,148 @@ import { outlinesApi } from "@/api/outlines";
 import { charactersApi } from "@/api/characters";
 import { chaptersApi } from "@/api/chapters";
 import { readNdjsonStream, detectStreamFailure, parseOutlineStreamEvent, type StreamRequest } from "@/api/streams";
-import type { GenreDef } from "@/config/genres";
 import { useNovelsStore } from "@/stores/novels-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useNewBookStore, type NewBookStep } from "@/stores/newbook-store";
 import SeedStep from "./seed-step";
 import PlotStep from "./plot-step";
 import OutlineStep from "./outline-step";
-import OutlineModePicker, { type OutlineMode } from "./outline-mode-picker";
-import type { CharProgress, GenStats, NovelState, PlotVersion } from "./types";
+import OutlineModePicker from "./outline-mode-picker";
+import IdeaChips from "./idea-chips";
 import { EMPTY_CHAR_PROGRESS } from "./types";
 import { cn } from "@/lib/utils";
 
-/** 向导状态（3 步）。 */
-type WizardStep = "seed" | "plot" | "outline" | "done";
-
-const STEPS: { key: WizardStep; label: string }[] = [
+const STEPS: { key: NewBookStep; label: string }[] = [
   { key: "seed", label: "种子" },
   { key: "plot", label: "剧情" },
   { key: "outline", label: "大纲与人物" },
 ];
+
+/**
+ * 三条流的 AbortController（**模块级**）。
+ *
+ * 为什么不用 useRef：组件卸载后 ref 还在但没人能拿到它 → 后台正在跑的
+ * 生成就停不掉了。模块级变量任何时候都能访问。
+ */
+let plotAbort: AbortController | null = null;
+let outlineAbort: AbortController | null = null;
+let charAbort: AbortController | null = null;
 
 export default function NewBook() {
   const navigate = useNavigate();
   const refreshNovels = useNovelsStore((s) => s.refresh);
   const setTarget = useWorkspaceStore((s) => s.setTarget);
 
-  const [step, setStep] = useState<WizardStep>("seed");
+  // ===== 持久化进度（切页面回来还在）=====
+  const step = useNewBookStore((s) => s.step);
+  const setStep = useNewBookStore((s) => s.setStep);
+  const genre = useNewBookStore((s) => s.genre);
+  const setGenre = useNewBookStore((s) => s.setGenre);
+  const keywords = useNewBookStore((s) => s.keywords);
+  const toggleKeyword = useNewBookStore((s) => s.toggleKeyword);
+  const removeKeyword = useNewBookStore((s) => s.removeKeyword);
+  const clearKeywords = useNewBookStore((s) => s.clearKeywords);
+  /** 作者想法词条（每次发送加一条；见 IdeaChips） */
+  const ideas = useNewBookStore((s) => s.ideas);
+  const addIdea = useNewBookStore((s) => s.addIdea);
+  const removeIdea = useNewBookStore((s) => s.removeIdea);
+  const plotVersions = useNewBookStore((s) => s.plotVersions);
+  const setPlotVersions = useNewBookStore((s) => s.setPlotVersions);
+  const chosenPlotIdx = useNewBookStore((s) => s.chosenPlotIdx);
+  const setChosenPlotIdx = useNewBookStore((s) => s.setChosenPlotIdx);
+  const outlineMode = useNewBookStore((s) => s.outlineMode);
+  const setOutlineMode = useNewBookStore((s) => s.setOutlineMode);
+  const outlineMeta = useNewBookStore((s) => s.outlineMeta);
+  const setOutlineMeta = useNewBookStore((s) => s.setOutlineMeta);
+  const charProgress = useNewBookStore((s) => s.charProgress);
+  const setCharProgress = useNewBookStore((s) => s.setCharProgress);
+  const plotStats = useNewBookStore((s) => s.plotStats);
+  const setPlotStats = useNewBookStore((s) => s.setPlotStats);
+  const outlineStats = useNewBookStore((s) => s.outlineStats);
+  const setOutlineStats = useNewBookStore((s) => s.setOutlineStats);
+  const charStats = useNewBookStore((s) => s.charStats);
+  const setCharStats = useNewBookStore((s) => s.setCharStats);
+  const resetAll = useNewBookStore((s) => s.resetAll);
 
-  // 种子（内存，不持久化）
-  const [genre, setGenre] = useState<GenreDef | null>(null);
-  const [keywords, setKeywords] = useState<Set<string>>(new Set());
-
-  // 剧情
-  const [plotVersions, setPlotVersions] = useState<PlotVersion[]>([]);
-  const [plotStreaming, setPlotStreaming] = useState<Record<number, string>>({});
+  // ===== 瞬时状态（放 store：组件卸载后 set 依然有效，后台生成能跑完）=====
+  const plotStreaming = useNewBookStore((s) => s.plotStreaming);
+  const setPlotStreaming = useNewBookStore((s) => s.setPlotStreaming);
   /** index → 模型思考中的文本（<think> 块；用来显示"模型思考中…"） */
-  const [plotThinking, setPlotThinking] = useState<Record<number, string>>({});
+  const plotThinking = useNewBookStore((s) => s.plotThinking);
+  const setPlotThinking = useNewBookStore((s) => s.setPlotThinking);
   /** index → 该版本的失败原因（单版本失败不影响其它版本） */
-  const [plotErrors, setPlotErrors] = useState<Record<number, string>>({});
-  const [plotBusy, setPlotBusy] = useState(false);
-  const [chosenPlotIdx, setChosenPlotIdx] = useState<number | null>(null);
-  const plotAbortRef = useRef<AbortController | null>(null);
+  const plotErrors = useNewBookStore((s) => s.plotErrors);
+  const setPlotErrors = useNewBookStore((s) => s.setPlotErrors);
+  const plotBusy = useNewBookStore((s) => s.plotBusy);
+  const setPlotBusy = useNewBookStore((s) => s.setPlotBusy);
   /** 本次生成已耗时（秒）—— 让用户看到"还在动" */
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const elapsedRef = useRef<number | null>(null);
+  const elapsedStartedAt = useNewBookStore((s) => s.elapsedStartedAt);
+  const setElapsedStartedAt = useNewBookStore((s) => s.setElapsedStartedAt);
   /**
-   * 当前耗时的**实时值**（ref）。
+   * 每秒 tick 一次，只为触发重渲染。
    *
-   * ⚠️ 不能直接读 state 里的 elapsedSec —— setState 是异步的，
-   *    事件回调里读到的还是旧值（AGENTS.md §4.9 同一个坑）。
+   * ⚠️ 显示的秒数是**算出来的**（now - elapsedStartedAt），不是累加的 ——
+   *    累加值在"切到别的页面再回来"时会停在切走的那一刻。
    */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (elapsedStartedAt === null) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [elapsedStartedAt]);
+  const elapsedSec =
+    elapsedStartedAt === null ? 0 : Math.floor((now - elapsedStartedAt) / 1000);
   const elapsedValueRef = useRef(0);
-  /** 剧情阶段的最终统计（模型 + 耗时 + 首字延迟） */
-  const [plotStats, setPlotStats] = useState<GenStats | null>(null);
 
   // 大纲 + 人物
   /** 流式过程中已解析出的**部分**大纲结构（不是原始 JSON 文本） */
-  const [outlinePartial, setOutlinePartial] = useState<Record<string, unknown> | null>(null);
+  const outlinePartial = useNewBookStore((s) => s.outlinePartial);
+  const setOutlinePartial = useNewBookStore((s) => s.setOutlinePartial);
   /** 流式过程中已完成的章节数 */
-  const [outlineChaptersDone, setOutlineChaptersDone] = useState(0);
+  const outlineChaptersDone = useNewBookStore((s) => s.outlineChaptersDone);
+  const setOutlineChaptersDone = useNewBookStore((s) => s.setOutlineChaptersDone);
   /** 模型思考中的文本（<think> 块）—— 显示"模型思考中…"避免看起来像卡死 */
-  const [outlineThinking, setOutlineThinking] = useState("");
-  const [outlineMeta, setOutlineMeta] = useState<NovelState | null>(null);
-  const [charProgress, setCharProgress] = useState<CharProgress>(EMPTY_CHAR_PROGRESS);
+  const outlineThinking = useNewBookStore((s) => s.outlineThinking);
+  const setOutlineThinking = useNewBookStore((s) => s.setOutlineThinking);
   /** 人物卡生成阶段的思考提示 */
-  const [charThinking, setCharThinking] = useState("");
-  const [outlinePhase, setOutlinePhase] = useState<
-    "outline" | "characters" | "done"
-  >("outline");
-  const outlineAbortRef = useRef<AbortController | null>(null);
-  const charAbortRef = useRef<AbortController | null>(null);
-  /** 大纲模式（完整 / 半开放式） */
-  const [outlineMode, setOutlineMode] = useState<OutlineMode>("complete");
-  /** 大纲阶段的最终统计 */
-  const [outlineStats, setOutlineStats] = useState<GenStats | null>(null);
-  /** 人物卡阶段的最终统计 */
-  const [charStats, setCharStats] = useState<GenStats | null>(null);
+  const charThinking = useNewBookStore((s) => s.charThinking);
+  const setCharThinking = useNewBookStore((s) => s.setCharThinking);
+  const outlinePhase = useNewBookStore((s) => s.outlinePhase);
+  const setOutlinePhase = useNewBookStore((s) => s.setOutlinePhase);
 
-  // 作者想法（贯穿所有步骤）
-  const [userExtra, setUserExtra] = useState("");
+  /** 底部输入框的临时文本 */
   const [idea, setIdea] = useState("");
+
+  /** 发给后端的"作者个人想法"——把词条拼成多行文本 */
+  const userExtra = useMemo(() => ideas.join("\n"), [ideas]);
 
   // ===== 步骤 1 → 2：生成剧情 =====
 
-  /** 开始/停止计时器（让用户看到"还在生成"，而不是干等）。 */
+  /**
+   * 开始/停止计时。
+   *
+   * 计时器本身在组件里（每秒 tick 触发重渲染），但**起始时刻存在 store** ——
+   * 这样切到别的页面再回来，秒数能接着算，而不是停在切走那一刻。
+   */
   const startElapsed = useCallback(() => {
     elapsedValueRef.current = 0;
-    setElapsedSec(0);
-    if (elapsedRef.current !== null) window.clearInterval(elapsedRef.current);
-    elapsedRef.current = window.setInterval(() => {
-      elapsedValueRef.current += 1;
-      setElapsedSec(elapsedValueRef.current);
-    }, 1000);
-  }, []);
+    setElapsedStartedAt(Date.now());
+  }, [setElapsedStartedAt]);
 
   const stopElapsed = useCallback(() => {
-    if (elapsedRef.current !== null) {
-      window.clearInterval(elapsedRef.current);
-      elapsedRef.current = null;
-    }
-  }, []);
+    setElapsedStartedAt(null);
+  }, [setElapsedStartedAt]);
+
+  /** 停止剧情生成（用户主动中断） */
+  const stopPlotStream = useCallback(() => {
+    plotAbort?.abort();
+    setPlotBusy(false);
+    stopElapsed();
+  }, [stopElapsed]);
 
   const startPlotStream = useCallback(async () => {
-    if (!genre || keywords.size === 0) return;
+    if (!genre || keywords.length === 0) return;
     setPlotVersions([]);
     setPlotStreaming({});
     setPlotThinking({});
@@ -133,7 +172,7 @@ export default function NewBook() {
     startElapsed();
 
     const ctrl = new AbortController();
-    plotAbortRef.current = ctrl;
+    plotAbort = ctrl;
     const req: StreamRequest = inspirationsApi.generatePlotStream(
       {
         genre: genre.name,
@@ -242,7 +281,7 @@ export default function NewBook() {
     startElapsed();
 
     const ctrl = new AbortController();
-    outlineAbortRef.current = ctrl;
+    outlineAbort = ctrl;
     const req: StreamRequest = outlinesApi.generateStream(
       {
         genre: genre?.name ?? "通用",
@@ -313,7 +352,7 @@ export default function NewBook() {
       // 人物卡是独立的一次生成 —— 重新计时
       startElapsed();
       const ctrl = new AbortController();
-      charAbortRef.current = ctrl;
+      charAbort = ctrl;
       const req: StreamRequest = charactersApi.generateFromOutlineStream(
         novelId,
         { outline, genre: genre?.name ?? "通用", user_extra: userExtra },
@@ -388,8 +427,8 @@ export default function NewBook() {
 
   // 大纲阶段 → 退回剧情页重选（不然选错一条只能整本重开）
   const handleBackToPlot = useCallback(() => {
-    outlineAbortRef.current?.abort();
-    charAbortRef.current?.abort();
+    outlineAbort?.abort();
+    charAbort?.abort();
     setOutlinePartial(null);
     setOutlineChaptersDone(0);
     setOutlineThinking("");
@@ -436,17 +475,14 @@ export default function NewBook() {
     navigate("/");
   }, [outlineMeta, setTarget, refreshNovels, navigate]);
 
-  // 离开页面 → 取消未完成请求
+  // 离开页面 → **不中断**正在跑的生成
+  //
+  // ⚠️ 2026-10-25 改：以前这里 abort 掉所有请求，用户切个页面回来
+  //    生成就白跑了。现在生成结果写进 store（组件卸载后 set 依然有效），
+  //    所以让请求**继续在后台跑完**，回来直接看到结果。
+  //    停止生成请用「停止」按钮（见 plot-step / outline-step）。
   useEffect(() => {
-    return () => {
-      plotAbortRef.current?.abort();
-      outlineAbortRef.current?.abort();
-      charAbortRef.current?.abort();
-      if (elapsedRef.current !== null) {
-        window.clearInterval(elapsedRef.current);
-        elapsedRef.current = null;
-      }
-    };
+    // 组件卸载时不 abort：让后台把生成跑完（结果写进 store，回来可见）
   }, []);
 
   // ===== 底部想法输入 =====
@@ -455,24 +491,17 @@ export default function NewBook() {
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      setUserExtra((prev) => (prev ? prev + "\n" + trimmed : trimmed));
-      // 种子步骤额外把文本当关键词
+      // 种子步骤：输入的文本当**关键词**（进 prompt 的关键词位）
       if (step === "seed") {
-        setKeywords((prev) => {
-          if (prev.has(trimmed)) return prev;
-          const next = new Set(prev);
-          next.add(trimmed);
-          return next;
-        });
+        if (!keywords.includes(trimmed)) toggleKeyword(trimmed);
         toast.success(`已加入关键词：${trimmed.slice(0, 24)}`);
       } else {
-        toast.info("想法已记录，会随下一次生成发送", {
-          description: trimmed.slice(0, 40),
-        });
+        // 其它步骤：变成一条**想法词条**（可见、可删、会随生成发送）
+        addIdea(trimmed);
       }
       setIdea("");
     },
-    [step],
+    [step, keywords, toggleKeyword, addIdea],
   );
 
   const ideaPlaceholder = useMemo(() => {
@@ -489,6 +518,7 @@ export default function NewBook() {
   }, [step]);
 
   const stepIndex = STEPS.findIndex((s) => s.key === step);
+  const keywordCount = keywords.length;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -557,22 +587,9 @@ export default function NewBook() {
                 genre={genre}
                 onSelectGenre={setGenre}
                 keywords={keywords}
-                onToggleKeyword={(kw) =>
-                  setKeywords((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(kw)) next.delete(kw);
-                    else next.add(kw);
-                    return next;
-                  })
-                }
-                onRemoveKeyword={(kw) =>
-                  setKeywords((prev) => {
-                    const next = new Set(prev);
-                    next.delete(kw);
-                    return next;
-                  })
-                }
-                onClearKeywords={() => setKeywords(new Set())}
+                onToggleKeyword={toggleKeyword}
+                onRemoveKeyword={removeKeyword}
+                onClearKeywords={clearKeywords}
               />
               <div className="mt-7 flex justify-end gap-2.5">
                 <button
@@ -585,7 +602,7 @@ export default function NewBook() {
                 <button
                   type="button"
                   onClick={() => void startPlotStream()}
-                  disabled={!genre || keywords.size === 0}
+                  disabled={!genre || keywordCount === 0}
                   className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-5 text-[13px] font-medium text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   生成 3 个剧情
@@ -606,6 +623,7 @@ export default function NewBook() {
                 isStreaming={plotBusy}
                 elapsedSec={elapsedSec}
                 stats={plotStats}
+                onStop={stopPlotStream}
                 chosenIdx={chosenPlotIdx}
                 onChoose={(idx) => {
                   // 只负责"选中"。生成走下面的按钮 —— 按钮显式传索引，
@@ -613,6 +631,8 @@ export default function NewBook() {
                   setChosenPlotIdx(idx);
                 }}
               />
+              {/* 想法词条：每次发送想法加一条，鼠标移上去才露出删除按钮 */}
+              <IdeaChips ideas={ideas} onRemove={removeIdea} disabled={plotBusy} />
               {chosenPlotIdx !== null && !plotBusy ? (
                 /* 选好剧情后，选"要哪种大纲"（2026-10-25 新增） */
                 <section className="mt-7 rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
@@ -629,7 +649,7 @@ export default function NewBook() {
                     <button
                       type="button"
                       onClick={() => {
-                        plotAbortRef.current?.abort();
+                        plotAbort?.abort();
                         stopElapsed();
                         setStep("seed");
                       }}
@@ -652,7 +672,7 @@ export default function NewBook() {
                   <button
                     type="button"
                     onClick={() => {
-                      plotAbortRef.current?.abort();
+                      plotAbort?.abort();
                       stopElapsed();
                       setStep("seed");
                     }}
@@ -680,27 +700,24 @@ export default function NewBook() {
               elapsedSec={elapsedSec}
               outlineMode={outlineMode}
               onFinish={() => void handleFinish()}
-              onBack={handleBackToPlot}
-              onRestart={() => {
-                setStep("seed");
-                setGenre(null);
-                setKeywords(new Set());
-                setPlotVersions([]);
+              onBack={handleBackToPlot}              onRestart={() => {
+                // 「再写一本」：清空持久化进度 + 本地瞬时状态
+                resetAll();
                 setPlotStreaming({});
                 setPlotThinking({});
                 setPlotErrors({});
-                setChosenPlotIdx(null);
                 setOutlinePartial(null);
                 setOutlineChaptersDone(0);
                 setOutlineThinking("");
-                setOutlineMeta(null);
-                setOutlineStats(null);
-                setCharProgress(EMPTY_CHAR_PROGRESS);
                 setCharThinking("");
-                setCharStats(null);
                 setOutlinePhase("outline");
               }}
             />
+          ) : null}
+
+          {/* 想法词条：大纲步骤也能看到已记录的想法（可删可改） */}
+          {step === "outline" || step === "done" ? (
+            <IdeaChips ideas={ideas} onRemove={removeIdea} />
           ) : null}
         </div>
       </div>
