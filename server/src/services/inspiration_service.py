@@ -158,7 +158,8 @@ class InspirationService:
         """列出灵感，支持 novel_id / type / tag 过滤。"""
         self._validate_type(inspiration_type)
         stmt = select(Inspiration)
-        # novel_id 过滤：None 表示仅通用灵感；int 表示该作品
+        # novel_id 过滤：None = **不过滤**（通用 + 所有作品的素材）；
+        # int = 只看该作品的
         if novel_id is not None:
             stmt = stmt.where(Inspiration.novel_id == novel_id)
         if inspiration_type is not None:
@@ -458,7 +459,7 @@ class PlotService:
                     stream=True,
                 )
                 # OpenAI 兼容流式：stream 是 ``AsyncIterator[str]``（每个 delta 文本）
-                async for delta in stream:  # type: ignore[union-attr]
+                async for delta in stream:  # type: ignore[attr-defined]
                     if not delta:
                         continue
                     for kind, text in splitter.feed(delta):

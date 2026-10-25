@@ -62,6 +62,15 @@ interface NewBookState {
   outlineScaleTouched: boolean;
   /** 已生成的大纲（作品 id + 结构） */
   outlineMeta: NovelState | null;
+  /**
+   * 本次向导建出来的**书名**（2026-10-25 新增）。
+   *
+   * ⚠️ 为什么要单独存：后端按书名 upsert 作品（同名 → 复用同一本）。
+   *    不传书名的话，后端会生成唯一名 —— 那么"退回剧情页再生成一次"
+   *    就会**新建第二本书**，第一次的那本变成孤儿。
+   *    存下来后：同一向导内重生成 → 复用同一本；换一本 → 「再写一本」清空。
+   */
+  novelName: string | null;
   /** 人物卡进度 */
   charProgress: CharProgress;
   /** 剧情阶段统计 */
@@ -103,6 +112,13 @@ interface NewBookState {
   /** 大纲步骤内部阶段 */
   outlinePhase: "outline" | "characters" | "done";
   /**
+   * 大纲是否正在生成（**不持久化**）。
+   *
+   * 用途：刷新页面后用它区分"正在生成"与"上次生成被刷新打断了" ——
+   * 后者要给出明确提示，而不是永远转圈。
+   */
+  outlineBusy: boolean;
+  /**
    * 本次生成的开始时刻（Date.now()）。
    *
    * ⚠️ 存**时间戳**而不是"已过秒数"：切到别的页面再回来，秒数要能
@@ -142,6 +158,8 @@ interface NewBookState {
   /** 取消"手动改过"标记（下次自动识别可以覆盖了） */
   resetOutlineScaleTouched: () => void;
   setOutlineMeta: (meta: NovelState | null) => void;
+  /** 记录本次向导建出来的书名（重生成时复用同一本作品） */
+  setNovelName: (name: string | null) => void;
   /** 设置人物卡进度（同样支持函数式更新） */
   setCharProgress: (
     p: CharProgress | ((prev: CharProgress) => CharProgress),
@@ -175,6 +193,8 @@ interface NewBookState {
   setOutlineThinking: (t: string | ((prev: string) => string)) => void;
   setCharThinking: (t: string | ((prev: string) => string)) => void;
   setOutlinePhase: (p: "outline" | "characters" | "done") => void;
+  /** 大纲是否正在生成（不持久化） */
+  setOutlineBusy: (busy: boolean) => void;
   setElapsedStartedAt: (t: number | null) => void;
   /** 整个流程重置（「再写一本」） */
   resetAll: () => void;
@@ -203,6 +223,7 @@ export function createNewBookStore(storage?: StateStorage) {
         outlineScale: DEFAULT_OUTLINE_SCALE,
         outlineScaleTouched: false,
         outlineMeta: null,
+        novelName: null,
         charProgress: EMPTY_CHAR_PROGRESS,
         plotStats: null,
         outlineStats: null,
@@ -217,6 +238,7 @@ export function createNewBookStore(storage?: StateStorage) {
         outlineThinking: "",
         charThinking: "",
         outlinePhase: "outline",
+        outlineBusy: false,
         elapsedStartedAt: null,
 
         setStep: (step) => set({ step }),
@@ -255,6 +277,7 @@ export function createNewBookStore(storage?: StateStorage) {
         },
         resetOutlineScaleTouched: () => set({ outlineScaleTouched: false }),
         setOutlineMeta: (outlineMeta) => set({ outlineMeta }),
+        setNovelName: (novelName) => set({ novelName }),
         setCharProgress: (charProgress) =>
           set((s) => ({
             charProgress:
@@ -316,6 +339,7 @@ export function createNewBookStore(storage?: StateStorage) {
                 : charThinking,
           })),
         setOutlinePhase: (outlinePhase) => set({ outlinePhase }),
+        setOutlineBusy: (outlineBusy) => set({ outlineBusy }),
         setElapsedStartedAt: (elapsedStartedAt) => set({ elapsedStartedAt }),
         resetAll: () =>
           set({
@@ -329,6 +353,7 @@ export function createNewBookStore(storage?: StateStorage) {
             outlineScale: DEFAULT_OUTLINE_SCALE,
             outlineScaleTouched: false,
             outlineMeta: null,
+            novelName: null,
             charProgress: EMPTY_CHAR_PROGRESS,
             plotStats: null,
             outlineStats: null,
@@ -343,6 +368,7 @@ export function createNewBookStore(storage?: StateStorage) {
             outlineThinking: "",
             charThinking: "",
             outlinePhase: "outline",
+            outlineBusy: false,
             elapsedStartedAt: null,
           }),
       }),
@@ -359,7 +385,12 @@ export function createNewBookStore(storage?: StateStorage) {
           outlineMode: s.outlineMode,
           outlineScale: s.outlineScale,
           outlineScaleTouched: s.outlineScaleTouched,
+          // ⚠️ outlinePhase 必须持久化：否则刷新后回到 "outline"，
+          //    而 outlinePartial 不持久化 → 页面永远停在"正在生成大纲"死界面
+          //    （2026-10-25 巡检发现）。
+          outlinePhase: s.outlinePhase,
           outlineMeta: s.outlineMeta,
+          novelName: s.novelName,
           charProgress: s.charProgress,
           plotStats: s.plotStats,
           outlineStats: s.outlineStats,

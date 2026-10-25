@@ -14,13 +14,14 @@
  *    生成中显示实时秒数，完成后显示总耗时 + 首字延迟 + 模型名。
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Check, Loader2, TriangleAlert } from "lucide-react";
 import type { CharProgress, GenStats, NovelState } from "./types";
 import type { OutlineVolumeStatus } from "@/stores/newbook-store";
 import OutlineStructureView from "./outline-structure-view";
 import type { OutlineMode } from "./outline-mode-picker";
 import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
+import { checkOutlineCoverage, coveragePercent } from "@/lib/consistency";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -36,8 +37,12 @@ interface Props {
    * 骨架完成后各卷**并行**补细节 —— 用户要能看到"哪一卷好了"。
    */
   outlineVolumeStatus: Record<number, OutlineVolumeStatus>;
+  /** 选中的那条剧情摘要（用于检测大纲是否沿着剧情走） */
+  plotSummary: string;
   /** 模型思考中的文本（<think> 块）—— 有值且还没出正文时显示"模型思考中…" */
   outlineThinking: string;
+  /** 大纲阶段是否正在生成（区分"生成中"与"上次被刷新打断"） */
+  generating: boolean;
   /** 大纲完成后的结构（结构化渲染用） */
   outlineStructure: Record<string, unknown> | null;
   novelMeta: NovelState | null;
@@ -65,6 +70,8 @@ export default function OutlineStep({
   outlinePartial,
   outlineChaptersDone,
   outlineVolumeStatus,
+  plotSummary,
+  generating,
   outlineThinking,
   outlineStructure,
   novelMeta,
@@ -109,6 +116,20 @@ export default function OutlineStep({
       status: status[i],
     }));
   })();
+
+  /**
+   * 大纲与剧情走向的**词面重合度**（需求6）。
+   *
+   * 用流式里的部分结构算（生成中就能看到实时变化）。
+   */
+  const plotCoverage = useMemo(
+    () =>
+      checkOutlineCoverage(
+        phase === "outline" ? outlinePartial : outlineStructure,
+        plotSummary,
+      ),
+    [phase, outlinePartial, outlineStructure, plotSummary],
+  );
 
   return (
     <div>
@@ -160,7 +181,7 @@ export default function OutlineStep({
 
         <div className="p-3.5">
           {phase === "outline" ? (
-            outlinePartial ? (
+            outlinePartial || outlineStructure ? (
               /*
                * ⚠️ 必须是 `overflow-y-auto`（原来写的是 `overflow-hidden`）：
                *    内容流到边界就被裁掉 → 后面的字渲染了但**看不见** →
@@ -168,17 +189,24 @@ export default function OutlineStep({
                */
               <div ref={streamRef} className="max-h-[460px] overflow-y-auto">
                 <OutlineStructureView
-                  structure={outlinePartial}
-                  streaming
+                  structure={outlinePartial ?? outlineStructure}
+                  streaming={generating}
                   chaptersDone={outlineChaptersDone}
                 />
               </div>
-            ) : (
+            ) : generating ? (
               <div className="flex items-center gap-2 rounded-lg border border-dashed border-neutral-200 px-3 py-3 text-[11.5px] text-neutral-400 dark:border-neutral-800">
                 <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-400" />
                 {outlineThinking
                   ? `模型思考中… ${outlineThinking.slice(-40).trim()}`
                   : "正在构思卷章结构…"}
+              </div>
+            ) : (
+              /* 刷新把生成打断了（outlinePartial 不持久化）—— 给明确出口 */
+              <div className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/5 px-3 py-3 text-[11.5px] leading-relaxed text-amber-600 dark:text-amber-400">
+                上次的大纲生成被中断了（刷新页面会打断生成）。
+                <br />
+                点右上角「← 换一条剧情」重新生成。
               </div>
             )
           ) : (
@@ -212,6 +240,35 @@ export default function OutlineStep({
                 <span className="truncate">{v.name}</span>
               </span>
             ))}
+          </div>
+        ) : null}
+
+        {/* 与剧情走向的重合度（需求6：检测大纲是否沿着选中的剧情走） */}
+        {plotCoverage.total > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-neutral-200/70 px-3.5 py-2 text-[10.5px] text-neutral-400 dark:border-neutral-800/70">
+            <span
+              className={cn(
+                "rounded px-1.5 py-0.5",
+                coveragePercent(plotCoverage) >= 60
+                  ? "bg-emerald-500/15 text-emerald-500"
+                  : coveragePercent(plotCoverage) >= 35
+                    ? "bg-amber-500/15 text-amber-500"
+                    : "bg-rose-500/15 text-rose-500",
+              )}
+            >
+              与剧情走向重合 {coveragePercent(plotCoverage)}%
+            </span>
+            {plotCoverage.matched.length > 0 ? (
+              <span className="text-neutral-400">
+                命中：{plotCoverage.matched.slice(0, 6).join("、")}
+              </span>
+            ) : null}
+            {plotCoverage.missing.length > 0 ? (
+              <span className="text-neutral-400">
+                未覆盖：{plotCoverage.missing.slice(0, 6).join("、")}
+                {plotCoverage.missing.length > 6 ? "…" : ""}
+              </span>
+            ) : null}
           </div>
         ) : null}
 

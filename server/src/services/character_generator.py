@@ -363,7 +363,7 @@ class CharacterGenerator:
                 temperature=0.5,
                 stream=True,
             )
-            async for delta in stream:  # type: ignore[union-attr]
+            async for delta in stream:  # type: ignore[attr-defined]
                 if not delta:
                     continue
                 for kind, text in splitter.feed(delta):
@@ -437,7 +437,7 @@ class CharacterGenerator:
                         temperature=0.7,
                         stream=True,
                     )
-                    async for delta in stream:  # type: ignore[union-attr]
+                    async for delta in stream:  # type: ignore[attr-defined]
                         if not delta:
                             continue
                         for kind, text in splitter.feed(delta):

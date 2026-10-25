@@ -19,6 +19,15 @@ interface NovelsState {
   error: string | null;
   /** 是否已经拉过（避免重复请求） */
   loaded: boolean;
+  /**
+   * 是否有一次强制刷新被"排队"了。
+   *
+   * ⚠️ 2026-10-25 巡检：原来 `load()` 开头 `if (s.loading) return;`，
+   *    飞行中的请求会把紧接着的 `refresh()` 静默吞掉 →
+   *    开新书写完，顶栏作品列表少一本（要用户手动再触发一次才出现）。
+   *    现在：飞行中收到 force 请求 → 记一个 needsRefresh，落地后再补拉一次。
+   */
+  needsRefresh: boolean;
   load: (force?: boolean) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -28,10 +37,15 @@ export const useNovelsStore = create<NovelsState>((set, get) => ({
   loading: false,
   error: null,
   loaded: false,
+  needsRefresh: false,
 
   load: async (force = false) => {
     const s = get();
-    if (s.loading) return;
+    if (s.loading) {
+      // 正在拉 → 记住"落地后要再拉一次"
+      if (force) set({ needsRefresh: true });
+      return;
+    }
     if (s.loaded && !force) return;
 
     set({ loading: true, error: null });
@@ -41,6 +55,11 @@ export const useNovelsStore = create<NovelsState>((set, get) => ({
     } catch (e: unknown) {
       const msg = e instanceof ApiError ? e.message : String(e);
       set({ loading: false, loaded: true, error: msg });
+    } finally {
+      if (get().needsRefresh) {
+        set({ needsRefresh: false });
+        void get().load(true);
+      }
     }
   },
 

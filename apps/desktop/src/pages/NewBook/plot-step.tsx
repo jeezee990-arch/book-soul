@@ -14,11 +14,12 @@
  *    用户不用手动拖就能看到"正在写的字"（原来只能盯着开头那一段）。
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Check, Square, X } from "lucide-react";
 import type { GenreDef } from "@/config/genres";
 import type { GenStats, PlotVersion } from "./types";
 import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
+import { checkKeywordCoverage, coveragePercent } from "@/lib/consistency";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -43,6 +44,48 @@ interface Props {
 }
 
 const VERSION_IDX = [1, 2, 3];
+
+/**
+ * 种子词条覆盖徽标。
+ *
+ * 显示"覆盖了几个种子词"+"缺了哪几个" —— 精确子串匹配，可信。
+ */
+function SeedCoverage({
+  keywords,
+  text,
+}: {
+  keywords: string[];
+  text: string;
+}) {
+  const coverage = useMemo(
+    () => checkKeywordCoverage(text, keywords),
+    [text, keywords],
+  );
+  if (coverage.total === 0) return null;
+  const good = coverage.missing.length === 0;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1 text-[10.5px]">
+      <span
+        className={cn(
+          "rounded px-1 py-0.5",
+          good
+            ? "bg-emerald-500/15 text-emerald-500"
+            : "bg-amber-500/15 text-amber-500",
+        )}
+      >
+        种子词 {coverage.matched.length}/{coverage.total}
+      </span>
+      {!good ? (
+        <span className="text-neutral-400">
+          缺：
+          {coverage.missing.slice(0, 4).join("、")}
+          {coverage.missing.length > 4 ? "…" : ""}
+        </span>
+      ) : null}
+      <span className="sr-only">{coveragePercent(coverage)}%</span>
+    </div>
+  );
+}
 
 export default function PlotStep({
   genre,
@@ -211,6 +254,14 @@ export default function PlotStep({
                         ? "✓ 已选中"
                         : "点击选中"}
                 </span>
+
+                {/*
+                 * 种子词条覆盖检测（需求6）：这条剧情有没有提到作者选的种子词。
+                 * 没提到的词直接列出来 —— 作者一眼就知道"模型跑偏了"。
+                 */}
+                {!streamingHere && !failed && text ? (
+                  <SeedCoverage keywords={keywords} text={text} />
+                ) : null}
               </div>
             </button>
           );

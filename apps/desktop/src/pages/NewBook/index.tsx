@@ -80,6 +80,9 @@ export default function NewBook() {
   const outlineScaleTouched = useNewBookStore((s) => s.outlineScaleTouched);
   const outlineMeta = useNewBookStore((s) => s.outlineMeta);
   const setOutlineMeta = useNewBookStore((s) => s.setOutlineMeta);
+  /** 本次向导建出来的书名（重生成时复用同一本作品） */
+  const novelName = useNewBookStore((s) => s.novelName);
+  const setNovelName = useNewBookStore((s) => s.setNovelName);
   const charProgress = useNewBookStore((s) => s.charProgress);
   const setCharProgress = useNewBookStore((s) => s.setCharProgress);
   const plotStats = useNewBookStore((s) => s.plotStats);
@@ -121,6 +124,14 @@ export default function NewBook() {
     elapsedStartedAt === null ? 0 : Math.floor((now - elapsedStartedAt) / 1000);
   const elapsedValueRef = useRef(0);
 
+  // 把算出来的秒数同步到 ref —— 后端没给 elapsed_sec 时用它兜底。
+  //
+  // ⚠️ 2026-10-25 巡检：这个 ref 以前**永远是 0**（声明了但没人更新），
+  // 于是「后端没返回耗时」时统计显示 0 秒。现在每次渲染同步一次。
+  useEffect(() => {
+    elapsedValueRef.current = elapsedSec;
+  }, [elapsedSec]);
+
   // 大纲 + 人物
   /** 流式过程中已解析出的**部分**大纲结构（不是原始 JSON 文本） */
   const outlinePartial = useNewBookStore((s) => s.outlinePartial);
@@ -139,12 +150,21 @@ export default function NewBook() {
   const setCharThinking = useNewBookStore((s) => s.setCharThinking);
   const outlinePhase = useNewBookStore((s) => s.outlinePhase);
   const setOutlinePhase = useNewBookStore((s) => s.setOutlinePhase);
+  /** 大纲是否正在生成（区分"生成中"与"上次被刷新打断"） */
+  const outlineBusy = useNewBookStore((s) => s.outlineBusy);
+  const setOutlineBusy = useNewBookStore((s) => s.setOutlineBusy);
 
   /** 底部输入框的临时文本 */
   const [idea, setIdea] = useState("");
 
   /** 发给后端的"作者个人想法"——把词条拼成多行文本 */
   const userExtra = useMemo(() => ideas.join("\n"), [ideas]);
+
+  /** 选中的那条剧情摘要（用于检测大纲是否沿着剧情走） */
+  const chosenPlotSummary = useMemo(() => {
+    if (chosenPlotIdx === null) return "";
+    return plotVersions.find((v) => v.index === chosenPlotIdx)?.summary ?? "";
+  }, [chosenPlotIdx, plotVersions]);
 
   // ===== 规模自动识别 =====
   //
@@ -287,7 +307,15 @@ export default function NewBook() {
     const idx = targetIdx ?? chosenPlotIdx;
     if (idx === null || idx === undefined) return;
     const plot = plotVersions.find((v) => v.index === idx);
-    if (!plot) return;
+    if (!plot) {
+      // ⚠️ 2026-10-25 巡检：剧情生成中途"停止"时卡片还有半截文本、
+      //    仍可点选，但**没有 version_done** → 这里拿不到完整剧情。
+      //    原来直接 return → 点了按钮什么都不发生（用户以为界面坏了）。
+      toast.error("这条剧情还没生成完", {
+        description: "点「停止」后留下的半截内容无法用来生成大纲，请重新生成剧情",
+      });
+      return;
+    }
 
     setOutlinePartial(null);
     setOutlineChaptersDone(0);
@@ -299,6 +327,7 @@ export default function NewBook() {
     setCharThinking("");
     setCharStats(null);
     setOutlinePhase("outline");
+    setOutlineBusy(true);
     setStep("outline");
     startElapsed();
 
@@ -309,7 +338,8 @@ export default function NewBook() {
         genre: genre?.name ?? "通用",
         plot_summary: plot.summary,
         keywords: Array.from(keywords),
-        novel_name: undefined,
+        // 书名：同一向导内复用（后端按名 upsert → 覆盖同一本而不是新建）
+        novel_name: novelName ?? undefined,
         outline_type: outlineMode,
         user_extra: userExtra,
         // 规模是**硬指标**：写进 prompt 要求模型照做
@@ -331,6 +361,7 @@ export default function NewBook() {
           toast.error("大纲生成失败", { description: parsed.message });
           setOutlinePartial(null);
           setOutlineThinking("");
+          setOutlineBusy(false);
           setStep("plot");
           return;
         }
@@ -358,11 +389,14 @@ export default function NewBook() {
           // 单卷失败不影响其它卷
           setOutlineVolumeStatus((s) => ({ ...s, [parsed.index]: "error" }));
         } else if (parsed.kind === "done") {
+          setOutlineBusy(false);
           setOutlineMeta({
             id: parsed.novelId,
             name: parsed.novelName,
             outlineStructure: parsed.structure,
           });
+          // 记住书名：退回剧情页再生成时复用同一本书（而不是新建一本）
+          setNovelName(parsed.novelName);
           setOutlineStats({
             model: parsed.model,
             elapsedSec: parsed.elapsedSec ?? elapsedValueRef.current,
@@ -378,6 +412,7 @@ export default function NewBook() {
       if (!msg.includes("abort")) {
         toast.error("大纲生成中断", { description: msg });
       }
+      setOutlineBusy(false);
       setStep("plot");
     }
   }, [
@@ -398,7 +433,11 @@ export default function NewBook() {
       setCharProgress(EMPTY_CHAR_PROGRESS);
       setCharThinking("");
       setCharStats(null);
-      setOutlinePhase("outline");
+      // ⚠️ 2026-10-25 巡检：这里原来写的是 setOutlinePhase("outline")，
+      //    把调用方刚设的 "characters" 覆盖回去 → React 批处理后最终是
+      //    "outline" → 人物卡整块被 phase !== "outline" 挡住不渲染，
+      //    用户几分钟都看不到人物卡进度。现在必须停在 "characters"。
+      setOutlinePhase("characters");
       // 人物卡是独立的一次生成 —— 重新计时
       startElapsed();
       const ctrl = new AbortController();
@@ -751,6 +790,8 @@ export default function NewBook() {
               outlinePartial={outlinePartial}
               outlineChaptersDone={outlineChaptersDone}
               outlineVolumeStatus={outlineVolumeStatus}
+              plotSummary={chosenPlotSummary}
+              generating={outlineBusy}
               outlineThinking={outlineThinking}
               outlineStructure={outlineMeta?.outlineStructure ?? null}
               novelMeta={outlineMeta}

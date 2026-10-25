@@ -195,7 +195,7 @@ class OutlineGenerator:
 
         structure = self._validate_and_tag(outline_type, structure)
 
-        name = (novel_name or f"{genre}新作").strip() or f"{genre}新作"
+        name = await self._resolve_novel_name(genre, novel_name)
         novel = await self._upsert_novel(
             name=name,
             genre=genre,
@@ -312,7 +312,7 @@ class OutlineGenerator:
             yield {"event": "error", "message": str(e)}
             return
 
-        name = (novel_name or f"{genre}新作").strip() or f"{genre}新作"
+        name = await self._resolve_novel_name(genre, novel_name)
         novel = await self._upsert_novel(
             name=name,
             genre=genre,
@@ -437,6 +437,34 @@ class OutlineGenerator:
         await self.session.flush()
         await self.session.refresh(novel)
         return novel
+
+    async def _resolve_novel_name(self, genre: str, novel_name: str | None) -> str:
+        """确定这次要用的作品名。
+
+        - **显式给了名字** → 原样用。同名会命中 :meth:`_upsert_novel` 的复用逻辑，
+          这正是"重新生成这本的大纲"的语义。
+        - **没给名字** → 生成**唯一**名字（``修仙新作`` / ``修仙新作 2`` …）。
+
+        ⚠️ 2026-10-25 巡检发现的**阻断级 bug**：这里原来直接用 ``f"{genre}新作"``，
+        而前端从不传书名 → 第二次用同题材走「开新书」会**复用第一本书**，
+        然后"同 type 覆盖"把第一本的大纲删掉重建、人物卡也写进第一本的 novel_id
+        —— 用户的第一本书被静默毁掉。
+        """
+        explicit = (novel_name or "").strip()
+        if explicit:
+            return explicit
+        base = f"{genre}新作"
+        name = base
+        index = 1
+        while await self._novel_exists(name):
+            index += 1
+            name = f"{base} {index}"
+        return name
+
+    async def _novel_exists(self, name: str) -> bool:
+        """同名作品是否已存在。"""
+        result = await self.session.execute(select(Novel.id).where(Novel.name == name).limit(1))
+        return result.scalar_one_or_none() is not None
 
     @staticmethod
     def clear_prompt_cache() -> None:
