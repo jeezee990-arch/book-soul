@@ -34,7 +34,11 @@ import asyncio
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
-__all__ = ["merge_queue_events", "merge_queue_events_ordered"]
+__all__ = [
+    "merge_queue_events",
+    "merge_queue_events_milestone_ordered",
+    "merge_queue_events_ordered",
+]
 
 
 async def merge_queue_events(
@@ -106,3 +110,67 @@ async def merge_queue_events_ordered(
                 # 该队列的结束哨兵：换下一个队列
                 break
             yield payload
+
+
+async def merge_queue_events_milestone_ordered(
+    queues: Sequence[asyncio.Queue[Any]],
+    *,
+    milestone: str = "version_done",
+    index_key: str = "index",
+) -> AsyncIterator[Any]:
+    """内容事件**实时透传**，只有"里程碑"事件保序。
+
+    为什么需要（2026-10-25 真机实测）
+    --------------------------------
+    :func:`merge_queue_events_ordered` 是"队列 1 消费完才消费队列 2"——
+    这意味着**后面版本的内容事件会憋在自己的队列里**，等前一个版本彻底
+    结束才一次性涌出。
+
+    实测（MiniMax-M3.1-Flash，"生成 3 个剧情"）::
+
+        [39.80s] delta index=1 ...      ← 版本 1 正常实时吐
+        [45.89s] delta index=1 ...      ← 版本 1 最后一块
+        [46.10s] delta index=2 ...      ← 版本 2 的几十块**同一毫秒**全到
+        [46.10s] delta index=2 ...
+
+    用户看到的正是"先生成但不输出，憋到前一个版本结束才一口气快速流式
+    输出"（2026-10-25 用户反馈）。总耗时没变（生产者照样并行），但**观感**
+    是坏的。
+
+    本函数改成：
+
+    - **内容事件**（thinking / delta）：按到达顺序**实时**透传 ——
+      三张卡各显示各的，谁先好谁先显示。
+    - **里程碑事件**（默认 ``version_done``）：仍然按 index 保序（A→B→C），
+      保留"出场顺序"的观感。乱序到达的里程碑会先缓冲，等前面的完成后再吐。
+
+    约定：每个生产者任务结束时往自己的队列 ``put(None)`` 作为结束哨兵。
+
+    :param queues: 各生产者的事件队列
+    :param milestone: 需要保序的事件名
+    :param index_key: 里程碑事件里表示序号的字段名
+    """
+    expected = 1
+    buffered: dict[int, Any] = {}
+    async for payload in merge_queue_events(queues):
+        if not isinstance(payload, dict) or payload.get("event") != milestone:
+            yield payload
+            continue
+        index = payload.get(index_key)
+        if not isinstance(index, int):
+            # 没有序号的里程碑：直接透传，不参与排序
+            yield payload
+            continue
+        if index == expected:
+            yield payload
+            expected += 1
+            # 缓冲里可能有连续的后继，一并放出来
+            while expected in buffered:
+                yield buffered.pop(expected)
+                expected += 1
+        else:
+            # 乱序到达：先存着，等前面的里程碑完成再吐
+            buffered[index] = payload
+    # 流结束：把还没轮到的里程碑按序吐出去（不能让它们永远卡在缓冲里）
+    for index in sorted(buffered):
+        yield buffered[index]

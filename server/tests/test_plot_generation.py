@@ -401,10 +401,25 @@ async def test_stream_generate_reports_llm_error_and_terminates() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_generate_emits_versions_in_order_a_b_c() -> None:
-    """版本事件必须按 **A → B → C** 的顺序出现。
+    """**完成**顺序必须是 A → B → C；**内容**事件实时透传，不憋着。
 
     三个 LLM 调用是并行的 → 谁先回是随机的。之前按"到达顺序"吐事件，
-    用户就看到 C 先出字、A 还在转圈（2026-10-24 用户反馈）。
+    用户就看到 C 先出字、A 还在转圈（2026-10-24 用户反馈）→ 所以
+    ``version_done`` 必须保序。
+
+    ⚠️ 但内容事件（delta / thinking）**不能**为了保序而憋住：
+
+    2026-10-25 真机实测，旧实现（严格串行消费队列）是这样的::
+
+        [39.80s] delta index=1 ...
+        [45.89s] delta index=1 ...
+        [46.10s] delta index=2 ...   ← 几十块同一毫秒全到
+
+    用户反馈的原话是"生成的时候像是先生成但不输出，阻塞到一整个剧情
+    生成完毕后才一口气很快地流式输出"—— **这就是那次"一口气"的成因**。
+
+    现在的约定：**完成**保序（A→B→C），**内容**实时（谁先好谁先显示，
+    每张卡各显示各的）。
     """
 
     class _SkewedLLM(_StreamMockLLM):
@@ -437,12 +452,14 @@ async def test_stream_generate_emits_versions_in_order_a_b_c() -> None:
     done_order = [e["index"] for e in events if e["event"] == "version_done"]
     assert done_order == [1, 2, 3], f"完成顺序应为 1,2,3，实际 {done_order}"
 
-    # delta 也必须按版本分组（先全是 A 的，再全是 B 的，再全是 C 的）
-    groups: list[int] = []
-    for e in events:
-        if e["event"] == "delta" and (not groups or groups[-1] != e["index"]):
-            groups.append(e["index"])
-    assert groups == [1, 2, 3], f"delta 顺序应为 1,2,3，实际 {groups}"
+    # 内容事件按**到达顺序**实时透传（快的版本先出字，不等慢的）
+    first_delta = [e["index"] for e in events if e["event"] == "delta"]
+    assert first_delta, "应该有 delta 事件"
+    # 版本 3 最快 → 它的 delta 应该最先到（证明没有等前两个版本）
+    assert first_delta[0] == 3, (
+        f"内容事件被憋住了 —— 首个 delta 应该是最快的版本 3，实际是 {first_delta[0]}"
+        "（这会造成用户说的'憋到最后才一口气输出'）"
+    )
 
 
 @pytest.mark.asyncio

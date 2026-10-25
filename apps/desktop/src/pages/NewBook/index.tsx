@@ -55,6 +55,8 @@ export default function NewBook() {
   const [plotStreaming, setPlotStreaming] = useState<Record<number, string>>({});
   /** index → 模型思考中的文本（<think> 块；用来显示"模型思考中…"） */
   const [plotThinking, setPlotThinking] = useState<Record<number, string>>({});
+  /** index → 该版本的失败原因（单版本失败不影响其它版本） */
+  const [plotErrors, setPlotErrors] = useState<Record<number, string>>({});
   const [plotBusy, setPlotBusy] = useState(false);
   const [chosenPlotIdx, setChosenPlotIdx] = useState<number | null>(null);
   const plotAbortRef = useRef<AbortController | null>(null);
@@ -123,6 +125,7 @@ export default function NewBook() {
     setPlotVersions([]);
     setPlotStreaming({});
     setPlotThinking({});
+    setPlotErrors({});
     setChosenPlotIdx(null);
     setPlotBusy(true);
     setPlotStats(null);
@@ -149,6 +152,14 @@ export default function NewBook() {
         const obj = ev as unknown as Record<string, unknown>;
         const failure = detectStreamFailure(ev);
         if (failure) {
+          // ⚠️ 后端现在给**单个版本**的错误带上 index（2026-10-25）。
+          //    一个版本失败不应该让另外两个也白跑 —— 只标记那张卡，
+          //    继续等剩下的版本。整体失败（没有 index）才中断。
+          const errIdx = typeof obj.index === "number" ? obj.index : null;
+          if (errIdx !== null) {
+            setPlotErrors((s) => ({ ...s, [errIdx]: failure.message }));
+            continue;
+          }
           toast.error("剧情生成失败", { description: failure.message });
           setPlotBusy(false);
           stopElapsed();
@@ -591,6 +602,7 @@ export default function NewBook() {
                 versions={plotVersions}
                 streaming={plotStreaming}
                 thinking={plotThinking}
+                errors={plotErrors}
                 isStreaming={plotBusy}
                 elapsedSec={elapsedSec}
                 stats={plotStats}
@@ -676,6 +688,7 @@ export default function NewBook() {
                 setPlotVersions([]);
                 setPlotStreaming({});
                 setPlotThinking({});
+                setPlotErrors({});
                 setChosenPlotIdx(null);
                 setOutlinePartial(null);
                 setOutlineChaptersDone(0);

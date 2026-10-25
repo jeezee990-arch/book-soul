@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import { Check } from "lucide-react";
+import { Check, X } from "lucide-react";
 import type { GenreDef } from "@/config/genres";
 import type { GenStats, PlotVersion } from "./types";
 import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
@@ -29,6 +29,8 @@ interface Props {
   streaming: Record<number, string>;
   /** index → 模型思考中的文本（<think> 块，用来显示"模型思考中…"） */
   thinking: Record<number, string>;
+  /** index → 该版本的失败原因（一个版本失败不影响其它版本） */
+  errors: Record<number, string>;
   isStreaming: boolean;
   /** 本次生成已耗时（秒） */
   elapsedSec: number;
@@ -46,6 +48,7 @@ export default function PlotStep({
   versions,
   streaming,
   thinking,
+  errors,
   isStreaming,
   elapsedSec,
   stats,
@@ -93,8 +96,10 @@ export default function PlotStep({
           const v = versions.find((x) => x.index === idx);
           const text = v?.summary ?? streaming[idx] ?? "";
           const thinkingText = thinking[idx] ?? "";
-          const streamingHere = isStreaming && !v;
+          const errorText = errors[idx] ?? "";
+          const streamingHere = isStreaming && !v && !errorText;
           const thinkingNow = streamingHere && !text && thinkingText.length > 0;
+          const failed = Boolean(errorText) && !v;
           const chosen = chosenIdx === idx;
           return (
             <button
@@ -122,6 +127,12 @@ export default function PlotStep({
                 >
                   走向 {String.fromCharCode(64 + idx)}
                 </span>
+                {failed ? (
+                  <span className="ml-auto inline-flex items-center gap-1 text-[10.5px] text-rose-500">
+                    <X className="h-3 w-3" />
+                    生成失败
+                  </span>
+                ) : null}
                 {streamingHere ? (
                   <span className="ml-auto inline-flex items-center gap-1 text-[10.5px] text-neutral-400">
                     <span className="inline-block h-2.5 w-[2px] bg-violet-500" />
@@ -151,6 +162,10 @@ export default function PlotStep({
                     {thinkingText.slice(-40).trim()}
                     <span className="ml-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-violet-500 align-middle" />
                   </span>
+                ) : failed ? (
+                  <span className="text-[12px] leading-relaxed text-rose-500">
+                    {errorText}
+                  </span>
                 ) : (
                   <>
                     {text || (streamingHere ? "…" : "等待生成…")}
@@ -172,9 +187,11 @@ export default function PlotStep({
                 >
                   {streamingHere
                     ? `生成中… ${elapsedSec}s`
-                    : chosen
-                      ? "✓ 已选中"
-                      : "点击选中"}
+                    : failed
+                      ? "生成失败"
+                      : chosen
+                        ? "✓ 已选中"
+                        : "点击选中"}
                 </span>
               </div>
             </button>

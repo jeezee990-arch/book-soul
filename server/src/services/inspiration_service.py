@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
 from ..core.llm.streaming import KIND_THINK, ThinkSplitter
 from ..core.paths import prompts_dir
-from ..core.queue_merge import merge_queue_events_ordered
+from ..core.queue_merge import merge_queue_events_milestone_ordered
 from ..core.skills import manager as skill_manager
 from ..models.inspiration import INSPIRATION_TYPES, Inspiration
 from ..models.novel import Novel
@@ -494,6 +494,7 @@ class PlotService:
                         await q.put(
                             {
                                 "event": "error",
+                                "index": idx,
                                 "message": f"version {idx}: 模型只返回了思考内容"
                                 "（<think> 块未闭合），没有正文",
                             }
@@ -506,6 +507,7 @@ class PlotService:
                         await q.put(
                             {
                                 "event": "error",
+                                "index": idx,
                                 "message": (
                                     f"version {idx}: 模型思考了约 {think_total} 字但没写出正文"
                                     "（输出额度被思考占满）。请重试，"
@@ -517,6 +519,7 @@ class PlotService:
                         await q.put(
                             {
                                 "event": "error",
+                                "index": idx,
                                 "message": (f"version {idx} empty（模型没有返回任何内容，请重试）"),
                             }
                         )
@@ -526,7 +529,7 @@ class PlotService:
                     await q.put({"event": "version_done", "index": idx, "summary": cleaned_summary})
             except Exception as e:  # noqa: BLE001
                 logger.error("plot version {} failed: {}", idx, describe_llm_error(e))
-                await q.put({"event": "error", "message": describe_llm_error(e)})
+                await q.put({"event": "error", "index": idx, "message": describe_llm_error(e)})
             finally:
                 await q.put(None)  # 哨兵
 
@@ -535,13 +538,21 @@ class PlotService:
         # 先发所有 version_start
         for i in range(n_versions):
             yield {"event": "version_start", "index": i + 1}
-        # ⚠️ **有序**合并：队列 1（A）消费完才消费队列 2（B）、队列 3（C）。
-        #    三个 LLM 调用仍然是**并行**的（事件先在各自队列里等着），
-        #    所以总耗时不变 —— 只是屏幕上的出场顺序固定为 A → B → C。
-        #    之前按到达顺序吐，C 有时先出字，看起来像"顺序乱了"。
+        # ⚠️ **内容实时透传 + 里程碑保序**（2026-10-25 修）。
+        #
+        #    旧实现是"队列 1 消费完才消费队列 2"—— 后面的版本的内容事件
+        #    全憋在队列里，等前一个版本结束才**同一毫秒**涌出：
+        #        [39.80s] delta index=1 ...
+        #        [45.89s] delta index=1 ...
+        #        [46.10s] delta index=2 ...   ← 几十块同一时刻全到
+        #    用户看到的正是"先生成但不输出，憋到最后才一口气快速流式输出"。
+        #
+        #    现在：thinking / delta 按到达顺序实时透传（三张卡各显示各的），
+        #    只有 version_done 保序（A → B → C），保留出场顺序的观感。
+        #    三个 LLM 调用照样并行，总耗时不变。
         t_stream = time.monotonic()
         try:
-            async for payload in merge_queue_events_ordered(queues):
+            async for payload in merge_queue_events_milestone_ordered(queues):
                 yield payload
         finally:
             # 等待所有 runner 退出
