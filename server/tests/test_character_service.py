@@ -487,6 +487,46 @@ async def test_api_create_character_path_body_mismatch(db_initialized):
 
 
 @pytest.mark.asyncio
+async def test_api_update_character_with_growth_arc(db_initialized):
+    """PATCH 人物卡（前端编辑表单的完整载荷）应 200。
+
+    ⚠️ 2026-10-25 巡检（真 bug）：前端 ``CharacterCard`` 的编辑表单**一定**
+    会带上 ``growth_arc``，而 ``CharacterUpdate`` schema 之前没有这个字段
+    + ``extra="forbid"`` → PATCH 一律 422「额外字段不允许」→
+    **连改个名字都保存不了**。
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from src.main import app
+
+    nid = await _create_novel(db_initialized)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            f"/novels/{nid}/characters",
+            json={"novel_id": nid, "name": "韩立", "role": "主角"},
+        )
+        cid = created.json()["id"]
+
+        # 完全照抄前端 startEdit() 的载荷
+        resp = await client.patch(
+            f"/characters/{cid}",
+            json={
+                "name": "韩立",
+                "role": "主角",
+                "basic_info": None,
+                "personality": None,
+                "habits": None,
+                "thinking": None,
+                "relationships": None,
+                "growth_arc": "从废材到飞升",
+                "is_active": True,
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["growth_arc"] == "从废材到飞升"
+
+
+@pytest.mark.asyncio
 async def test_api_list_characters_by_novel(db_initialized):
     """GET /novels/{nid}/characters 应只返回该作品。"""
     from httpx import ASGITransport, AsyncClient

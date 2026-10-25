@@ -324,6 +324,45 @@ async def test_generate_from_outline_creates_characters(
 
 
 @pytest.mark.asyncio
+async def test_generate_from_outline_persists_growth_arc(db_initialized: Path) -> None:
+    """成长弧线必须真的存进数据库（2026-10-25 巡检发现并修掉的真 bug）。
+
+    以前 ``CharacterCreate`` schema 里**没有** ``growth_arc`` 字段 →
+    Pydantic 默认 ``extra="ignore"`` → LLM 生成的成长弧线被**静默丢弃** →
+    导出时"成长弧线"一栏永远是空的。
+    """
+    from sqlalchemy import select
+
+    from src.models.character import Character
+    from src.models.novel import Novel
+
+    async with _session() as session:
+        novel = Novel(name="凡人修仙传", genre="修仙", description="test")
+        session.add(novel)
+        await session.commit()
+        await session.refresh(novel)
+        novel_id = novel.id
+
+    mock = _make_mock_llm()
+    async with _session() as session:
+        gen = CharacterGenerator(session, llm_client=mock)
+        await gen.generate_from_outline(
+            novel_id=novel_id,
+            outline={"outline_type": "complete", "volumes": []},
+            genre="修仙",
+        )
+
+    async with _session() as session:
+        stmt = select(Character).where(Character.novel_id == novel_id)
+        rows = (await session.execute(stmt)).scalars().all()
+        arcs = {c.name: c.growth_arc for c in rows}
+
+    assert arcs["韩立"] == "从废材到飞升"
+    assert arcs["南宫婉"] == "从宗派长老到双修伴侣"
+    assert arcs["墨大夫"] == "被识破后败亡"
+
+
+@pytest.mark.asyncio
 async def test_generate_from_outline_novel_not_found(
     db_initialized: Path,
 ) -> None:

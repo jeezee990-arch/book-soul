@@ -46,6 +46,19 @@ class CharacterCreate(CharacterBase):
 
     novel_id: int = Field(gt=0, description="所属作品 id")
     is_active: bool = Field(default=True, description="是否在用")
+    # ⚠️ 2026-10-25 巡检（mypy 揪出来的真 bug）：这一列**以前根本没在 schema 里**。
+    #    ORM 有 growth_arc 列、prompt 让 LLM 生成、character_generator 也取了值，
+    #    但 CharacterCreate 没有这个字段 → Pydantic 默认 extra="ignore" →
+    #    **成长弧线被静默丢弃**，导出时"成长弧线"一栏永远是空的。
+    #
+    #    只加在 Create 上，不加进 CharacterBase：CharacterRead 单独声明了它，
+    #    而且 CharacterUpdate 故意不加（growth_arc 由 update_growth 追加维护，
+    #    不允许外部直接改 —— 见 character_service 的设计取舍）。
+    growth_arc: str | None = Field(
+        default=None,
+        max_length=_TEXT_MAX,
+        description="成长弧线（初始值；后续由 update_growth 追加）",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -58,6 +71,7 @@ class CharacterCreate(CharacterBase):
                 "habits": "随身带多件保命法器",
                 "thinking": "凡事留后路，不轻易树敌",
                 "relationships": "师兄好友：厉飞雨；道侣：南宫婉",
+                "growth_arc": "从资质平庸的杂役，一步步修炼到化神。",
             }
         }
     )
@@ -75,6 +89,11 @@ class CharacterUpdate(BaseModel):
     habits: str | None = Field(default=None, max_length=_TEXT_MAX)
     thinking: str | None = Field(default=None, max_length=_TEXT_MAX)
     relationships: str | None = Field(default=None, max_length=_TEXT_MAX)
+    # ⚠️ 2026-10-25 巡检（真 bug）：前端人物卡编辑表单**一定会带上** growth_arc，
+    #    而这个 schema 之前没有该字段 + extra="forbid" →
+    #    PATCH 人物卡一律 422「额外字段不允许」→ **改名字都保存不了**。
+    #    ORM 有这一列，表单也在编辑它，所以这里必须收下。
+    growth_arc: str | None = Field(default=None, max_length=_TEXT_MAX)
     is_active: bool | None = Field(default=None)
 
 
