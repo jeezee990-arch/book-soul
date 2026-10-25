@@ -73,6 +73,78 @@ export function detectStreamFailure(e: StreamEvent): StreamFailure | null {
   return null;
 }
 
+/**
+ * 大纲流事件的分类结果（2026-10-25 新增）。
+ *
+ * 后端大纲流协议（见 `server/src/services/outline_generator.py`）：
+ * - `{"event": "thinking", "text": "..."}` —— 模型思考中
+ * - `{"event": "partial", "structure": {...}, "chapters_done": N}` —— **结构化**增量
+ * - `{"event": "done", "novel_id": ..., "structure": {...}, "model": ..., "elapsed_sec": ...}`
+ * - `{"event": "error", "message": "..."}`
+ *
+ * ⚠️ 2026-10-25 之前还有 `{"event": "delta", "text": "..."}` —— 那是 LLM 吐的
+ * **原始 JSON**，前端用 `<pre>` 渲染就是一堆英文代码。现在后端不再发它，
+ * 改成发已解析好的 `partial`。
+ */
+export type OutlineStreamEvent =
+  | { kind: "thinking"; text: string }
+  | { kind: "partial"; structure: Record<string, unknown>; chaptersDone: number }
+  | {
+      kind: "done";
+      novelId: number;
+      novelName: string;
+      structure: Record<string, unknown>;
+      provider: string;
+      model: string;
+      elapsedSec: number | null;
+      firstDeltaSec: number | null;
+    }
+  | { kind: "error"; message: string }
+  | { kind: "unknown" };
+
+/**
+ * 把一个 ndjson 事件解析成大纲流事件。
+ *
+ * 失败（两类：transport / server）统一走 {@link detectStreamFailure}，
+ * 这里只处理"正常"的事件 —— 避免同一个错误被两个地方各判一遍、判出不同结果。
+ */
+export function parseOutlineStreamEvent(ev: StreamEvent): OutlineStreamEvent {
+  const failure = detectStreamFailure(ev);
+  if (failure) {
+    return { kind: "error", message: failure.message };
+  }
+  const obj = ev as unknown as Record<string, unknown>;
+  const event = obj.event as string | undefined;
+  if (event === "thinking") {
+    return { kind: "thinking", text: (obj.text as string) ?? "" };
+  }
+  if (event === "partial") {
+    const structure = obj.structure as Record<string, unknown> | undefined;
+    if (!structure) return { kind: "unknown" };
+    const done = obj.chapters_done as number | undefined;
+    return {
+      kind: "partial",
+      structure,
+      chaptersDone: typeof done === "number" ? done : 0,
+    };
+  }
+  if (event === "done") {
+    const elapsed = obj.elapsed_sec as number | undefined;
+    const first = obj.first_delta_sec as number | null | undefined;
+    return {
+      kind: "done",
+      novelId: (obj.novel_id as number) ?? 0,
+      novelName: (obj.novel_name as string) ?? "",
+      structure: (obj.structure as Record<string, unknown>) ?? {},
+      provider: (obj.provider as string) ?? "",
+      model: (obj.model as string) ?? "",
+      elapsedSec: typeof elapsed === "number" ? elapsed : null,
+      firstDeltaSec: typeof first === "number" ? first : null,
+    };
+  }
+  return { kind: "unknown" };
+}
+
 /** 把 baseUrl + path 拼成绝对 URL（用于 fetch + 流式 body）。 */
 function absUrl(path: string, baseUrl?: string): string {
   if (path.startsWith("http://") || path.startsWith("https://")) return path;

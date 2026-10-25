@@ -18,14 +18,15 @@ import { inspirationsApi } from "@/api/inspirations";
 import { outlinesApi } from "@/api/outlines";
 import { charactersApi } from "@/api/characters";
 import { chaptersApi } from "@/api/chapters";
-import { readNdjsonStream, detectStreamFailure, type StreamRequest } from "@/api/streams";
+import { readNdjsonStream, detectStreamFailure, parseOutlineStreamEvent, type StreamRequest } from "@/api/streams";
 import type { GenreDef } from "@/config/genres";
 import { useNovelsStore } from "@/stores/novels-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import SeedStep from "./seed-step";
 import PlotStep from "./plot-step";
 import OutlineStep from "./outline-step";
-import type { CharProgress, NovelState, PlotVersion } from "./types";
+import OutlineModePicker, { type OutlineMode } from "./outline-mode-picker";
+import type { CharProgress, GenStats, NovelState, PlotVersion } from "./types";
 import { EMPTY_CHAR_PROGRESS } from "./types";
 import { cn } from "@/lib/utils";
 
@@ -60,9 +61,21 @@ export default function NewBook() {
   /** 本次生成已耗时（秒）—— 让用户看到"还在动" */
   const [elapsedSec, setElapsedSec] = useState(0);
   const elapsedRef = useRef<number | null>(null);
+  /**
+   * 当前耗时的**实时值**（ref）。
+   *
+   * ⚠️ 不能直接读 state 里的 elapsedSec —— setState 是异步的，
+   *    事件回调里读到的还是旧值（AGENTS.md §4.9 同一个坑）。
+   */
+  const elapsedValueRef = useRef(0);
+  /** 剧情阶段的最终统计（模型 + 耗时 + 首字延迟） */
+  const [plotStats, setPlotStats] = useState<GenStats | null>(null);
 
   // 大纲 + 人物
-  const [outlineText, setOutlineText] = useState("");
+  /** 流式过程中已解析出的**部分**大纲结构（不是原始 JSON 文本） */
+  const [outlinePartial, setOutlinePartial] = useState<Record<string, unknown> | null>(null);
+  /** 流式过程中已完成的章节数 */
+  const [outlineChaptersDone, setOutlineChaptersDone] = useState(0);
   /** 模型思考中的文本（<think> 块）—— 显示"模型思考中…"避免看起来像卡死 */
   const [outlineThinking, setOutlineThinking] = useState("");
   const [outlineMeta, setOutlineMeta] = useState<NovelState | null>(null);
@@ -74,6 +87,12 @@ export default function NewBook() {
   >("outline");
   const outlineAbortRef = useRef<AbortController | null>(null);
   const charAbortRef = useRef<AbortController | null>(null);
+  /** 大纲模式（完整 / 半开放式） */
+  const [outlineMode, setOutlineMode] = useState<OutlineMode>("complete");
+  /** 大纲阶段的最终统计 */
+  const [outlineStats, setOutlineStats] = useState<GenStats | null>(null);
+  /** 人物卡阶段的最终统计 */
+  const [charStats, setCharStats] = useState<GenStats | null>(null);
 
   // 作者想法（贯穿所有步骤）
   const [userExtra, setUserExtra] = useState("");
@@ -83,10 +102,12 @@ export default function NewBook() {
 
   /** 开始/停止计时器（让用户看到"还在生成"，而不是干等）。 */
   const startElapsed = useCallback(() => {
+    elapsedValueRef.current = 0;
     setElapsedSec(0);
     if (elapsedRef.current !== null) window.clearInterval(elapsedRef.current);
     elapsedRef.current = window.setInterval(() => {
-      setElapsedSec((s) => s + 1);
+      elapsedValueRef.current += 1;
+      setElapsedSec(elapsedValueRef.current);
     }, 1000);
   }, []);
 
@@ -104,6 +125,7 @@ export default function NewBook() {
     setPlotThinking({});
     setChosenPlotIdx(null);
     setPlotBusy(true);
+    setPlotStats(null);
     setStep("plot");
     startElapsed();
 
@@ -157,6 +179,15 @@ export default function NewBook() {
               { index: index!, summary: obj.summary as string },
             ].sort((a, b) => a.index - b.index);
           });
+        } else if (event === "done") {
+          // 记录"这次用的是哪个模型、耗时多少秒"（用户明确要求）
+          const backendElapsed = obj.elapsed_sec as number | undefined;
+          const backendFirst = obj.first_delta_sec as number | null | undefined;
+          setPlotStats({
+            model: (obj.model as string) || "",
+            elapsedSec: backendElapsed ?? elapsedValueRef.current,
+            firstDeltaSec: backendFirst ?? null,
+          });
         }
       }
     } catch (e: unknown) {
@@ -187,13 +218,17 @@ export default function NewBook() {
     const plot = plotVersions.find((v) => v.index === idx);
     if (!plot) return;
 
-    setOutlineText("");
+    setOutlinePartial(null);
+    setOutlineChaptersDone(0);
     setOutlineThinking("");
     setOutlineMeta(null);
+    setOutlineStats(null);
     setCharProgress(EMPTY_CHAR_PROGRESS);
     setCharThinking("");
+    setCharStats(null);
     setOutlinePhase("outline");
     setStep("outline");
+    startElapsed();
 
     const ctrl = new AbortController();
     outlineAbortRef.current = ctrl;
@@ -203,7 +238,7 @@ export default function NewBook() {
         plot_summary: plot.summary,
         keywords: Array.from(keywords),
         novel_name: undefined,
-        outline_type: "complete",
+        outline_type: outlineMode,
         user_extra: userExtra,
       },
       ctrl.signal,
@@ -214,34 +249,37 @@ export default function NewBook() {
         body: req.body,
         signal: req.signal,
       })) {
-        const obj = ev as unknown as Record<string, unknown>;
-        const failure = detectStreamFailure(ev);
-        if (failure) {
+        const parsed = parseOutlineStreamEvent(ev);
+        if (parsed.kind === "error") {
           // 失败就退回剧情页 —— 否则界面停在"流式生成中…"永远转圈
-          toast.error("大纲生成失败", { description: failure.message });
-          setOutlineText("");
+          toast.error("大纲生成失败", { description: parsed.message });
+          setOutlinePartial(null);
           setOutlineThinking("");
           setStep("plot");
           return;
         }
-        const event = obj.event as string | undefined;
-        if (event === "thinking") {
+        if (parsed.kind === "thinking") {
           // 推理模型思考阶段：显示"模型思考中…"，而不是让用户对着空白等待
-          setOutlineThinking((s) => s + ((obj.text as string) ?? ""));
-        } else if (event === "delta") {
-          const t = obj.text as string | undefined;
-          if (t) setOutlineText((s) => s + t);
-        } else if (event === "done") {
-          const novelId = obj.novel_id as number;
-          const structure = (obj.structure as Record<string, unknown>) ?? {};
+          setOutlineThinking((s) => s + parsed.text);
+        } else if (parsed.kind === "partial") {
+          // 后端推的是**已解析好的结构**（不是原始 JSON 文本）——
+          // 前端只管渲染中文剧情，不用解析半截 JSON。
+          setOutlinePartial(parsed.structure);
+          setOutlineChaptersDone(parsed.chaptersDone);
+        } else if (parsed.kind === "done") {
           setOutlineMeta({
-            id: novelId,
-            name: (obj.novel_name as string) ?? "",
-            outlineStructure: structure,
+            id: parsed.novelId,
+            name: parsed.novelName,
+            outlineStructure: parsed.structure,
+          });
+          setOutlineStats({
+            model: parsed.model,
+            elapsedSec: parsed.elapsedSec ?? elapsedValueRef.current,
+            firstDeltaSec: parsed.firstDeltaSec,
           });
           setOutlinePhase("characters");
           // 自动触发人物卡生成
-          void startCharacterStream(novelId, structure);
+          void startCharacterStream(parsed.novelId, parsed.structure);
         }
       }
     } catch (e: unknown) {
@@ -251,13 +289,18 @@ export default function NewBook() {
       }
       setStep("plot");
     }
-  }, [chosenPlotIdx, plotVersions, genre, keywords, userExtra]);
+  }, [chosenPlotIdx, plotVersions, genre, keywords, userExtra, outlineMode, startElapsed]);
 
   // ===== 步骤 3：从大纲生成人物卡 =====
 
   const startCharacterStream = useCallback(
     async (novelId: number, outline: Record<string, unknown>) => {
       setCharProgress(EMPTY_CHAR_PROGRESS);
+      setCharThinking("");
+      setCharStats(null);
+      setOutlinePhase("outline");
+      // 人物卡是独立的一次生成 —— 重新计时
+      startElapsed();
       const ctrl = new AbortController();
       charAbortRef.current = ctrl;
       const req: StreamRequest = charactersApi.generateFromOutlineStream(
@@ -312,6 +355,11 @@ export default function NewBook() {
               cards: s.cards.map((c) => (c.name === name ? { ...c, id } : c)),
             }));
           } else if (event === "done") {
+            setCharStats({
+              model: (obj.model as string) || "",
+              elapsedSec: (obj.elapsed_sec as number | undefined) ?? elapsedValueRef.current,
+              firstDeltaSec: null,
+            });
             setOutlinePhase("done");
             setStep("done");
             toast.success(`已生成 ${(obj.saved_count as number) ?? 0} 个人物卡`);
@@ -324,18 +372,21 @@ export default function NewBook() {
         }
       }
     },
-    [genre, userExtra],
+    [genre, userExtra, startElapsed],
   );
 
   // 大纲阶段 → 退回剧情页重选（不然选错一条只能整本重开）
   const handleBackToPlot = useCallback(() => {
     outlineAbortRef.current?.abort();
     charAbortRef.current?.abort();
-    setOutlineText("");
+    setOutlinePartial(null);
+    setOutlineChaptersDone(0);
     setOutlineThinking("");
     setOutlineMeta(null);
+    setOutlineStats(null);
     setCharProgress(EMPTY_CHAR_PROGRESS);
     setCharThinking("");
+    setCharStats(null);
     setOutlinePhase("outline");
     setStep("plot");
   }, []);
@@ -542,6 +593,7 @@ export default function NewBook() {
                 thinking={plotThinking}
                 isStreaming={plotBusy}
                 elapsedSec={elapsedSec}
+                stats={plotStats}
                 chosenIdx={chosenPlotIdx}
                 onChoose={(idx) => {
                   // 只负责"选中"。生成走下面的按钮 —— 按钮显式传索引，
@@ -549,40 +601,72 @@ export default function NewBook() {
                   setChosenPlotIdx(idx);
                 }}
               />
-              <div className="mt-7 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => {
-                    plotAbortRef.current?.abort();
-                    stopElapsed();
-                    setStep("seed");
-                  }}
-                  className="h-9 rounded-lg px-4 text-[13px] text-neutral-500 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                >
-                  ← 回到种子
-                </button>
-                {chosenPlotIdx !== null && !plotBusy ? (
+              {chosenPlotIdx !== null && !plotBusy ? (
+                /* 选好剧情后，选"要哪种大纲"（2026-10-25 新增） */
+                <section className="mt-7 rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+                  <h3 className="text-[13px] font-semibold">接下来生成哪种大纲？</h3>
+                  <p className="mt-1 mb-3 text-[11.5px] leading-relaxed text-neutral-400">
+                    两种都可以随时换成另一种 —— 选错了在下一步点「← 换一条剧情」回来重选。
+                  </p>
+                  <OutlineModePicker
+                    value={outlineMode}
+                    onChange={setOutlineMode}
+                    disabled={plotBusy}
+                  />
+                  <div className="mt-4 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        plotAbortRef.current?.abort();
+                        stopElapsed();
+                        setStep("seed");
+                      }}
+                      className="h-9 rounded-lg px-4 text-[13px] text-neutral-500 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      ← 回到种子
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void startOutlineStream(chosenPlotIdx)}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-5 text-[13px] font-medium text-white transition-colors hover:bg-violet-700"
+                    >
+                      用走向 {String.fromCharCode(64 + chosenPlotIdx)} 生成
+                      {outlineMode === "semi_open" ? "半开放大纲" : "完整大纲"}
+                    </button>
+                  </div>
+                </section>
+              ) : (
+                <div className="mt-7 flex justify-between">
                   <button
                     type="button"
-                    onClick={() => void startOutlineStream(chosenPlotIdx)}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-5 text-[13px] font-medium text-white transition-colors hover:bg-violet-700"
+                    onClick={() => {
+                      plotAbortRef.current?.abort();
+                      stopElapsed();
+                      setStep("seed");
+                    }}
+                    className="h-9 rounded-lg px-4 text-[13px] text-neutral-500 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
-                    用走向 {String.fromCharCode(64 + chosenPlotIdx)} 生成大纲
+                    ← 回到种子
                   </button>
-                ) : null}
-              </div>
+                </div>
+              )}
             </>
           ) : null}
 
           {step === "outline" || step === "done" ? (
             <OutlineStep
               phase={outlinePhase}
-              outlineText={outlineText}
+              outlinePartial={outlinePartial}
+              outlineChaptersDone={outlineChaptersDone}
               outlineThinking={outlineThinking}
               outlineStructure={outlineMeta?.outlineStructure ?? null}
               novelMeta={outlineMeta}
               charProgress={charProgress}
               charThinking={charThinking}
+              outlineStats={outlineStats}
+              charStats={charStats}
+              elapsedSec={elapsedSec}
+              outlineMode={outlineMode}
               onFinish={() => void handleFinish()}
               onBack={handleBackToPlot}
               onRestart={() => {
@@ -593,11 +677,14 @@ export default function NewBook() {
                 setPlotStreaming({});
                 setPlotThinking({});
                 setChosenPlotIdx(null);
-                setOutlineText("");
+                setOutlinePartial(null);
+                setOutlineChaptersDone(0);
                 setOutlineThinking("");
                 setOutlineMeta(null);
+                setOutlineStats(null);
                 setCharProgress(EMPTY_CHAR_PROGRESS);
                 setCharThinking("");
+                setCharStats(null);
                 setOutlinePhase("outline");
               }}
             />

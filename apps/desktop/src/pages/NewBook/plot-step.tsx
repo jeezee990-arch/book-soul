@@ -17,7 +17,7 @@
 import { useEffect, useRef } from "react";
 import { Check } from "lucide-react";
 import type { GenreDef } from "@/config/genres";
-import type { PlotVersion } from "./types";
+import type { GenStats, PlotVersion } from "./types";
 import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +32,8 @@ interface Props {
   isStreaming: boolean;
   /** 本次生成已耗时（秒） */
   elapsedSec: number;
+  /** 生成完成后的统计（模型 + 总耗时 + 首字延迟） */
+  stats: GenStats | null;
   chosenIdx: number | null;
   onChoose: (idx: number) => void;
 }
@@ -46,6 +48,7 @@ export default function PlotStep({
   thinking,
   isStreaming,
   elapsedSec,
+  stats,
   chosenIdx,
   onChoose,
 }: Props) {
@@ -72,9 +75,16 @@ export default function PlotStep({
         </h2>
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-neutral-400">
           {genre?.name} · {keywords.size} 个关键词 ·{" "}
-          {isStreaming
-            ? `正在生成（${elapsedSec}s）…`
-            : "点卡片读全文，选中的那个会作为大纲和人物卡的基准"}
+          {isStreaming ? (
+            `正在生成（${elapsedSec}s）…`
+          ) : stats ? (
+            <span className="text-neutral-500 dark:text-neutral-300">
+              {stats.model || "当前模型"} · 用时 {stats.elapsedSec}s
+              {stats.firstDeltaSec != null ? ` · 首字 ${stats.firstDeltaSec}s` : ""}
+            </span>
+          ) : (
+            "点卡片读全文，选中的那个会作为大纲和人物卡的基准"
+          )}
         </p>
       </div>
 

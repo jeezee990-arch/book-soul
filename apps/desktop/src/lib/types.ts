@@ -110,6 +110,16 @@ export interface CompleteOutlineStructure {
   overall_theme?: string | null;
 }
 
+/**
+ * semi_open：半开放式 —— 前期分卷 + 悬念钩子。
+ *
+ * 与 complete 的结构一样，区别是篇幅刻意留短，并且多一个
+ * `suspense_hook`（大纲在此停下，后续由作者自行创作或 AI 续写）。
+ */
+export interface SemiOpenOutlineStructure extends CompleteOutlineStructure {
+  suspense_hook?: string | null;
+}
+
 /** freedom：自由文字 + 关键节拍 + 主题。 */
 export interface FreedomOutlineStructure {
   summary?: string;

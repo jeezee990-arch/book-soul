@@ -42,3 +42,16 @@ export interface CharProgress {
 
 /** 空的人物卡进度（用于重置）。 */
 export const EMPTY_CHAR_PROGRESS: CharProgress = { extracted: [], cards: [] };
+
+/**
+ * 一次生成的结果统计（用户要求显示"当前模型 + 耗时多少秒"）。
+ *
+ * - `model`：这次实际用的模型名（后端从 provider 配置读出来的，不是前端猜的）
+ * - `elapsedSec`：整个生成流程的耗时（秒）
+ * - `firstDeltaSec`：首字延迟（秒）—— 从发起到吐出第一个正文字符
+ */
+export interface GenStats {
+  model: string;
+  elapsedSec: number;
+  firstDeltaSec: number | null;
+}

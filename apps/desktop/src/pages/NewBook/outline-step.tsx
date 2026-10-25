@@ -3,26 +3,32 @@
  *
  * 对应设计稿 s11。大纲流式生成 → 自动抽取人物 → 逐张人物卡生成。
  *
- * 一个改进：旧实现从头到尾只显示 JSON 文本。这里**流式阶段**显示原始片段，
- * **完成之后**（done 事件带回 structure）改用结构化渲染（卷 → 章），
- * 作者一眼能看懂大纲长什么样。
+ * 2026-10-25 的两个关键改动：
+ *
+ * 1. **不再显示 JSON 代码**。旧实现流式阶段把 LLM 吐的原始 JSON 用
+ *    `<pre>` 直接渲染 —— 用户看到的是一堆英文代码（"把代码也显示出来"）。
+ *    现在后端推的是**已解析好的结构**，流式和完成阶段共用
+ *    :component:`OutlineStructureView`，从头到尾都是中文剧情。
+ *
+ * 2. **显示当前模型 + 耗时**。用户明确要求"添加生成当前模型耗时多少秒"。
+ *    生成中显示实时秒数，完成后显示总耗时 + 首字延迟 + 模型名。
  */
 
 import { useEffect, useRef } from "react";
 import { Check, Loader2 } from "lucide-react";
-import type {
-  CharProgress,
-  NovelState,
-} from "./types";
-import type { CompleteOutlineStructure } from "@/lib/types";
+import type { CharProgress, GenStats, NovelState } from "./types";
+import OutlineStructureView from "./outline-structure-view";
+import type { OutlineMode } from "./outline-mode-picker";
 import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
 import { cn } from "@/lib/utils";
 
 interface Props {
   /** 当前阶段 */
   phase: "outline" | "characters" | "done";
-  /** 大纲流式原始文本（JSON 片段） */
-  outlineText: string;
+  /** 流式过程中已解析出的**部分**大纲结构 */
+  outlinePartial: Record<string, unknown> | null;
+  /** 流式过程中已完成的章节数 */
+  outlineChaptersDone: number;
   /** 模型思考中的文本（<think> 块）—— 有值且还没出正文时显示"模型思考中…" */
   outlineThinking: string;
   /** 大纲完成后的结构（结构化渲染用） */
@@ -31,6 +37,14 @@ interface Props {
   charProgress: CharProgress;
   /** 人物卡阶段的思考提示 */
   charThinking: string;
+  /** 大纲阶段的统计（模型 + 耗时 + 首字延迟） */
+  outlineStats: GenStats | null;
+  /** 人物卡阶段的统计（模型 + 耗时） */
+  charStats: GenStats | null;
+  /** 当前阶段已耗时（秒）—— 生成中实时显示 */
+  elapsedSec: number;
+  /** 本次用的大纲模式 */
+  outlineMode: OutlineMode;
   /** 去写第一章 */
   onFinish: () => void;
   /** 退回剧情页重选一条 */
@@ -41,22 +55,25 @@ interface Props {
 
 export default function OutlineStep({
   phase,
-  outlineText,
+  outlinePartial,
+  outlineChaptersDone,
   outlineThinking,
   outlineStructure,
   novelMeta,
   charProgress,
   charThinking,
+  outlineStats,
+  charStats,
+  elapsedSec,
+  outlineMode,
   onFinish,
   onBack,
   onRestart,
 }: Props) {
   const savedCount = charProgress.cards.filter((c) => c.id).length;
-  const structure = outlineStructure as CompleteOutlineStructure | null;
-  const volumes = structure?.volumes ?? [];
 
-  /** 流式原文区的 DOM 引用（用于自动滚到底） */
-  const streamRef = useRef<HTMLPreElement | null>(null);
+  /** 流式结构区的 DOM 引用（用于自动滚到底部看最新章节） */
+  const streamRef = useRef<HTMLDivElement | null>(null);
 
   // 流式内容变化 → 滚到底部看最新
   //
@@ -65,7 +82,9 @@ export default function OutlineStep({
     const el = streamRef.current;
     if (!el) return;
     if (isNearBottom(el)) scrollToBottom(el);
-  }, [outlineText]);
+  }, [outlinePartial]);
+
+  const modeLabel = outlineMode === "semi_open" ? "半开放式大纲" : "完整大纲";
 
   return (
     <div>
@@ -76,7 +95,7 @@ export default function OutlineStep({
           </h2>
           <p className="mt-1.5 text-[12.5px] leading-relaxed text-neutral-400">
             {phase === "outline"
-              ? "大纲会按「卷 → 章 → 关键事件」结构化输出，随后自动抽取角色。"
+              ? `${modeLabel}会按「卷 → 章 → 关键事件」结构化输出，随后自动抽取角色。`
               : phase === "characters"
                 ? "大纲已完成，正在从大纲抽取角色并生成人物卡。"
                 : "大纲与人物卡都已入库，可以直接开始写第一章。"}
@@ -101,96 +120,57 @@ export default function OutlineStep({
           {phase === "outline" ? (
             <span className="ml-auto inline-flex items-center gap-1.5 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10.5px] text-violet-400">
               <Loader2 className="h-3 w-3 animate-spin" />
-              {outlineThinking && !outlineText ? "模型思考中…" : "流式生成中"}
+              {outlineThinking && !outlinePartial
+                ? `模型思考中… ${elapsedSec}s`
+                : `流式生成中 ${elapsedSec}s`}
             </span>
           ) : (
             <span className="ml-auto inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10.5px] text-emerald-500">
               <Check className="h-3 w-3" />
-              已完成
+              {outlineStats
+                ? `已完成 · 用时 ${outlineStats.elapsedSec}s`
+                : "已完成"}
             </span>
           )}
         </div>
 
         <div className="p-3.5">
           {phase === "outline" ? (
-            /*
-             * ⚠️ 必须是 `overflow-y-auto`（原来写的是 `overflow-hidden`）：
-             *    JSON 原文流到 280px 就被裁掉 → 后面的字渲染了但看不见，
-             *    用户看到的就是"生成到一半不动了"。
-             */
-            <pre
-              ref={streamRef}
-              className="max-h-[280px] overflow-y-auto font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-neutral-500 dark:text-neutral-400"
-            >
-              {outlineText || (
-                <span className="text-neutral-400">
-                  {outlineThinking ? outlineThinking.slice(-60).trim() : "…"}
-                </span>
-              )}
-              <span className="ml-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-violet-500 align-middle" />
-            </pre>
+            outlinePartial ? (
+              /*
+               * ⚠️ 必须是 `overflow-y-auto`（原来写的是 `overflow-hidden`）：
+               *    内容流到边界就被裁掉 → 后面的字渲染了但**看不见** →
+               *    用户看到"生成到一半不动了"。
+               */
+              <div ref={streamRef} className="max-h-[460px] overflow-y-auto">
+                <OutlineStructureView
+                  structure={outlinePartial}
+                  streaming
+                  chaptersDone={outlineChaptersDone}
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg border border-dashed border-neutral-200 px-3 py-3 text-[11.5px] text-neutral-400 dark:border-neutral-800">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-400" />
+                {outlineThinking
+                  ? `模型思考中… ${outlineThinking.slice(-40).trim()}`
+                  : "正在构思卷章结构…"}
+              </div>
+            )
           ) : (
-            <div className="space-y-3">
-              {structure?.overall_theme ? (
-                <p className="rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-[12px] text-violet-600 dark:text-violet-300">
-                  <b className="font-semibold">全篇主题</b>：{structure.overall_theme}
-                </p>
-              ) : null}
-
-              {volumes.length === 0 ? (
-                <p className="text-[12px] text-neutral-400">
-                  大纲已生成（自由型）
-                </p>
-              ) : (
-                volumes.map((v) => (
-                  <div
-                    key={v.name}
-                    className="overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800"
-                  >
-                    <div className="flex items-center gap-2 bg-neutral-100 px-3 py-2 dark:bg-neutral-800/60">
-                      <span className="text-[12px] font-semibold">{v.name}</span>
-                      <span className="ml-auto text-[10.5px] text-neutral-400">
-                        {v.chapters?.length ?? 0} 章
-                      </span>
-                    </div>
-                    {(v.chapters ?? []).map((c, i) => (
-                      <div
-                        key={`${v.name}-${i}`}
-                        className="border-t border-neutral-200 px-3 py-2 dark:border-neutral-800"
-                      >
-                        <div className="flex items-start gap-2">
-                          <span className="mt-px font-mono text-[10.5px] text-violet-400">
-                            CH{String(i + 1).padStart(2, "0")}
-                          </span>
-                          <span className="min-w-0 flex-1 text-[12px] font-medium">
-                            {c.title}
-                          </span>
-                        </div>
-                        {c.summary ? (
-                          <p className="mt-1 pl-[46px] text-[11.5px] leading-relaxed text-neutral-500 dark:text-neutral-400">
-                            {c.summary}
-                          </p>
-                        ) : null}
-                        {c.key_events && c.key_events.length > 0 ? (
-                          <ul className="mt-1 space-y-0.5 pl-[46px]">
-                            {c.key_events.map((e, ei) => (
-                              <li
-                                key={ei}
-                                className="text-[11px] leading-relaxed text-neutral-400"
-                              >
-                                · {e}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                ))
-              )}
-            </div>
+            <OutlineStructureView structure={outlineStructure} />
           )}
         </div>
+
+        {/* 生成信息：模型 + 耗时 */}
+        {phase !== "outline" && outlineStats ? (
+          <div className="border-t border-neutral-200/70 px-3.5 py-2 text-[11px] text-neutral-400 dark:border-neutral-800/70">
+            {outlineStats.model || "当前模型"} · 大纲用时 {outlineStats.elapsedSec}s
+            {outlineStats.firstDeltaSec != null
+              ? ` · 首字 ${outlineStats.firstDeltaSec}s`
+              : ""}
+          </div>
+        ) : null}
       </section>
 
       {/* ===== 人物卡 ===== */}
@@ -205,14 +185,16 @@ export default function OutlineStep({
             </h3>
             {phase === "characters" ? (
               <span className="ml-auto rounded bg-violet-500/15 px-1.5 py-0.5 text-[10.5px] text-violet-400">
-                生成 {savedCount} / {charProgress.extracted.length}
+                生成 {savedCount} / {charProgress.extracted.length} · {elapsedSec}s
               </span>
             ) : null}
           </div>
 
           {charProgress.cards.length === 0 ? (
             <p className="rounded-lg border border-dashed border-neutral-200 px-3 py-3 text-[11.5px] text-neutral-400 dark:border-neutral-800">
-              {charThinking ? `模型思考中… ${charThinking.slice(-40).trim()}` : "正在从大纲抽取角色…"}
+              {charThinking
+                ? `模型思考中… ${charThinking.slice(-40).trim()}`
+                : "正在从大纲抽取角色…"}
             </p>
           ) : (
             <div className="flex flex-wrap gap-2.5">
@@ -254,6 +236,12 @@ export default function OutlineStep({
             </div>
           )}
 
+          {charStats ? (
+            <p className="mt-2 text-[11px] text-neutral-400">
+              {charStats.model || "当前模型"} · 人物卡用时 {charStats.elapsedSec}s
+            </p>
+          ) : null}
+
           {charProgress.error ? (
             <p className="mt-2 text-[11.5px] text-rose-500">{charProgress.error}</p>
           ) : null}
@@ -270,10 +258,9 @@ export default function OutlineStep({
             《{novelMeta?.name}》已就绪
           </h4>
           <p className="mt-1.5 text-[12.5px] text-neutral-500 dark:text-neutral-400">
-            {volumes.length > 0
-              ? `${volumes.length} 卷 · ${volumes.reduce((n, v) => n + (v.chapters?.length ?? 0), 0)} 章`
-              : "1 份大纲"}{" "}
-            · {savedCount} 个人物卡
+            {modeLabel} · {savedCount} 个人物卡
+            {outlineStats ? ` · 大纲用时 ${outlineStats.elapsedSec}s` : ""}
+            {charStats ? ` · 人物卡用时 ${charStats.elapsedSec}s` : ""}
           </p>
           <div className="mt-4 flex gap-2.5">
             <button

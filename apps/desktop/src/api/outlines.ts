@@ -16,7 +16,13 @@ export interface OutlineGenerationRequest {
   plot_summary: string;
   keywords?: string[];
   novel_name?: string;
-  outline_type?: "complete" | "freedom";
+  /**
+   * 大纲模式：
+   * - `complete`：完整大纲，从开头写到全书结束（适合短篇小说）
+   * - `semi_open`：半开放式，只写前期并留悬念，后续作者自行创作或 AI 续写
+   * - `freedom`：创作型，散文 + 关键节拍 + 主题
+   */
+  outline_type?: "complete" | "semi_open" | "freedom";
   user_extra?: string;
 }
 

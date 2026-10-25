@@ -25,6 +25,7 @@ import {
   detectStreamFailure,
   isStreamDone,
   isStreamError,
+  parseOutlineStreamEvent,
   readNdjsonStream,
   streamRequestToOptions,
   type StreamEvent,
@@ -100,8 +101,86 @@ describe("detectStreamFailure", () => {
   });
 });
 
-describe("streamRequestToOptions", () => {
-  it("原样透传 method / body / signal / baseUrl", () => {
+/**
+ * 大纲流事件解析（2026-10-25 新增）。
+ *
+ * 为什么要有这个纯函数：后端大纲流协议改版了 —— 不再推原始 JSON 的
+ * `delta` 事件，改推**已解析好**的 `partial`（卷 → 章 → 关键事件）。
+ * 前端拿到就能直接渲染中文剧情，不需要解析半截 JSON。
+ */
+describe("parseOutlineStreamEvent", () => {
+  it("thinking 事件 → kind=thinking", () => {
+    const r = parseOutlineStreamEvent({ event: "thinking", text: "先想想" } as never);
+    expect(r).toEqual({ kind: "thinking", text: "先想想" });
+  });
+
+  it("partial 事件 → 结构 + 已完成章节数", () => {
+    const structure = { volumes: [{ name: "第一卷" }] };
+    const r = parseOutlineStreamEvent({
+      event: "partial",
+      structure,
+      chapters_done: 3,
+    } as never);
+    expect(r).toEqual({ kind: "partial", structure, chaptersDone: 3 });
+  });
+
+  it("partial 事件缺 chapters_done 时按 0 处理", () => {
+    const structure = { volumes: [] };
+    const r = parseOutlineStreamEvent({ event: "partial", structure } as never);
+    expect(r.kind).toBe("partial");
+    if (r.kind === "partial") expect(r.chaptersDone).toBe(0);
+  });
+
+  it("done 事件 → 作品信息 + 模型 + 耗时 + 首字延迟", () => {
+    const structure = { volumes: [] };
+    const r = parseOutlineStreamEvent({
+      event: "done",
+      novel_id: 7,
+      novel_name: "灵根重塑",
+      structure,
+      provider: "minimax",
+      model: "MiniMax-M3.1-Flash",
+      elapsed_sec: 12.34,
+      first_delta_sec: 1.5,
+    } as never);
+    expect(r).toEqual({
+      kind: "done",
+      novelId: 7,
+      novelName: "灵根重塑",
+      structure,
+      provider: "minimax",
+      model: "MiniMax-M3.1-Flash",
+      elapsedSec: 12.34,
+      firstDeltaSec: 1.5,
+    });
+  });
+
+  it("done 事件缺耗时字段 → null（不编造数字）", () => {
+    const r = parseOutlineStreamEvent({ event: "done", novel_id: 1 } as never);
+    expect(r.kind).toBe("done");
+    if (r.kind === "done") {
+      expect(r.elapsedSec).toBeNull();
+      expect(r.firstDeltaSec).toBeNull();
+    }
+  });
+
+  it("transport 失败（{ error }）→ kind=error", () => {
+    const r = parseOutlineStreamEvent({ error: "422 Unprocessable Content" });
+    expect(r).toEqual({ kind: "error", message: "422 Unprocessable Content" });
+  });
+
+  it("server 失败（{ event: 'error' }）→ kind=error", () => {
+    const r = parseOutlineStreamEvent({ event: "error", message: "结构无效" } as never);
+    expect(r).toEqual({ kind: "error", message: "结构无效" });
+  });
+
+  it("不认识的事件 → kind=unknown（不当作错误）", () => {
+    const r = parseOutlineStreamEvent({ event: "phase", phase: "cards" } as never);
+    expect(r).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("streamRequestToOptions", () => {  it("原样透传 method / body / signal / baseUrl", () => {
     const ctrl = new AbortController();
     const opts = streamRequestToOptions(
       { url: "/x", method: "POST", body: { a: 1 }, signal: ctrl.signal },
