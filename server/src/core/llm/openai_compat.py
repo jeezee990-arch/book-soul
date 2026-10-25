@@ -46,7 +46,7 @@ from .base import (
     RateLimitError,
     Usage,
 )
-from .streaming import extract_delta_text, iter_sse_chunks
+from .streaming import extract_delta_reasoning, extract_delta_text, iter_sse_chunks
 
 # 流式默认参数（可被 provider 配置覆盖）
 DEFAULT_STREAM_READ_TIMEOUT = 120.0
@@ -119,6 +119,15 @@ class OpenAICompatClient:
         self._model_specs: dict[str, Any] = config.get("model_specs") or {}
         # provider 级兜底：模型没登记规格时用它（用户自填的新模型名）
         self._default_max_output_tokens: Any = config.get("default_max_output_tokens")
+        # 推理模型的"思考预算"（token）。
+        #
+        # ⚠️ 2026-10-25 实测事故：MiniMax-M3.1-Flash 的思考内容走
+        #    `delta.reasoning_content`，**同样计入 max_tokens 额度**。
+        #    剧情场景的正文预算是 2048，思考一上来就吃掉 3000+ token →
+        #    正文一个字没剩 → 前端报 "version N empty"。
+        #    所以业务层给的 max_tokens 语义是"**正文**预算"，
+        #    实际请求 = 正文预算 + 思考预算（再用模型硬上限裁剪）。
+        self._reasoning_overhead: int = int(config.get("reasoning_token_overhead", 0) or 0)
 
         if not self._api_key:
             raise AuthError(
@@ -178,6 +187,48 @@ class OpenAICompatClient:
             return None
         return n if n > 0 else None
 
+    def _effective_max_tokens(self, model_name: str, requested: int | None) -> int | None:
+        """算出实际发给上游的 ``max_tokens``。
+
+        三层语义（别搞混）：
+
+        - **模型硬上限**（``model_specs.*.max_output_tokens``）：模型总共最多能吐
+          多少 token（**含思考**）。超过它上游会直接报 400。
+        - **正文预算**（业务层传的 ``max_tokens``，或 provider 级
+          ``default_max_output_tokens``）：正文本身要多少 token。
+        - **思考预算**（``reasoning_token_overhead``）：推理模型的思考大概要多少。
+
+        实际请求 = ``min(正文预算 + 思考预算, 模型硬上限)``。
+
+        为什么不能直接用正文预算（2026-10-25 修）：
+
+        剧情场景的正文预算是 2048（``scene_limits.plot_generation``），
+        而 MiniMax-M3.1-Flash 光思考就能吃掉 3000+ token —— 额度被思考占满，
+        正文为空 → 前端报 "version N empty"。加上思考预算后实际发 10240，
+        思考 3000 + 正文 500 绰绰有余。
+
+        :param model_name: 本次请求用的模型名
+        :param requested: 业务层显式给的正文预算（None → 用 provider 默认）
+        """
+        hard_cap = self._resolve_max_tokens(model_name)
+        if requested is not None:
+            base = requested
+        else:
+            # 业务层没给 → 用 provider 级的正文默认预算
+            base = self._default_max_output_tokens
+            try:
+                base = int(base) if base is not None else None
+            except (TypeError, ValueError):
+                base = None
+            if base is None:
+                base = hard_cap
+        if base is None:
+            return None
+        total = base + self._reasoning_overhead
+        if hard_cap is not None:
+            total = min(total, hard_cap)
+        return max(total, 1)
+
     # ===================== 不可达提示 =====================
 
     def _unavailable_hint(self, exc: BaseException) -> str:
@@ -212,9 +263,7 @@ class OpenAICompatClient:
             "temperature": temperature,
             "stream": stream,
         }
-        effective_max_tokens = (
-            max_tokens if max_tokens is not None else (self._resolve_max_tokens(model_name))
-        )
+        effective_max_tokens = self._effective_max_tokens(model_name, max_tokens)
         if effective_max_tokens is not None:
             payload["max_tokens"] = effective_max_tokens
 
@@ -305,6 +354,19 @@ class OpenAICompatClient:
                         text = extract_delta_text(chunk)
                         if text:
                             yield text
+                        # 思考内容单独转发（2026-10-25）。
+                        #
+                        # 为什么包成 ``<think>...</think>`` 标签：下游
+                        # ``streaming.ThinkSplitter`` 已经会把这个标签拆成
+                        # "think" 片段，各 service 再转成 "thinking" 事件给前端。
+                        # 这样**所有**流式端点（剧情 / 大纲 / 人物卡 / 章节 / 重写）
+                        # 一次到位，不用每个 service 各写一遍字段名兼容。
+                        #
+                        # 不包标签的话，思考会直接混进正文 —— 章节正文里多出一段
+                        # "We need answer Chinese..."，比丢掉还糟。
+                        reasoning = extract_delta_reasoning(chunk)
+                        if reasoning:
+                            yield f"<think>{reasoning}</think>"
         except httpx.ConnectError as e:
             raise ProviderUnavailableError(self._unavailable_hint(e)) from e
         except TimeoutError as e:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
@@ -341,6 +342,8 @@ class CharacterGenerator:
         model = str(getattr(llm, "model", "") or "")
 
         yield {"event": "phase", "phase": "extract"}
+        # 整个流程的计时起点（用户要求显示"当前模型耗时多少秒"）
+        t0 = time.monotonic()
 
         # Step 1: 流式抽取人物
         extracted: list[dict[str, str]] = []
@@ -517,6 +520,8 @@ class CharacterGenerator:
             "saved_count": saved_count,
             "provider": provider,
             "model": model,
+            # 耗时（用户明确要求："添加生成当前模型耗时多少秒"）
+            "elapsed_sec": round(time.monotonic() - t0, 2),
         }
 
     def _build_card_prompt(

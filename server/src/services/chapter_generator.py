@@ -28,10 +28,22 @@ from ..core.chapter_context import (
     select_relevant_characters,
 )
 from ..core.llm.base import ChatMessage, describe_llm_error
+from ..core.llm.streaming import KIND_THINK, ThinkSplitter
 from ..models.chapter import Chapter
 from ..models.character import Character
 from ..models.novel import Novel
 from ..models.outline import Outline
+
+# 大纲模式 → prompt 里显示的中文标签
+#
+# 半开放式（semi_open）的章节**不能自己把故事写完** —— 大纲只到前期，
+# 后续由作者创作或 AI 续写。把模式原样（英文枚举）塞进 prompt，
+# 模型多半看不懂，所以这里翻成人话。
+_OUTLINE_MODE_LABELS: dict[str, str] = {
+    "complete": "完整大纲（从开头写到全书结束，本章按大纲推进即可）",
+    "semi_open": "半开放式（大纲只到前期并留了悬念，本章要延续悬念，不要写出结局）",
+    "freedom": "创作型（自由文字 + 关键节拍，按节拍推进）",
+}
 
 
 class _LLMClientLike(Protocol):
@@ -154,11 +166,12 @@ class ChapterGenerator:
             )
 
         prompt_tpl = load_chapter_generation_prompt()
+        mode_key = novel.outline_mode or "complete"
         try:
             full_prompt = prompt_tpl.format(
                 novel_name=novel.name,
                 genre=novel.genre,
-                outline_mode=novel.outline_mode or "complete",
+                outline_mode=_OUTLINE_MODE_LABELS.get(mode_key, mode_key),
                 all_characters=format_characters(characters),
                 novel_outline=format_outline(outline),
                 chapter_outline=chapter_outline,
@@ -183,10 +196,21 @@ class ChapterGenerator:
             raise ChapterGenerationError(describe_llm_error(e)) from e
 
         # stream_iter 是 AsyncIterator[str]；逐个 yield
+        #
+        # ⚠️ 推理模型（MiniMax M3 等）的思考内容会被上游包成
+        #    ``<think>...</think>`` 混在 delta 里（见 core/llm/openai_compat.py）。
+        #    直接 yield 会让章节正文里多出一段 "We need answer Chinese..."——
+        #    比丢掉更糟。这里用 ThinkSplitter 把思考段剥掉，只吐正文。
+        splitter = ThinkSplitter()
         try:
             async for delta in stream_iter:  # type: ignore[union-attr]
-                if delta:
-                    yield delta
+                if not delta:
+                    continue
+                for kind, text in splitter.feed(delta):
+                    if kind == KIND_THINK:
+                        continue
+                    if text:
+                        yield text
         finally:
             await self._release_llm()
 

@@ -20,6 +20,7 @@ _THEME_MAX = 200
 _VOLUME_NAME_MAX = 100
 _CHAPTER_TITLE_MAX = 200
 _KEY_EVENT_MAX = 500
+_SUSPENSE_MAX = 1000
 
 
 # ===== structure 子模型（complete / freedom 形状）=====
@@ -66,6 +67,22 @@ class FreedomStructure(BaseModel):
     themes: list[str] = Field(default_factory=list, description="主题列表")
 
 
+class SemiOpenStructure(BaseModel):
+    """半开放式大纲：前期分卷 + 悬念钩子。
+
+    与 :class:`CompleteStructure` 的区别只在于**篇幅刻意留短**，并且多一个
+    ``suspense_hook``（悬念钩子）字段 —— 它是作者后续创作的起点。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    volumes: list[VolumeNode] = Field(default_factory=list, description="前期分卷列表")
+    overall_theme: str | None = Field(default=None, max_length=_THEME_MAX, description="全篇主题")
+    suspense_hook: str | None = Field(
+        default=None, max_length=_SUSPENSE_MAX, description="悬念钩子（大纲在此停下）"
+    )
+
+
 # ===== Outline 主 schema =====
 
 
@@ -87,6 +104,7 @@ class OutlineCreate(OutlineBase):
         description=(
             "大纲结构（dict）。"
             "complete: 应含 volumes: [...]；"
+            "semi_open: 应含 volumes: [...] + suspense_hook: str；"
             "freedom: 应含 summary: str + key_beats: [...]。形状错误会被 service 拒。"
         )
     )
@@ -149,7 +167,8 @@ class OutlineGenerationRequest(BaseModel):
     - 必传 ``plot_summary``（来自 3.3 PlotGenerator 保存的 PLOT 卡 content.summary）
     - ``genre`` 用于 prompt 注入；``keywords`` 可选（让 LLM 知道强调什么）
     - ``novel_name`` 可选（缺省用 "{genre}新作"）
-    - ``outline_type`` 取值 ``complete``（分卷/章）或 ``freedom``（散文+节拍）
+    - ``outline_type`` 取值 ``complete``（分卷/章，完整写到全书结束）、
+      ``semi_open``（半开放式：只写前期并留悬念）或 ``freedom``（散文+节拍）
     """
 
     model_config = ConfigDict(
@@ -170,7 +189,11 @@ class OutlineGenerationRequest(BaseModel):
     novel_name: str | None = Field(default=None, max_length=200)
     outline_type: str = Field(
         default="complete",
-        description="complete（分卷/章）or freedom（散文+节拍）",
+        description=(
+            "complete（分卷/章，完整大纲）/ "
+            "semi_open（半开放式：只写前期并留悬念）/ "
+            "freedom（散文+节拍）"
+        ),
     )
     user_extra: str = Field(default="", max_length=2000, description="作者个人想法，会拼进 prompt")
 

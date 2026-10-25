@@ -119,6 +119,14 @@ Response: `{"new_version": ChapterVersion, "rolled_back_to": int}`
 
 ## Outlines
 
+### 大纲模式（`outline_type`）
+
+| 取值 | 含义 | structure 形状 |
+|------|------|----------------|
+| `complete` | 完整大纲：从开头写到全书结束（适合短篇小说） | `{ volumes: [{name, summary, chapters:[{title, summary, key_events}]}], overall_theme }` |
+| `semi_open` | 半开放式：只写前期并留悬念，后续由作者自行创作或 AI 辅助续写 | 同上 + `suspense_hook`（悬念钩子） |
+| `freedom` | 创作型：散文 + 关键节拍 + 主题 | `{ summary, key_beats: [...], themes: [...] }` |
+
 ### `GET /novels/{id}/outlines?outline_type=complete`
 列出大纲。
 
@@ -138,6 +146,23 @@ Body:
   "outline_type": "complete"
 }
 ```
+
+### `POST /novels/outlines/generate/stream`
+流式生成大纲（NDJSON）。
+
+事件协议（2026-10-25 改版）：
+
+| 事件 | 载荷 | 说明 |
+|------|------|------|
+| `start` | `phase`, `outline_type` | 开始 |
+| `thinking` | `text` | 模型思考中（推理模型的内容，**不丢**） |
+| `partial` | `structure`, `chapters_done` | **已解析好的**部分大纲结构（卷 → 章 → 关键事件） |
+| `done` | `novel_id`, `outline_id`, `structure`, `provider`, `model`, `elapsed_sec`, `first_delta_sec` | 完成（含耗时统计） |
+| `error` | `message` | 失败 |
+
+> ⚠️ 2026-10-25 之前还有 `delta` 事件（LLM 吐的**原始 JSON** 文本）。
+> 现在不再发送 —— 前端拿到 `delta` 只会渲染出一堆 JSON 代码。
+> `partial` 里的 `structure` 已经是解析结果，直接渲染即可。
 
 ---
 

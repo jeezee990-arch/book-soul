@@ -150,6 +150,27 @@ async def test_stream_generate_llm_init_failure(db_initialized: Path) -> None:
                 pass
 
 
+@pytest.mark.asyncio
+async def test_stream_generate_strips_thinking_blocks(db_initialized: Path) -> None:
+    """推理模型的思考段不能混进章节正文（2026-10-25 修）。
+
+    上游（MiniMax M3 等）会把思考包成 ``<think>...</think>`` 混在 delta 里
+    （见 core/llm/openai_compat.py）。不剥掉的话章节正文里会多出一段
+    "We need answer Chinese..." —— 比丢掉更糟。
+    """
+    chapter_id = await _make_chapter(db_initialized)
+    mock = _mock_stream_llm(["<think>我先想想怎么写</think>", "第一章", "正文"])
+    from src.db import SessionLocal
+
+    async with SessionLocal() as session:
+        gen = ChapterGenerator(session, llm_client=mock)
+        chunks: list[str] = []
+        async for d in gen.stream_generate(chapter_id=chapter_id):
+            chunks.append(d)
+    assert chunks == ["第一章", "正文"]
+    assert "<think>" not in "".join(chunks)
+
+
 def test_prompt_loading() -> None:
     """确保 prompt 文件存在且有 'chapter_generation' 字段。"""
     p = load_chapter_generation_prompt()

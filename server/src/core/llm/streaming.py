@@ -41,12 +41,47 @@ async def iter_sse_chunks(
 
 
 def extract_delta_text(chunk: dict[str, Any]) -> str:
-    """从单个 SSE chunk 提取 delta 文本。"""
+    """从单个 SSE chunk 提取**正文**文本（``delta.content``）。"""
     choices = chunk.get("choices") or []
     if not choices:
         return ""
     delta = choices[0].get("delta") or {}
     return delta.get("content") or ""
+
+
+def extract_delta_reasoning(chunk: dict[str, Any]) -> str:
+    """从单个 SSE chunk 提取**思考**内容（reasoning）。
+
+    不同 provider 把"模型思考"放在不同字段：
+
+    - MiniMax：``delta.reasoning_content``（2026-10-25 实测确认）
+    - 部分 OpenAI 兼容端：``delta.reasoning``
+    - Ollama 原生协议：``delta.thinking``
+
+    ⚠️ 为什么必须单独提取（2026-10-25 用户实测：生成像"阻塞" + 偶发
+    ``version N empty``）：
+
+    MiniMax-M3.1-Flash 的一次实测响应里，``delta`` 的字段分布是::
+
+        {'role': 195, 'reasoning_content': 172, 'content': 21}
+
+    也就是说 **172/195 的片段是思考**，正文只有 21 个片段。之前
+    :func:`extract_delta_text` 只读 ``delta.content``，思考被整段丢掉 →
+    ① 思考期（实测 1.1s ~ 8.7s）前端一个字都收不到 → 用户看到"阻塞"；
+    ② 思考 token 同样计入 ``max_tokens`` 额度，思考一长正文就为空 →
+    "version N empty"。
+
+    所以这里把思考单独抽出来，由调用方转成 "thinking" 事件。
+    """
+    choices = chunk.get("choices") or []
+    if not choices:
+        return ""
+    delta = choices[0].get("delta") or {}
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        value = delta.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 # 正文片段的 kind

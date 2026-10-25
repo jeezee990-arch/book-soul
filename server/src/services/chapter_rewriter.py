@@ -22,6 +22,7 @@ from ..core.chapter_context import (
     load_chapter_rewrite_prompt,
 )
 from ..core.llm.base import ChatMessage, describe_llm_error
+from ..core.llm.streaming import KIND_THINK, ThinkSplitter
 from ..models.chapter import Chapter
 from ..models.character import Character
 from ..models.novel import Novel
@@ -164,10 +165,19 @@ class ChapterRewriter:
             logger.error("LLM stream init failed (rewrite): {}", describe_llm_error(e))
             raise ChapterRewriteError(describe_llm_error(e)) from e
 
+        # ⚠️ 推理模型的思考内容会以 ``<think>...</think>`` 混在 delta 里
+        #    （见 core/llm/openai_compat.py）—— 重写正文里混进一段英文思考
+        #    比丢掉更糟。这里用 ThinkSplitter 剥掉，只吐正文。
+        splitter = ThinkSplitter()
         try:
             async for delta in stream_iter:  # type: ignore[union-attr]
-                if delta:
-                    yield delta
+                if not delta:
+                    continue
+                for kind, text in splitter.feed(delta):
+                    if kind == KIND_THINK:
+                        continue
+                    if text:
+                        yield text
         finally:
             await self._release_llm()
 

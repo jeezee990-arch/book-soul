@@ -27,7 +27,13 @@ providers:
     models: [mimo-v2.6-pro, mimo-v2.6-pro-ultraspeed, mimo-v2.6-flash]
     # 用户自填的未知模型按这组能力值兜底（避免"没登记规格就发不出章节"）
     default_context_window: 128000
-    default_max_output_tokens: 8192
+    default_max_output_tokens: 16384
+    # 推理模型思考预算（token，2026-10-25 新增）
+    #
+    # 为什么需要：思考内容同样计入 max_tokens 额度。业务层给的 max_tokens
+    # 语义是"**正文**预算"，实际请求 = 正文预算 + 思考预算。
+    # 少了这一项，剧情场景（正文预算 2048）会被思考吃光 → "version N empty"。
+    reasoning_token_overhead: 4096
     model_specs:
       mimo-v2.6-pro:
         context_window: 128000
@@ -68,7 +74,15 @@ providers:
       - MiniMax-M2.1-highspeed
       - MiniMax-M2
     default_context_window: 200000
-    default_max_output_tokens: 8192
+    default_max_output_tokens: 16384
+    # 推理模型思考预算（token，2026-10-25 新增）
+    #
+    # ⚠️ MiniMax-M3 系列的思考内容走 `delta.reasoning_content`，**同样计入
+    #    max_tokens 额度**。2026-10-25 实测：一次响应里 172/195 个片段是思考
+    #    （3180 字符），正文只有 21 个片段（404 字符）。
+    #    剧情场景正文预算是 2048 —— 光思考就超了 → 正文为空 → "version N empty"。
+    #    给足 8192 的思考预算后实际发 10240，思考 3000 + 正文 500 绰绰有余。
+    reasoning_token_overhead: 8192
     model_specs:
       MiniMax-M3:
         context_window: 1000000      # 1M tokens（开发期辅助模型）
@@ -140,7 +154,9 @@ providers:
     stream_total_timeout: 1800
     models: [qwen2.5:14b, qwen2.5:7b, llama3.1:8b]
     default_context_window: 128000
-    default_max_output_tokens: 8192
+    default_max_output_tokens: 16384
+    # 本地 qwen3 / gpt-oss 这类模型带思考模式，留一点预算
+    reasoning_token_overhead: 2048
     model_specs:
       qwen2.5:14b:
         context_window: 128000
@@ -193,6 +209,7 @@ routing:
   inspiration: "@settings"
   plot_generation: "@settings"
   outline_complete: "@settings"
+  outline_semi_open: "@settings"
   outline_freedom: "@settings"
   character_generation: "@settings"
   chapter_generation: "@settings"

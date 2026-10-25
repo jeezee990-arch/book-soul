@@ -6,7 +6,7 @@
 - style 可选
 - description 可选，最长 2000 字
 - status 必填，默认 'draft'，取值：draft / writing / paused / completed / abandoned
-- outline_mode 可选，取值：'complete' / 'freedom'
+- outline_mode 可选，取值：'complete' / 'semi_open' / 'freedom'
 - file_path 可选，本地文件路径
 - imported 默认 False（扫描接入标志）
 - read_only 默认 False
@@ -27,7 +27,7 @@ NOVEL_STATUSES: tuple[str, ...] = (
     "completed",
     "abandoned",
 )
-OUTLINE_MODES: tuple[str, ...] = ("complete", "freedom")
+OUTLINE_MODES: tuple[str, ...] = ("complete", "semi_open", "freedom")
 
 
 class Novel(Base, TimestampMixin):

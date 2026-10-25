@@ -418,6 +418,8 @@ class PlotService:
         queues: list[asyncio.Queue[dict[str, Any] | None]] = [
             asyncio.Queue() for _ in range(n_versions)
         ]
+        # 每个版本的首字延迟（秒）—— 用来告诉用户"等这么久才出第一个字"
+        first_delta_times: list[float | None] = [None] * n_versions
 
         async def version_runner(idx: int, q: asyncio.Queue) -> None:
             """单版本流式 LLM 调用，结果塞到 ``q``。
@@ -442,6 +444,10 @@ class PlotService:
             #    （上游格式异常）——不限量的话会把整段正文都当成思考内容，
             #    用户看到"想了好久"最后收到一个空结果。
             think_sent = 0
+            # 思考内容的**总**字数（不限量）。think_sent 是"转发给前端多少"，
+            # think_total 是"模型实际想了多少"—— 空正文时用它判断
+            # 是不是"额度被思考吃光"（2026-10-25 实测过的失败模式）。
+            think_total = 0
             splitter = ThinkSplitter()
             t0 = time.monotonic()
             try:
@@ -457,6 +463,7 @@ class PlotService:
                         continue
                     for kind, text in splitter.feed(delta):
                         if kind == KIND_THINK:
+                            think_total += len(text)
                             room = MAX_THINK_CHARS - think_sent
                             if room > 0:
                                 piece = text[:room]
@@ -470,6 +477,7 @@ class PlotService:
                     #    给流式链路加 I/O 开销（几千个 delta 就能看出差别）。
                     if first_delta_at is None and delta_count > 0:
                         first_delta_at = time.monotonic()
+                        first_delta_times[idx - 1] = first_delta_at - t0
                         logger.info(
                             "plot version {}: first delta after {:.2f}s", idx, first_delta_at - t0
                         )
@@ -490,8 +498,28 @@ class PlotService:
                                 "（<think> 块未闭合），没有正文",
                             }
                         )
+                    elif think_total > 0:
+                        # ⚠️ 2026-10-25 实测：思考 token 同样吃 max_tokens 额度。
+                        #    正文预算被思考占满 → 模型根本没机会写正文 →
+                        #    旧文案只说 "version N empty"，用户完全看不懂。
+                        #    现在把"思考了多少字、可能是什么原因"讲清楚。
+                        await q.put(
+                            {
+                                "event": "error",
+                                "message": (
+                                    f"version {idx}: 模型思考了约 {think_total} 字但没写出正文"
+                                    "（输出额度被思考占满）。请重试，"
+                                    "或到「设置 → LLM」换一个思考更短的模型。"
+                                ),
+                            }
+                        )
                     else:
-                        await q.put({"event": "error", "message": f"version {idx} empty"})
+                        await q.put(
+                            {
+                                "event": "error",
+                                "message": (f"version {idx} empty（模型没有返回任何内容，请重试）"),
+                            }
+                        )
                 else:
                     # 自动调用 scene=plot_generation 的 post-process skills（默认 sensitive_word）
                     cleaned_summary = await skill_manager.apply_post("plot_generation", raw_summary)
@@ -521,10 +549,17 @@ class PlotService:
             if owns_client:
                 await self._release_llm(llm, owns=True)
 
-        logger.info(
-            "plot stream: {} versions done in {:.2f}s", n_versions, time.monotonic() - t_stream
-        )
-        yield {"event": "done", "provider": provider, "model": model}
+        elapsed = time.monotonic() - t_stream
+        logger.info("plot stream: {} versions done in {:.2f}s", n_versions, elapsed)
+        known_first = [t for t in first_delta_times if t is not None]
+        yield {
+            "event": "done",
+            "provider": provider,
+            "model": model,
+            # 耗时（用户明确要求："添加生成当前模型耗时多少秒"）
+            "elapsed_sec": round(elapsed, 2),
+            "first_delta_sec": round(min(known_first), 2) if known_first else None,
+        }
 
     async def _release_llm(self, llm: _LLMClientLike, owns: bool) -> None:
         """懒加载的客户端用完关闭（防连接泄漏），并清缓存让下次重建。"""

@@ -19,6 +19,7 @@ from ..schemas.outline import (
     FreedomStructure,
     OutlineCreate,
     OutlineUpdate,
+    SemiOpenStructure,
 )
 
 
@@ -26,6 +27,8 @@ def _structure_model_for(outline_type: str) -> type[BaseModel]:
     """按 outline_type 返回对应的 Pydantic model。"""
     if outline_type == "complete":
         return CompleteStructure
+    if outline_type == "semi_open":
+        return SemiOpenStructure
     if outline_type == "freedom":
         return FreedomStructure
     raise OutlineValidationError(  # noqa: F821

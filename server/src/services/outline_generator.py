@@ -1,12 +1,17 @@
 """基于剧情生成大纲（Phase 3.4）。
 
 设计：
-- 加载 ``config/prompts/outline_{complete,freedom}.yaml`` 模板（lru_cache）
+- 加载 ``config/prompts/outline_{complete,semi_open,freedom}.yaml`` 模板（lru_cache）
 - 调 LLM 抽象生成结构化 JSON
 - 后处理：strip thinking 块 + extract JSON object
 - 自动 upsert novel（按 novel_name 查重，缺省 ``"{genre}新作"``）
 - 把结果存到 Outline 表（OutlineService.create）
 - 失败 → :class:`OutlineGenerationError`
+
+三种模式（2026-10-25 新增 semi_open）：
+- ``complete``：完整大纲，从开头写到全书结束（适合短篇小说）
+- ``semi_open``：半开放式，只写前期并留悬念，后续由作者自行创作或 AI 辅助续写
+- ``freedom``：创作型，散文 + 关键节拍 + 主题
 
 不做的事：
 - 不直接修改 outline_service.py（保持其文件 ≤ 300 行）
@@ -15,6 +20,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any, Protocol
@@ -26,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
 from ..core.llm.formatting import extract_json_object, strip_thinking
+from ..core.llm.partial_json import parse_partial_json
 from ..core.llm.streaming import KIND_THINK, ThinkSplitter
 from ..core.paths import prompts_dir
 from ..core.skills import manager as skill_manager
@@ -34,6 +41,31 @@ from ..models.outline import OUTLINE_TYPES
 from .outline_service import OutlineService, OutlineTypeConflictError
 
 _PROMPTS_DIR = prompts_dir()
+
+# 增量解析节流（2026-10-25）
+#
+# 大纲 JSON 可能几万字符。流式过程中每来一个 delta 就全量重扫一遍会变成
+# O(n²)，Python 里能明显感觉到卡。所以：累计够多字符、或过了够长时间，
+# 才重新解析一次。
+#
+# ⚠️ 150 字符 ≈ 一章的量 —— 阈值太大时用户会看到"好几秒才动一次"。
+PARTIAL_PARSE_MIN_CHARS = 150
+PARTIAL_PARSE_MAX_INTERVAL = 0.3
+
+
+def _count_chapters(structure: dict[str, Any]) -> int:
+    """统计结构里已写完的章节数（给前端显示"已生成 N 章"）。"""
+    volumes = structure.get("volumes")
+    if not isinstance(volumes, list):
+        return 0
+    total = 0
+    for volume in volumes:
+        if not isinstance(volume, dict):
+            continue
+        chapters = volume.get("chapters")
+        if isinstance(chapters, list):
+            total += len(chapters)
+    return total
 
 
 @lru_cache(maxsize=16)
@@ -150,7 +182,12 @@ class OutlineGenerator:
 
         # upsert novel
         name = (novel_name or f"{genre}新作").strip() or f"{genre}新作"
-        novel = await self._upsert_novel(name=name, genre=genre, description=plot_summary[:500])
+        novel = await self._upsert_novel(
+            name=name,
+            genre=genre,
+            description=plot_summary[:500],
+            outline_mode=outline_type,
+        )
 
         # 存 outline（OutlineService 内部会校验同 type 冲突）
         from ..schemas.outline import OutlineCreate
@@ -220,13 +257,24 @@ class OutlineGenerator:
         name: str,
         genre: str,
         description: str,
+        outline_mode: str | None = None,
     ) -> Novel:
-        """按 name 查重 novel。已存在 → 复用；否则创建。"""
+        """按 name 查重 novel。已存在 → 复用；否则创建。
+
+        :param outline_mode: 大纲模式（complete / semi_open / freedom）——
+            写进 novel，章节生成 prompt 会带上它（半开放式写出来的章节
+            要"只写前期、留悬念"，不能自己把故事写完）。
+        """
         existing = await self.session.execute(select(Novel).where(Novel.name == name))
         novel = existing.scalar_one_or_none()
         if novel is not None:
             return novel
-        novel = Novel(name=name, genre=genre, description=description)
+        novel = Novel(
+            name=name,
+            genre=genre,
+            description=description,
+            outline_mode=outline_mode,
+        )
         self.session.add(novel)
         await self.session.flush()
         await self.session.refresh(novel)
@@ -253,9 +301,16 @@ class OutlineGenerator:
 
         协议：
         - ``{"event": "start", "phase": "outline"}``
-        - ``{"event": "delta", "text": "..."}``（每条 token；前端累加显示）
-        - ``{"event": "done", "novel_id": ..., "outline_id": ..., "novel_name": ..., "structure": ..., "provider": "...", "model": "..."}``
+        - ``{"event": "thinking", "text": "..."}``（模型思考中）
+        - ``{"event": "partial", "structure": {...}, "chapters_done": N}``
+          （**结构化**的增量大纲 —— 前端直接渲染，不用解析裸 JSON）
+        - ``{"event": "done", "novel_id": ..., "outline_id": ..., "novel_name": ..., "structure": ..., "provider": "...", "model": "...", "elapsed_sec": 12.34, "first_delta_sec": 1.2}``
         - ``{"event": "error", "message": "..."}``
+
+        ⚠️ 2026-10-25 改了协议：**不再推 ``delta`` 事件**。
+        旧协议把 LLM 吐的原始 JSON 逐字推给前端用 ``<pre>`` 渲染 ——
+        用户看到的是一堆英文代码（"把代码也显示出来"）。
+        现在改成推**已经解析好的结构**，前端只管渲染中文剧情。
         """
         if outline_type not in OUTLINE_TYPES:
             yield {"event": "error", "message": f"invalid outline_type: {outline_type!r}"}
@@ -285,6 +340,11 @@ class OutlineGenerator:
         # 直接丢掉的话前端这段时间一个字都收不到（用户看到"卡住不动"）。
         # 这里转发成 "thinking" 事件，前端显示"模型思考中…"。
         splitter = ThinkSplitter()
+        t0 = time.monotonic()
+        first_delta_at: float | None = None
+        last_parsed_len = 0
+        last_parse_at = t0
+        last_partial: dict[str, Any] | None = None
         try:
             stream = await llm.chat(
                 [ChatMessage("user", full_prompt)],
@@ -299,7 +359,35 @@ class OutlineGenerator:
                         yield {"event": "thinking", "text": text}
                         continue
                     full_text += text
-                    yield {"event": "delta", "text": text}
+                    if first_delta_at is None:
+                        first_delta_at = time.monotonic()
+                    # 增量结构化：节流解析，把"已经写完的章节"提前发给前端
+                    now = time.monotonic()
+                    if (
+                        last_partial is None
+                        or len(full_text) - last_parsed_len >= PARTIAL_PARSE_MIN_CHARS
+                        or now - last_parse_at >= PARTIAL_PARSE_MAX_INTERVAL
+                    ):
+                        last_parsed_len = len(full_text)
+                        last_parse_at = now
+                        partial = parse_partial_json(full_text)
+                        if partial and partial != last_partial:
+                            last_partial = partial
+                            yield {
+                                "event": "partial",
+                                "structure": partial,
+                                "chapters_done": _count_chapters(partial),
+                            }
+            # 流结束：再解析一次，把最后写完的部分补发出去
+            # （最后一章往往是在流结束前几十毫秒才写完的，节流会把它漏掉）
+            final_partial = parse_partial_json(full_text)
+            if final_partial and final_partial != last_partial:
+                last_partial = final_partial
+                yield {
+                    "event": "partial",
+                    "structure": final_partial,
+                    "chapters_done": _count_chapters(final_partial),
+                }
         except Exception as e:  # noqa: BLE001
             logger.error("outline LLM stream failed: {}", describe_llm_error(e))
             yield {"event": "error", "message": describe_llm_error(e)}
@@ -332,7 +420,12 @@ class OutlineGenerator:
         structure["outline_type"] = outline_type
 
         name = (novel_name or f"{genre}新作").strip() or f"{genre}新作"
-        novel = await self._upsert_novel(name=name, genre=genre, description=plot_summary[:500])
+        novel = await self._upsert_novel(
+            name=name,
+            genre=genre,
+            description=plot_summary[:500],
+            outline_mode=outline_type,
+        )
 
         from ..schemas.outline import OutlineCreate
 
@@ -358,6 +451,11 @@ class OutlineGenerator:
             "structure": structure,
             "provider": provider,
             "model": model,
+            # 耗时（用户明确要求："添加生成当前模型耗时多少秒"）
+            "elapsed_sec": round(time.monotonic() - t0, 2),
+            "first_delta_sec": round(first_delta_at - t0, 2)
+            if first_delta_at is not None
+            else None,
         }
 
 
