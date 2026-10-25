@@ -58,6 +58,15 @@ class QualityCheckError(Exception):
     """质检失败。"""
 
 
+class QualityNotFoundError(QualityCheckError):
+    """对象不存在（章节 / 小说）。
+
+    ⚠️ 单独一个子类，而不是靠字符串匹配（``"not found" in msg``）——
+    字符串匹配会被**用户内容**误伤：章节正文里出现 "not found" 就把
+    422 变成 404。子类是类型安全的，API 层直接 ``except QualityNotFoundError``。
+    """
+
+
 @dataclass
 class DimensionIssue:
     """单个维度的问题条目。"""
@@ -126,13 +135,13 @@ class QualityService:
     async def _load_chapter(self, chapter_id: int) -> Chapter:
         chapter = await self.session.get(Chapter, chapter_id)
         if chapter is None:
-            raise QualityCheckError(f"Chapter {chapter_id} not found")
+            raise QualityNotFoundError(f"Chapter {chapter_id} not found")
         return chapter
 
     async def _load_novel(self, novel_id: int) -> Novel:
         novel = await self.session.get(Novel, novel_id)
         if novel is None:
-            raise QualityCheckError(f"Novel {novel_id} not found")
+            raise QualityNotFoundError(f"Novel {novel_id} not found")
         return novel
 
     async def _get_chapter_content(self, chapter: Chapter) -> str:
@@ -287,11 +296,24 @@ class QualityService:
         return json.loads(text[start:end])
 
     # ===== 主入口 =====
+    async def ensure_checkable(self, novel_id: int, chapter_id: int) -> None:
+        """前置校验：章节存在且属于该作品。
+
+        给**流式端点**用 —— 流一旦开始，HTTP 状态码就锁死了，错误只能塞进
+        流内（前端会看到"转圈到一半停了"）。所以开流之前先校验，
+        不存在就直接 404。
+
+        非流式端点不用它（``check_chapter`` 内部已经会抛）。
+        """
+        chapter = await self._load_chapter(chapter_id)
+        if chapter.novel_id != novel_id:
+            raise QualityNotFoundError(f"Chapter {chapter_id} not in novel {novel_id}")
+
     async def check_chapter(self, novel_id: int, chapter_id: int) -> QualityReport:
         """对单章节做 5 维度质检（并行）。"""
         chapter = await self._load_chapter(chapter_id)
         if chapter.novel_id != novel_id:
-            raise QualityCheckError(f"Chapter {chapter_id} not in novel {novel_id}")
+            raise QualityNotFoundError(f"Chapter {chapter_id} not in novel {novel_id}")
         novel = await self._load_novel(novel_id)
         chapter_content = await self._get_chapter_content(chapter)
         if not chapter_content.strip():
@@ -365,7 +387,7 @@ class QualityService:
         try:
             chapter = await self._load_chapter(chapter_id)
             if chapter.novel_id != novel_id:
-                raise QualityCheckError(f"Chapter {chapter_id} not in novel {novel_id}")
+                raise QualityNotFoundError(f"Chapter {chapter_id} not in novel {novel_id}")
             novel = await self._load_novel(novel_id)
             chapter_content = await self._get_chapter_content(chapter)
             if not chapter_content.strip():
@@ -469,6 +491,7 @@ class QualityService:
 __all__ = [
     "QualityService",
     "QualityCheckError",
+    "QualityNotFoundError",
     "QualityReport",
     "DimensionResult",
     "DimensionIssue",

@@ -108,7 +108,7 @@ def _load_builtin_skills() -> int:
 
 # Builtin skill 的自动触发配置。
 # triggers: 场景列表（"all" 或 "scene:<name>"）
-# type: post_process | pre_process | both
+# type 取值：post_process | pre_process | both
 # enabled: 默认 True
 BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "sensitive_word": {

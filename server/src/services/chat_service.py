@@ -67,7 +67,10 @@ class _LLMClientLike(Protocol):
 
     async def chat(
         self,
-        messages: list[ChatMessage],
+        # ⚠️ 必须用 LLMChatMessage（core.llm.base 那个）：本模块还 import 了
+        #    ORM 的 ``ChatMessage``（models.chat），裸 ``ChatMessage`` 会被解析成
+        #    那个 → 协议签名与真实客户端对不上（mypy 报 arg-type 不兼容）。
+        messages: list[LLMChatMessage],
         *,
         model: str | None = None,
         temperature: float = 0.7,
@@ -326,9 +329,10 @@ class ChatService:
         splitter = ThinkSplitter()
         full_text = ""
         t0 = time.monotonic()
+        saved = False
         try:
             stream = await llm.chat(messages, temperature=0.7, stream=True)
-            async for delta in stream:  # type: ignore[union-attr]
+            async for delta in stream:
                 if not delta:
                     continue
                 for kind, text in splitter.feed(delta):
@@ -337,28 +341,42 @@ class ChatService:
                         continue
                     full_text += text
                     yield {"event": "delta", "text": text}
+
+            # 流正常结束 → 入库完整回复（**必须放在 try 里面**：
+            # finally 里还有一个"中断时存半截"的兜底，两处都存会存成两条）
+            if not full_text.strip():
+                yield {"event": "error", "message": "模型没有返回内容"}
+                return
+            assistant = await self._add_message(
+                conversation_id, "assistant", full_text, model=used_model
+            )
+            saved = True
+            yield {
+                "event": "done",
+                "message": _message_dict(assistant),
+                "model": used_model,
+                "provider": str(getattr(llm, "provider", "") or ""),
+                "elapsed_sec": round(time.monotonic() - t0, 2),
+            }
         except Exception as e:  # noqa: BLE001
             logger.error("chat stream failed: {}", describe_llm_error(e))
             yield {"event": "error", "message": describe_llm_error(e)}
             return
         finally:
+            # 客户端中断（用户点「停止」/ 关闭窗口）时，async generator 会被
+            # close → 已经吐出来的半截也要存下来，不能凭空消失。
+            #
+            # ⚠️ saved 为 True 说明完整回复已经存过了 —— 这里**不能再存一次**
+            #    （否则同一条回复会入库两条，历史里出现重复）。
+            if not saved and full_text.strip():
+                try:
+                    await self._add_message(
+                        conversation_id, "assistant", full_text, model=used_model
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("保存半截回复失败: {}", describe_llm_error(e))
             if owns_client:
                 await self._release_llm(llm, owns=True)
-
-        if not full_text.strip():
-            yield {"event": "error", "message": "模型没有返回内容"}
-            return
-
-        assistant = await self._add_message(
-            conversation_id, "assistant", full_text, model=used_model
-        )
-        yield {
-            "event": "done",
-            "message": _message_dict(assistant),
-            "model": used_model,
-            "provider": str(getattr(llm, "provider", "") or ""),
-            "elapsed_sec": round(time.monotonic() - t0, 2),
-        }
 
 
 def _message_dict(message: ChatMessage) -> dict[str, Any]:

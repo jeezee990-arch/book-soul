@@ -3,7 +3,8 @@
 职责：
 - 加载上下文（人物卡 / 大纲 / 前章摘要 / 前章尾部 / 用户 prompt）
 - 流式调 LLM
-- 暴露 AsyncIterator[str]，由 API 层包装成 ndjson 返回
+- 暴露 AsyncIterator[str]（只吐正文）或 AsyncIterator[tuple[str, str]]
+  （区分思考 / 正文），由 API 层包装成 ndjson 返回
 
 不做的事：
 - 不写 ChapterVersion 记录（流式输出可能中途失败；写版本由前端拿到完整文本后调 update_content）
@@ -28,7 +29,7 @@ from ..core.chapter_context import (
     select_relevant_characters,
 )
 from ..core.llm.base import ChatMessage, describe_llm_error
-from ..core.llm.streaming import KIND_THINK, ThinkSplitter
+from ..core.llm.streaming import KIND_TEXT, ThinkSplitter
 from ..models.chapter import Chapter
 from ..models.character import Character
 from ..models.novel import Novel
@@ -139,9 +140,37 @@ class ChapterGenerator:
         user_prompt: str = "",
         target_word_count: int = 4000,
     ) -> AsyncIterator[str]:
-        """流式生成章节正文。
+        """流式生成章节正文（**只吐正文**）。
+
+        兼容入口：给只需要正文的调用方用。要拿到思考内容请用
+        :meth:`stream_generate_parts`。
 
         失败：抛 :class:`ChapterGenerationError`（在 yield 之前 / 之后均可能）。
+        """
+        async for kind, text in self.stream_generate_parts(
+            chapter_id=chapter_id,
+            user_prompt=user_prompt,
+            target_word_count=target_word_count,
+        ):
+            if kind == KIND_TEXT:
+                yield text
+
+    async def stream_generate_parts(
+        self,
+        *,
+        chapter_id: int,
+        user_prompt: str = "",
+        target_word_count: int = 4000,
+    ) -> AsyncIterator[tuple[str, str]]:
+        """流式生成章节正文，区分「思考」与「正文」。
+
+        产出 ``(KIND_THINK, text)`` / ``(KIND_TEXT, text)``。
+
+        ⚠️ 为什么要分开（AGENTS.md §4.7 铁律：思考内容不能被丢弃）：
+        推理模型（MiniMax M3 等）先吐好几秒的 ``<think>`` 再开始写正文。
+        以前这里 ``if kind == KIND_THINK: continue`` 把思考整段丢了 →
+        思考期前端一个字都收不到 → 用户看到"生成卡住不动"。
+        现在思考单独走一路，由 API 层转成 ``thinking`` 事件给前端显示。
         """
         chapter = await self._load_chapter(chapter_id)
         novel = await self._load_novel(chapter.novel_id)
@@ -199,18 +228,16 @@ class ChapterGenerator:
         #
         # ⚠️ 推理模型（MiniMax M3 等）的思考内容会被上游包成
         #    ``<think>...</think>`` 混在 delta 里（见 core/llm/openai_compat.py）。
-        #    直接 yield 会让章节正文里多出一段 "We need answer Chinese..."——
-        #    比丢掉更糟。这里用 ThinkSplitter 把思考段剥掉，只吐正文。
+        #    这里用 ThinkSplitter 拆成两路：**思考单独走一路**（不丢），
+        #    正文走另一路 —— 正文里混进 "We need answer Chinese..." 是灾难。
         splitter = ThinkSplitter()
         try:
-            async for delta in stream_iter:  # type: ignore[union-attr]
+            async for delta in stream_iter:
                 if not delta:
                     continue
                 for kind, text in splitter.feed(delta):
-                    if kind == KIND_THINK:
-                        continue
                     if text:
-                        yield text
+                        yield (kind, text)
         finally:
             await self._release_llm()
 

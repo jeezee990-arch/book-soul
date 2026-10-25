@@ -25,6 +25,7 @@ import {
   detectStreamFailure,
   isStreamDone,
   isStreamError,
+  isStreamThinking,
   parseOutlineStreamEvent,
   readNdjsonStream,
   streamRequestToOptions,
@@ -75,6 +76,19 @@ describe("类型守卫", () => {
     expect(isStreamError({ error: "boom" })).toBe(true);
     expect(isStreamError({ error: 123 } as never)).toBe(false);
     expect(isStreamError({ text: "x" })).toBe(false);
+  });
+
+  /**
+   * 思考事件的识别（2026-10-25 新增）。
+   *
+   * ⚠️ 思考内容不能丢（AGENTS.md §4.7）：推理模型先吐好几秒 ``<think>``
+   * 再写正文，丢掉思考 → 前端一个字都收不到 → 用户看到"生成卡住不动"。
+   */
+  it("isStreamThinking 只认 event=thinking", () => {
+    expect(isStreamThinking({ event: "thinking", text: "先想想" })).toBe(true);
+    expect(isStreamThinking({ event: "delta", text: "正文" } as never)).toBe(false);
+    expect(isStreamThinking({ text: "正文" })).toBe(false);
+    expect(isStreamThinking({ done: true })).toBe(false);
   });
 });
 

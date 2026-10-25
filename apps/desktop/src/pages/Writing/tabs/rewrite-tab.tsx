@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { Wand2, X } from "lucide-react";
 import type { Chapter } from "@/lib/types";
 import type { ChapterStreamApi } from "../use-chapter-stream";
-import { Field, HintBar, panelInputClass } from "../ui";
+import { Field, HintBar, StreamBox, ThinkingBox, panelInputClass } from "../ui";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -89,10 +89,8 @@ export default function RewriteTab({ chapter, stream, selection }: Props) {
                 {String(stream.elapsed % 60).padStart(2, "0")}
               </span>
             </div>
-            <div className="max-h-[150px] overflow-hidden font-serif text-[13px] leading-relaxed text-neutral-300">
-              {stream.streamText.slice(-900)}
-              <span className="ml-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-violet-400 align-middle" />
-            </div>
+            <ThinkingBox text={stream.thinkingText} />
+            <StreamBox text={stream.streamText} tail={900} className="max-h-[150px]" />
           </div>
         ) : null}
 

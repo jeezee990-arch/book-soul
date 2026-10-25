@@ -22,7 +22,7 @@ from ..core.chapter_context import (
     load_chapter_rewrite_prompt,
 )
 from ..core.llm.base import ChatMessage, describe_llm_error
-from ..core.llm.streaming import KIND_THINK, ThinkSplitter
+from ..core.llm.streaming import KIND_TEXT, ThinkSplitter
 from ..models.chapter import Chapter
 from ..models.character import Character
 from ..models.novel import Novel
@@ -125,7 +125,33 @@ class ChapterRewriter:
         original_text: str,
         user_prompt: str,
     ) -> AsyncIterator[str]:
-        """流式重写选区 / 全文。"""
+        """流式重写选区 / 全文（**只吐正文**）。
+
+        兼容入口；要拿到思考内容请用 :meth:`stream_rewrite_parts`。
+        """
+        async for kind, text in self.stream_rewrite_parts(
+            chapter_id=chapter_id,
+            original_text=original_text,
+            user_prompt=user_prompt,
+        ):
+            if kind == KIND_TEXT:
+                yield text
+
+    async def stream_rewrite_parts(
+        self,
+        *,
+        chapter_id: int,
+        original_text: str,
+        user_prompt: str,
+    ) -> AsyncIterator[tuple[str, str]]:
+        """流式重写，区分「思考」与「正文」。
+
+        产出 ``(KIND_THINK, text)`` / ``(KIND_TEXT, text)``。
+
+        ⚠️ 与 :meth:`ChapterGenerator.stream_generate_parts` 同一个理由
+        （AGENTS.md §4.7）：思考内容不能被丢弃 —— 丢了思考期就是空窗，
+        用户看到的是"生成卡住不动"。
+        """
         if not original_text or not original_text.strip():
             raise ChapterRewriteError("original_text is empty")
         if not user_prompt or not user_prompt.strip():
@@ -166,18 +192,16 @@ class ChapterRewriter:
             raise ChapterRewriteError(describe_llm_error(e)) from e
 
         # ⚠️ 推理模型的思考内容会以 ``<think>...</think>`` 混在 delta 里
-        #    （见 core/llm/openai_compat.py）—— 重写正文里混进一段英文思考
-        #    比丢掉更糟。这里用 ThinkSplitter 剥掉，只吐正文。
+        #    （见 core/llm/openai_compat.py）—— 思考单独走一路（不丢），
+        #    正文走另一路：正文里混进一段英文思考比丢掉更糟。
         splitter = ThinkSplitter()
         try:
-            async for delta in stream_iter:  # type: ignore[union-attr]
+            async for delta in stream_iter:
                 if not delta:
                     continue
                 for kind, text in splitter.feed(delta):
-                    if kind == KIND_THINK:
-                        continue
                     if text:
-                        yield text
+                        yield (kind, text)
         finally:
             await self._release_llm()
 

@@ -194,16 +194,26 @@ export function createChatStore(storage?: StateStorage) {
         loadMessages: async (conversationId) => {
           try {
             const messages = await chatApi.listMessages(conversationId);
+            // ⚠️ 2026-10-25 巡检：快速切换两个对话时，先发的请求可能后到
+            //    → 直接 set 会把**上一个对话**的消息显示在当前对话下。
+            //    只接受"仍然是当前对话"的响应。
+            if (get().currentConversationId !== conversationId) return;
             set({ messages });
           } catch {
-            set({ messages: [] });
+            if (get().currentConversationId === conversationId) {
+              set({ messages: [] });
+            }
           }
         },
 
         stopStreaming: () => {
           chatAbort?.abort();
           chatAbort = null;
-          set({ busy: false, streamingText: "", streamingThinking: "" });
+          // ⚠️ **不要**清 streamingText：用户主动停止，已经吐出来的半截
+          //    要留在屏幕上（后端也会把半截存下来）。
+          //    原来这里清空 + 下面的 abort 被当成"聊天失败"弹红字 ——
+          //    用户自己点的停止，反倒被报成错误（2026-10-25 巡检）。
+          set({ busy: false });
         },
 
         sendMessage: async (content) => {
@@ -250,6 +260,14 @@ export function createChatStore(storage?: StateStorage) {
                   busy: false,
                 }));
               }
+            }
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            const aborted =
+              msg.includes("abort") || msg.includes("aborted");
+            if (!aborted) {
+              // 真实错误才抛给调用方弹 toast；用户主动停止不算错误
+              throw e;
             }
           } finally {
             chatAbort = null;

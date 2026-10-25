@@ -11,7 +11,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { readNdjsonStream, isStreamDone, isStreamError } from "@/api/streams";
+import {
+  readNdjsonStream,
+  isStreamDone,
+  isStreamThinking,
+  detectStreamFailure,
+  type StreamEvent,
+} from "@/api/streams";
 import { chaptersApi } from "@/api/chapters";
 import { ApiError } from "@/api";
 import type { Chapter, ChapterVersion } from "@/lib/types";
@@ -21,6 +27,45 @@ export interface ChapterSelection {
   from: number;
   to: number;
   text: string;
+}
+
+/**
+ * 章节流事件分类结果。
+ *
+ * - ``fail``：流失败了（transport / server 两类都归到这里）
+ * - ``done``：整流结束
+ * - ``thinking``：推理模型在思考（**不进正文**，单独显示）
+ * - ``text``：正文增量（进正文）
+ * - ``ignore``：不认识的帧
+ */
+export type ChapterStreamAction =
+  | { kind: "fail"; message: string }
+  | { kind: "done" }
+  | { kind: "thinking"; text: string }
+  | { kind: "text"; text: string }
+  | { kind: "ignore" };
+
+/**
+ * 把一个 ndjson 事件分类成"该干什么"。
+ *
+ * 抽成纯函数是为了能单测 —— hook 本身要 DOM 环境，这个项目没装
+ * @testing-library/react（不为了测试引入新依赖）。
+ *
+ * ⚠️ 两类失败必须都认（AGENTS.md §4.10）：
+ * - transport：``{"error": "422 ..."}``（HTTP 非 2xx）
+ * - server：``{"event": "error", "message": "..."}``（流内错误帧）
+ * 漏掉任何一类 → 界面永远转圈。
+ *
+ * ⚠️ 思考内容**不能丢**（§4.7）：推理模型先思考好几秒再写正文，
+ * 丢掉思考 → 前端一个字都收不到 → 用户看到"生成卡住不动"。
+ */
+export function classifyChapterStreamEvent(ev: StreamEvent): ChapterStreamAction {
+  const failure = detectStreamFailure(ev);
+  if (failure) return { kind: "fail", message: failure.message };
+  if (isStreamDone(ev)) return { kind: "done" };
+  if (isStreamThinking(ev)) return { kind: "thinking", text: ev.text };
+  if ("text" in ev && typeof ev.text === "string") return { kind: "text", text: ev.text };
+  return { kind: "ignore" };
 }
 
 /**
@@ -45,6 +90,14 @@ export interface ChapterStreamApi {
   rewriting: boolean;
   /** 本次流式产出的文本（右栏状态卡实时显示） */
   streamText: string;
+  /**
+   * 模型思考中的文本（推理模型的 ``<think>`` 段）。
+   *
+   * ⚠️ 思考内容**不能丢**（AGENTS.md §4.7）：推理模型先思考好几秒再写正文，
+   * 丢掉思考 → 前端一个字都收不到 → 用户看到"生成卡住不动"。
+   * 这里单独显示成"模型思考中…"，正文区保持不动。
+   */
+  thinkingText: string;
   /** 已耗时（秒） */
   elapsed: number;
   /** 当前模式（用于右栏展示） */
@@ -76,6 +129,7 @@ export function useChapterStream({
   const [generating, setGenerating] = useState(false);
   const [rewriting, setRewriting] = useState(false);
   const [streamText, setStreamText] = useState("");
+  const [thinkingText, setThinkingText] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -103,6 +157,7 @@ export function useChapterStream({
 
   const reset = useCallback(() => {
     setStreamText("");
+    setThinkingText("");
     setElapsed(0);
   }, []);
 
@@ -153,10 +208,15 @@ export function useChapterStream({
 
       setGenerating(true);
       setStreamText("");
+      setThinkingText("");
       startTimer();
       abortRef.current = new AbortController();
 
       let accumulated = "";
+      // ⚠️ 2026-10-25 巡检：流失败后如果还往下走，会把**半截正文**存成正式版本，
+      //    而且用户会先看到红色「生成失败」再看到绿色「生成完成」——自相矛盾。
+      //    这里用 failed 标记：失败就**不落库**、不再报成功。
+      let failed = false;
       try {
         for await (const ev of readNdjsonStream(
           `/chapters/${chapter.id}/generate`,
@@ -169,17 +229,31 @@ export function useChapterStream({
             signal: abortRef.current.signal,
           },
         )) {
-          if (isStreamError(ev)) {
-            toast.error("生成失败", { description: ev.error });
+          // ⚠️ 两类失败都要认（AGENTS.md §4.10）：transport（非 2xx）
+          //    与 server（流内 error 帧）——漏掉任何一类界面都会永远转圈。
+          const action = classifyChapterStreamEvent(ev);
+          if (action.kind === "fail") {
+            failed = true;
+            toast.error("生成失败", { description: action.message });
             break;
           }
-          if (isStreamDone(ev)) break;
-          accumulated += ev.text;
+          if (action.kind === "done") break;
+          if (action.kind === "thinking") {
+            // 思考内容单独显示，**不进正文**（正文里混进英文思考是灾难）
+            setThinkingText((t) => t + action.text);
+            continue;
+          }
+          if (action.kind !== "text") continue;
+          accumulated += action.text;
           setStreamText(accumulated);
-          editorRef.current?.appendText(ev.text);
+          editorRef.current?.appendText(action.text);
         }
         // 流式完成：立即 flush 缓冲区
         editorRef.current?.flush();
+        if (failed) {
+          // 半截正文留在编辑器里（用户可以自己接着改），但**不落库**
+          return;
+        }
         const finalText = accumulated.trim();
         if (finalText) {
           // 存的是编辑器的完整正文（原有正文 + 本次新增）
@@ -227,11 +301,14 @@ export function useChapterStream({
 
       setRewriting(true);
       setStreamText("");
+      setThinkingText("");
       startTimer();
       abortRef.current = new AbortController();
 
       const { from, to, text: originalText } = selection;
       let accumulated = "";
+      // 同生成路径：失败就不落库、不再报成功（2026-10-25 巡检）
+      let failed = false;
       try {
         for await (const ev of readNdjsonStream(
           `/chapters/${chapter.id}/rewrite`,
@@ -246,17 +323,28 @@ export function useChapterStream({
             signal: abortRef.current.signal,
           },
         )) {
-          if (isStreamError(ev)) {
-            toast.error("重写失败", { description: ev.error });
+          const action = classifyChapterStreamEvent(ev);
+          if (action.kind === "fail") {
+            failed = true;
+            toast.error("重写失败", { description: action.message });
             break;
           }
-          if (isStreamDone(ev)) break;
-          accumulated += ev.text;
+          if (action.kind === "done") break;
+          if (action.kind === "thinking") {
+            setThinkingText((t) => t + action.text);
+            continue;
+          }
+          if (action.kind !== "text") continue;
+          accumulated += action.text;
           setStreamText(accumulated);
           // 用增量替换：只传新增 chunk，编辑器内部累加并替换选区
-          editorRef.current?.replaceSelection(from, to, ev.text);
+          editorRef.current?.replaceSelection(from, to, action.text);
         }
         editorRef.current?.flush();
+        if (failed) {
+          // 半截重写留在编辑器里（用户可自行调整），但**不落库**
+          return;
+        }
         const finalText = accumulated.trim();
         if (finalText) {
           // 存的是编辑器的完整正文（选区已被新内容替换）
@@ -307,6 +395,7 @@ export function useChapterStream({
     generating,
     rewriting,
     streamText,
+    thinkingText,
     elapsed,
     mode: generating ? "generate" : rewriting ? "rewrite" : null,
     startGenerate,

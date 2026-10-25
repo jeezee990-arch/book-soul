@@ -224,7 +224,16 @@ async def send_message_stream(
     """流式聊天端点。
 
     协议：``user_message`` / ``thinking`` / ``delta`` / ``done`` / ``error``。
+
+    ⚠️ 前置校验放在**开流之前**（对话是否还存在）。
+    否则：对话被删掉时异常在 generator 里抛 → 客户端收到一段被截断的 200
+    响应 → 既没有 error 帧也没有 done 帧 → 前端界面永远转圈，
+    用户刚打的字也随流一起丢了（AGENTS.md §4.10）。
     """
+    try:
+        await service.get_conversation(conversation_id)
+    except ChatNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
     async def gen():
         async for event in service.stream_chat(

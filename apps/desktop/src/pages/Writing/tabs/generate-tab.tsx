@@ -10,7 +10,7 @@ import { Sparkles, X } from "lucide-react";
 import type { Chapter, Novel } from "@/lib/types";
 import type { ChapterStreamApi } from "../use-chapter-stream";
 import type { PanelTab } from "../types";
-import { Field, HintBar, SegmentedControl, panelInputClass } from "../ui";
+import { Field, HintBar, SegmentedControl, StreamBox, ThinkingBox, panelInputClass } from "../ui";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -65,10 +65,12 @@ export default function GenerateTab({ novel, chapter, stream, onSwitchTab }: Pro
                 {String(stream.elapsed % 60).padStart(2, "0")}
               </span>
             </div>
-            <div className="max-h-[190px] overflow-hidden font-serif text-[13px] leading-relaxed text-neutral-300">
-              {stream.streamText.slice(-1200)}
-              <span className="ml-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-violet-400 align-middle" />
-            </div>
+            <ThinkingBox text={stream.thinkingText} />
+            <StreamBox
+              text={stream.streamText}
+              tail={1200}
+              className="max-h-[190px]"
+            />
             <div className="mt-2.5 border-t border-violet-500/20 pt-2.5">
               <span className="font-mono text-[18px] font-semibold text-violet-300">
                 {stream.streamText.length.toLocaleString()}

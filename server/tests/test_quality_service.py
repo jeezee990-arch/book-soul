@@ -26,6 +26,9 @@ from src.core.quality.prompts import (
 )
 from src.services.quality_service import (
     QualityCheckError,
+    # ⚠️ 必须写在**模块顶层**（AGENTS.md §7.3）：conftest 的 temp_db fixture 会
+    #    重建 src.* 模块，函数体 import 拿到的是**新类**，pytest.raises 永远不匹配。
+    QualityNotFoundError,
     QualityService,
 )
 
@@ -379,3 +382,43 @@ async def test_api_quality_check_empty_chapter_422(db_initialized: Path) -> None
     resp = client.post(f"/novels/{novel_id}/chapters/{ch_id}/quality")
     assert resp.status_code == 422
     assert "no content" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_quality_not_found_is_typed_error(db_initialized: Path) -> None:
+    """不存在 → 抛 ``QualityNotFoundError``（**类型**判定，不是字符串匹配）。
+
+    ⚠️ 2026-10-25 巡检：API 层原来靠 ``"not found" in msg.lower()`` 判 404，
+    字符串匹配会被**内容**误伤。现在用专门的子类。
+    """
+    from src.db import SessionLocal
+
+    async with SessionLocal() as session:
+        svc = QualityService(session, llm_client=_mock_llm_responses())
+        with pytest.raises(QualityNotFoundError):
+            await svc.check_chapter(novel_id=1, chapter_id=9999)
+        # 仍是 QualityCheckError 的子类，老代码不受影响
+        assert issubclass(QualityNotFoundError, QualityCheckError)
+
+
+@pytest.mark.asyncio
+async def test_api_quality_stream_chapter_not_found_returns_404(db_initialized: Path) -> None:
+    """流式端点：章节不存在 → **开流之前**就 404。
+
+    ⚠️ 原来没有前置校验，异常在 generator 里抛 → 客户端收到一段被截断的
+    200 响应 → 既没 error 帧也没 done 帧 → 前端界面永远转圈（§4.10）。
+    """
+    from fastapi.testclient import TestClient
+
+    from src.db import SessionLocal
+    from src.main import app
+    from src.schemas.novel import NovelCreate
+    from src.services.novel_service import NovelService
+
+    async with SessionLocal() as session:
+        novel = await NovelService(session).create(NovelCreate(name="测试", genre="xiuxian"))
+        novel_id = novel.id
+
+    client = TestClient(app)
+    resp = client.post(f"/novels/{novel_id}/chapters/9999/quality/stream")
+    assert resp.status_code == 404

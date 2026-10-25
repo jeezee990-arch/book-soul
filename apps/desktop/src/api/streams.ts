@@ -24,7 +24,19 @@ export interface StreamError {
   error: string;
 }
 
-export type StreamEvent = StreamDelta | StreamDone | StreamError;
+/**
+ * 推理模型的思考增量（``{"event": "thinking", "text": "..."}``）。
+ *
+ * ⚠️ 思考内容**不能丢**（AGENTS.md §4.7）：推理模型先吐好几秒 ``<think>``
+ * 再写正文，丢掉思考 → 前端一个字都收不到 → 用户看到"生成卡住不动"。
+ * 章节生成 / 重写 / 剧情 / 大纲 / 聊天都走这个事件。
+ */
+export interface StreamThinking {
+  event: "thinking";
+  text: string;
+}
+
+export type StreamEvent = StreamDelta | StreamDone | StreamError | StreamThinking;
 
 export function isStreamDone(e: StreamEvent): e is StreamDone {
   return "done" in e && e.done === true;
@@ -32,6 +44,11 @@ export function isStreamDone(e: StreamEvent): e is StreamDone {
 
 export function isStreamError(e: StreamEvent): e is StreamError {
   return "error" in e && typeof (e as StreamError).error === "string";
+}
+
+/** 判断一个事件是不是"模型思考中"的增量。 */
+export function isStreamThinking(e: StreamEvent): e is StreamThinking {
+  return "event" in e && e.event === "thinking";
 }
 
 /** 流失败的来源。 */

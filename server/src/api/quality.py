@@ -17,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas.quality import QualityReportRead
-from ..services.quality_service import QualityCheckError, QualityService
+from ..services.quality_service import (
+    QualityCheckError,
+    QualityNotFoundError,
+    QualityService,
+)
 from ._stream_helpers import ndjson_line, ndjson_response
 
 router = APIRouter(tags=["quality"])
@@ -39,11 +43,11 @@ async def check_chapter_quality(
 ) -> QualityReportRead:
     try:
         report = await service.check_chapter(novel_id, chapter_id)
+    except QualityNotFoundError as e:
+        # 对象不存在 → 404（类型判定，不是字符串匹配）
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except QualityCheckError as e:
-        msg = str(e)
-        if "not found" in msg.lower() or "not in novel" in msg:
-            raise HTTPException(status_code=404, detail=msg) from e
-        raise HTTPException(status_code=422, detail=msg) from e
+        raise HTTPException(status_code=422, detail=str(e)) from e
     return QualityReportRead(
         chapter_id=report.chapter_id,
         novel_id=report.novel_id,
@@ -101,7 +105,15 @@ async def check_chapter_quality_stream(
     """流式端点：5 维度 LLM **并行**调，单个完成即推事件。
 
     协议见 :mod:`src.api._stream_helpers`。
+
+    ⚠️ 前置校验放在**开流之前** —— 否则章节不存在时异常在 generator 里抛，
+    客户端收到的是一段被截断的 200 响应 → 前端既没收到 error 帧也没收到 done
+    → 界面永远转圈（AGENTS.md §4.10 的反面案例）。
     """
+    try:
+        await service.ensure_checkable(novel_id, chapter_id)
+    except QualityNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
     async def gen():
         async for event in service.stream_check_chapter(novel_id, chapter_id):

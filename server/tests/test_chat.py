@@ -79,9 +79,7 @@ async def test_project_crud(db_initialized: Path) -> None:
         assert project.id > 0
         assert project.name == "新书构思"
 
-        updated = await service.update_project(
-            project.id, ChatProjectUpdate(name="改个名")
-        )
+        updated = await service.update_project(project.id, ChatProjectUpdate(name="改个名"))
         assert updated.name == "改个名"
 
         listed = await service.list_projects()
@@ -103,9 +101,7 @@ async def test_set_materials_keeps_only_existing_ids(db_initialized: Path) -> No
     async with SessionLocal() as session:
         service = ChatService(session)
         project = await service.create_project(ChatProjectCreate(name="素材项目"))
-        updated = await service.set_project_materials(
-            project.id, [real_id, 999999, real_id]
-        )
+        updated = await service.set_project_materials(project.id, [real_id, 999999, real_id])
         assert updated.materials == [real_id]
 
 
@@ -140,9 +136,7 @@ async def test_conversation_crud(db_initialized: Path) -> None:
     async with SessionLocal() as session:
         service = ChatService(session)
         project = await service.create_project(ChatProjectCreate(name="项目"))
-        conversation = await service.create_conversation(
-            project.id, title="主线"
-        )
+        conversation = await service.create_conversation(project.id, title="主线")
         assert conversation.project_id == project.id
 
         renamed = await service.update_conversation(conversation.id, title="支线")
@@ -167,12 +161,7 @@ async def test_stream_chat_saves_messages(db_initialized: Path) -> None:
         service = ChatService(session, llm_client=llm)
         project = await service.create_project(ChatProjectCreate(name="项目"))
         conversation = await service.create_conversation(project.id)
-        events = [
-            ev
-            async for ev in service.stream_chat(
-                conversation.id, "帮我看看这个设定"
-            )
-        ]
+        events = [ev async for ev in service.stream_chat(conversation.id, "帮我看看这个设定")]
 
     kinds = [e["event"] for e in events]
     assert kinds[0] == "user_message"
@@ -185,6 +174,35 @@ async def test_stream_chat_saves_messages(db_initialized: Path) -> None:
     assert [m.role for m in messages] == ["user", "assistant"]
     assert messages[0].content == "帮我看看这个设定"
     assert messages[1].content == "你好，我是助手"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_partial_saved_once_on_client_abort(db_initialized: Path) -> None:
+    """用户点「停止」→ 半截回复要入库，而且**只入库一条**。
+
+    ⚠️ 2026-10-25 巡检踩过的坑：完整回复的保存原本放在 try 块**外面**，
+    finally 里的"中断存半截"兜底又存了一次 → 同一条回复入库两条，
+    历史里出现重复。完整保存必须挪进 try 块并置 ``saved = True``。
+    """
+    from src.db import SessionLocal
+
+    llm = _FakeStreamLLM(["第一段", "第二段"])
+    async with SessionLocal() as session:
+        service = ChatService(session, llm_client=llm)
+        project = await service.create_project(ChatProjectCreate(name="项目"))
+        conversation = await service.create_conversation(project.id)
+
+        stream = service.stream_chat(conversation.id, "你好")
+        async for ev in stream:
+            if ev.get("event") == "delta":
+                break  # 模拟用户点「停止」→ 中断消费
+        await stream.aclose()
+
+        messages = await service.list_messages(conversation.id)
+
+    assistants = [m for m in messages if m.role == "assistant"]
+    assert len(assistants) == 1, "半截回复只应入库一条"
+    assert "第一段" in assistants[0].content
 
 
 @pytest.mark.asyncio
@@ -243,9 +261,7 @@ async def test_chat_api_project_flow(db_initialized: Path) -> None:
         assert r.status_code == 201
         project_id = r.json()["id"]
 
-        r = client.post(
-            f"/chat/projects/{project_id}/conversations", json={"title": "主线"}
-        )
+        r = client.post(f"/chat/projects/{project_id}/conversations", json={"title": "主线"})
         assert r.status_code == 201
         conversation_id = r.json()["id"]
 
@@ -265,6 +281,22 @@ def test_chat_api_missing_project_returns_404(db_initialized: Path) -> None:
 
     with TestClient(app) as client:
         r = client.get("/chat/projects/999999")
+    assert r.status_code == 404
+
+
+def test_chat_stream_api_missing_conversation_returns_404(db_initialized: Path) -> None:
+    """对话不存在 → **开流之前**就 404。
+
+    ⚠️ 2026-10-25 巡检：原来没有前置校验，对话被删掉时异常在 generator
+    里抛 → 客户端收到一段被截断的 200 响应 → 既没 error 帧也没 done 帧
+    → 前端界面永远转圈，用户刚打的字也丢了（AGENTS.md §4.10）。
+    """
+    from fastapi.testclient import TestClient
+
+    from src.main import app
+
+    with TestClient(app) as client:
+        r = client.post("/chat/conversations/999999/messages/stream", json={"content": "你好"})
     assert r.status_code == 404
 
 

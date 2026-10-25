@@ -5,10 +5,15 @@
 - POST /chapters/{chapter_id}/rewrite      流式选区 / 全文重写（ndjson）
 
 流式协议（ndjson，每行一个 JSON 对象）：
-- 成功增量：``{"text": "<delta>"}``
+- 正文增量：``{"text": "<delta>"}``
+- 思考增量：``{"event": "thinking", "text": "<delta>"}``（推理模型思考期，**不丢**）
 - 终止：``{"done": true, "provider": "mimo", "model": "..."}``
 - 错误：``{"error": "<msg>"}``
 - 客户端按行 split 即可
+
+⚠️ 为什么思考要单独一路（AGENTS.md §4.7）：
+推理模型先吐好几秒 ``<think>`` 再写正文。丢掉思考 → 前端一个字都收不到 →
+用户看到"生成卡住不动"。思考单独走 ``thinking`` 事件，前端显示"模型思考中…"。
 
 注意：
 - 不在端点层写 ChapterVersion；流式失败时不需要回滚 DB
@@ -25,6 +30,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.llm.streaming import KIND_THINK
 from ..db import get_db
 from ..schemas.chapter import ChapterGenerateRequest, ChapterRewriteRequest
 from ..services.chapter_generator import (
@@ -67,12 +73,16 @@ async def _stream_chapter_generate(
         return
 
     try:
-        async for delta in gen.stream_generate(
+        async for kind, delta in gen.stream_generate_parts(
             chapter_id=chapter_id,
             user_prompt=payload.user_prompt or "",
             target_word_count=payload.target_word_count,
         ):
-            yield _ndjson({"text": delta})
+            if kind == KIND_THINK:
+                # 思考内容单独一路 —— 前端显示"模型思考中…"，不让界面空窗
+                yield _ndjson({"event": "thinking", "text": delta})
+            else:
+                yield _ndjson({"text": delta})
         # 收尾帧
         try:
             llm = gen._get_llm()  # noqa: SLF001 - 偷一下 provider 名
@@ -125,12 +135,15 @@ async def _stream_chapter_rewrite(
         return
 
     try:
-        async for delta in rewriter.stream_rewrite(
+        async for kind, delta in rewriter.stream_rewrite_parts(
             chapter_id=chapter_id,
             original_text=payload.original_text,
             user_prompt=payload.user_prompt,
         ):
-            yield _ndjson({"text": delta})
+            if kind == KIND_THINK:
+                yield _ndjson({"event": "thinking", "text": delta})
+            else:
+                yield _ndjson({"text": delta})
         yield _ndjson({"done": True})
     except ChapterRewriteError as e:
         yield _ndjson({"error": str(e)})
