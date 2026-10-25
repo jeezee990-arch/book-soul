@@ -215,6 +215,7 @@ routing:
   chapter_generation: "@settings"
   chapter_rewrite: "@settings"
   quality_check: "@settings"
+  chat: "@settings"
   summarize: "@settings"
   quality_writing: "@settings"
   quality_logic: "@settings"

@@ -188,6 +188,85 @@ export function parseOutlineStreamEvent(ev: StreamEvent): OutlineStreamEvent {
   return { kind: "unknown" };
 }
 
+/**
+ * 聊天流事件（2026-10-25 新增）。
+ *
+ * 后端聊天流协议（见 `server/src/services/chat_service.py`）：
+ * - `{"event": "user_message", "message": {...}}` —— 用户消息已入库
+ * - `{"event": "thinking", "text": "..."}` —— 推理模型思考中
+ * - `{"event": "delta", "text": "..."}` —— 正文增量
+ * - `{"event": "done", "message": {...}, "model": "...", "elapsed_sec": 1.2}`
+ * - `{"event": "error", "message": "..."}`
+ */
+export type ChatStreamEvent =
+  | { kind: "user_message"; message: ChatStreamMessage }
+  | { kind: "thinking"; text: string }
+  | { kind: "delta"; text: string }
+  | {
+      kind: "done";
+      message: ChatStreamMessage;
+      model: string;
+      elapsedSec: number | null;
+    }
+  | { kind: "error"; message: string }
+  | { kind: "unknown" };
+
+/** 聊天消息（结构与 `api/chat.ts` 的 ChatMessage 一致；此处独立定义避免循环 import）。 */
+export interface ChatStreamMessage {
+  id: number;
+  conversation_id: number;
+  role: string;
+  content: string;
+  model?: string | null;
+  created_at?: string | null;
+}
+
+/**
+ * 把一个 ndjson 事件解析成聊天流事件。
+ *
+ * 失败（transport / server 两类）统一走 {@link detectStreamFailure}。
+ */
+export function parseChatStreamEvent(ev: StreamEvent): ChatStreamEvent {
+  const failure = detectStreamFailure(ev);
+  if (failure) {
+    return { kind: "error", message: failure.message };
+  }
+  const obj = ev as unknown as Record<string, unknown>;
+  const event = obj.event as string | undefined;
+  if (event === "user_message") {
+    return {
+      kind: "user_message",
+      message: (obj.message as ChatStreamMessage) ?? {
+        id: 0,
+        conversation_id: 0,
+        role: "user",
+        content: "",
+      },
+    };
+  }
+  if (event === "thinking") {
+    return { kind: "thinking", text: (obj.text as string) ?? "" };
+  }
+  if (event === "delta") {
+    return { kind: "delta", text: (obj.text as string) ?? "" };
+  }
+  if (event === "done") {
+    const elapsed = obj.elapsed_sec as number | undefined;
+    return {
+      kind: "done",
+      message: (obj.message as ChatStreamMessage) ?? {
+        id: 0,
+        conversation_id: 0,
+        role: "assistant",
+        content: "",
+      },
+      model: (obj.model as string) ?? "",
+      elapsedSec: typeof elapsed === "number" ? elapsed : null,
+    };
+  }
+  return { kind: "unknown" };
+}
+
 /** 把 baseUrl + path 拼成绝对 URL（用于 fetch + 流式 body）。 */
 function absUrl(path: string, baseUrl?: string): string {
   if (path.startsWith("http://") || path.startsWith("https://")) return path;

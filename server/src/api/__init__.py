@@ -7,6 +7,7 @@ from .chapter_generation import router as chapter_generation_router
 from .chapter_versioning import router as chapter_versioning_router
 from .chapters import combined_router as chapters_router
 from .characters import combined_router as characters_router
+from .chat import router as chat_router
 from .export import router as export_router
 from .inspirations import router as inspirations_router
 from .llm import router as llm_router
@@ -38,4 +39,5 @@ router.include_router(quality_router)
 router.include_router(scanner_router)
 router.include_router(skills_router)
 router.include_router(backup_router)
+router.include_router(chat_router)
 router.include_router(generation_router)
