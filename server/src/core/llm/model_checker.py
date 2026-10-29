@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from .factory import get_provider_config, load_llm_config
 
@@ -57,10 +58,11 @@ def check_model_capability(
     """
     pc = get_provider_config(provider)
     specs = pc.get("model_specs") or {}
-    spec = specs.get(model)
-    known = isinstance(spec, dict)
-    if not known:
-        spec = {}
+    spec_raw = specs.get(model)
+    known = isinstance(spec_raw, dict)
+    # mypy 不会通过布尔变量 ``known`` 收窄 ``spec_raw``，这里显式再判一次 isinstance：
+    # 语义与原实现完全一致 —— 非 dict（含 None / 脏值）一律退化成空 dict。
+    spec: dict[str, Any] = spec_raw if isinstance(spec_raw, dict) else {}
 
     context_window = int(spec.get("context_window", pc.get("default_context_window", 0)) or 0)
     max_output = int(spec.get("max_output_tokens", pc.get("default_max_output_tokens", 0)) or 0)

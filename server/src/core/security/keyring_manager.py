@@ -43,7 +43,7 @@ def _get_default_keyring() -> _KeyringLike | None:
     except ImportError:
         logger.warning("keyring package not installed; encryption will be disabled")
         return None
-    return keyring  # type: ignore[return-value]
+    return keyring
 
 
 def _get_or_create_with_backend(backend: _KeyringLike) -> bytes | None:

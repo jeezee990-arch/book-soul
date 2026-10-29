@@ -44,7 +44,7 @@ class _KeyringLike(Protocol):
 
 def _default_keyring() -> _KeyringLike | None:
     try:
-        return importlib.import_module("keyring")  # type: ignore[return-value]
+        return importlib.import_module("keyring")
     except ImportError:
         logger.warning("keyring package not installed; API key storage disabled")
         return None

@@ -2,6 +2,10 @@
 
 <!--
 修改记录
+- 2026-10-29：第六轮（七项 UI 需求 + 质检）。主要变化：
+  · §4.7 修正「并行保序」：内容实时透传 + 里程碑保序（`merge_queue_events_milestone_ordered`），
+    明确禁用严格保序（`merge_queue_events_ordered`）—— 它就是「憋着最后一口气输出」的元凶
+  · 新增 §4.10（流式失败两类）+ §4.9（同一帧别读刚 set 的 state）已在上一轮补齐
 - 2026-10-24：第五轮（真机 UI 走查 + 门禁补漏）。主要变化：
   · §4.10 流式失败有两类（transport / server），前端必须都认，否则界面永远转圈
   · 根 pyproject.toml 的 ruff 排除 server/alembic/versions（模板生成文件不手改）
@@ -238,7 +242,7 @@ resp = await self._client.post(url, json=payload)
 > 契约测试：`server/tests/test_llm_cache.py`（含"预检与 /llm/health 只探测一次"）。
 > 改坏了这层，`/llm/health` 会立刻退回 10 秒。
 
-### 4.7 流式端点的三条铁律（2026-10-24 新增）
+### 4.7 流式端点的三条铁律（2026-10-24 新增，2026-10-29 修订第三条）
 
 用户实测报过三个流式问题，全部归到这三条：
 
@@ -246,7 +250,14 @@ resp = await self._client.post(url, json=payload)
 |---|---|---|
 | **思考内容不能被丢弃** | 推理模型先吐 `<think>...</think>` 再吐正文，思考可能好几秒。旧写法 `if "<think>" in delta: continue` 把这段**全丢了** → 前端一个字都收不到 → 用户看到"卡住不动"。现在用 `core/llm/streaming.py::ThinkSplitter` 拆成两路，思考内容作为 `thinking` 事件转发 | `core/llm/streaming.py` |
 | **流式容器必须能滚动** | 内容区写 `overflow-hidden` + 固定高 → 文字流到边界就被裁掉，后面的字渲染了但**看不见** → 用户看到"生成到一半不动了"，结束时又"一口气全出来"。必须 `max-h-* overflow-y-auto`，并**自动滚到底部** | 前端各流式面板 |
-| **并行的 N 个版本要保序** | 3 个版本并行调用，谁先回是随机的 → 屏幕上是 C→A→B。要"生成 N 个"时用 `merge_queue_events_ordered`（**生产者仍并行**，只改吐事件顺序，总耗时不变） | `core/queue_merge.py` |
+| **并行的 N 个版本：内容实时透传 + 里程碑保序** | 3 个版本并行调用，谁先回是随机的。**内容事件**（thinking / delta）按到达顺序**实时**透传，各版本各显示各的；**里程碑事件**（`version_done` 这类"这个版本好了"）按下标保序，保留出场顺序的观感。用 `merge_queue_events_milestone_ordered`（**生产者仍并行**，只改里程碑顺序，总耗时不变） | `core/queue_merge.py` |
+
+> ⚠️ **不要用"严格保序"（`merge_queue_events_ordered`）** —— 2026-10-25 实测踩过：
+> 严格保序的实现是「队列 1 消费完才消费队列 2」，后面版本的内容事件全憋在队列里，
+> 等前一个版本彻底结束才**同一毫秒**涌出 —— 用户反馈的原话是
+> "生成的时候像是先生成但不输出，阻塞到一整个生成完毕才一口气很快地流式输出"。
+> **"一口气"的直接成因就是这个**，不是模型慢，也不是前端缓冲。
+> → 拆成两件事：内容永远实时，里程碑才排序。
 
 > 契约测试：`server/tests/test_think_splitter.py` + `test_queue_merge.py` +
 > `test_plot_generation.py`（顺序 / thinking 事件）。

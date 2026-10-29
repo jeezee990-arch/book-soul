@@ -6,6 +6,8 @@ v2 升级：可调 LLM 标注"紧张/舒缓"标签叠加到数据上。
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from ..base import SkillResult
 
 
@@ -29,12 +31,12 @@ class PacingVisualizerSkill:
 
         # 按 \n\n 切段
         raw = text.split("\n\n")
-        segments = [
+        segments: list[dict[str, Any]] = [
             {"index": idx, "char_count": len(p), "preview": p[:50]}
             for idx, p in enumerate(raw)
             if p.strip()
         ]
-        char_counts = [s["char_count"] for s in segments]
+        char_counts: list[int] = [cast(int, s["char_count"]) for s in segments]
         total = sum(char_counts)
         return SkillResult(
             success=True,

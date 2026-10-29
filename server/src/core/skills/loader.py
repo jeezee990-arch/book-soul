@@ -29,7 +29,7 @@ import importlib.util
 import inspect
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from loguru import logger
@@ -92,13 +92,16 @@ def _load_builtin_skills() -> int:
             if not hasattr(cls, "execute"):
                 continue
             try:
-                inst = cls()  # type: ignore[call-arg]
+                # 动态发现的类无法被 mypy 静态判定满足 Skill 协议，
+                # 但运行时已校验 name/description/execute 三个属性存在，
+                # 故显式 cast 声明其符合 Skill 契约。
+                inst = cast(Skill, cls())
                 # 附加默认 manifest
                 inst._manifest = BUILTIN_MANIFESTS.get(  # type: ignore[attr-defined]
                     getattr(inst, "name", ""),
                     {"type": "post_process", "triggers": ["all"], "enabled": True},
                 )
-                registry.register(inst)  # type: ignore[arg-type]
+                registry.register(inst)
                 count += 1
                 logger.debug("Loaded builtin skill: {}", getattr(inst, "name", "?"))
             except Exception as e:  # noqa: BLE001
@@ -220,7 +223,7 @@ def _load_user_skill_dir(skill_dir: Path) -> Skill | None:
     skill_obj: Skill | None = None
     if hasattr(module, "create_skill"):
         try:
-            skill_obj = module.create_skill()  # type: ignore[attr-defined]
+            skill_obj = module.create_skill()
         except Exception as e:  # noqa: BLE001
             logger.error("create_skill() failed in {}: {}", handler_path, e)
             return None
@@ -231,7 +234,7 @@ def _load_user_skill_dir(skill_dir: Path) -> Skill | None:
                 continue
             if hasattr(cls, "execute") and hasattr(cls, "name"):
                 try:
-                    skill_obj = cls()  # type: ignore[call-arg]
+                    skill_obj = cast(Skill, cls())
                     break
                 except Exception:  # noqa: BLE001
                     continue
@@ -244,7 +247,7 @@ def _load_user_skill_dir(skill_dir: Path) -> Skill | None:
     skill_obj._manifest = manifest_data  # type: ignore[attr-defined]
     # 若 handler 没设 description，用 manifest 的补上
     if not getattr(skill_obj, "description", ""):
-        skill_obj.description = description  # type: ignore[attr-defined]
+        skill_obj.description = description
     return skill_obj
 
 

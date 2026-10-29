@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { createRequestGuard } from "@/lib/request-guard";
 import type { WordbankAllWords, WordbankListEntry } from "@/lib/types";
 import { categoryLabel, genreLabel, parseImportText, summarizeImport } from "./wordbank-parse";
 import WordbankManagerImport from "./wordbank-manager-import";
@@ -89,6 +90,9 @@ export default function WordbankManagerDialog({
   const [importStats, setImportStats] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
 
+  /** 词库列表请求守卫（防"切换板块时旧响应覆盖新数据"） */
+  const [reqGuard] = useState(createRequestGuard);
+
   const categories = useMemo(() => data?.categories ?? [], [data]);
 
   /** 拉板块列表（来自后端 —— config/wordbanks 下实际存在的板块）。 */
@@ -112,16 +116,23 @@ export default function WordbankManagerDialog({
       setData(null);
       return;
     }
+    // ⚠️ 请求序号：快速切换板块 A→B 时，A 的响应可能后到并覆盖 B 的数据
+    // → Tab 显示 B、列表却是 A 的词，而写操作按 active(=B) 执行，
+    //   用户可能在看 A 的列表时误删 B 的词条。只认最后一次请求的结果。
+    const seq = reqGuard.next();
     setLoading(true);
     try {
-      setData(await wordbanksApi.getAllWords(gid));
+      const result = await wordbanksApi.getAllWords(gid);
+      if (!reqGuard.isCurrent(seq)) return;
+      setData(result);
     } catch (e: unknown) {
+      if (!reqGuard.isCurrent(seq)) return;
       toast.error("加载词库失败", { description: errText(e) });
       setData(null);
     } finally {
-      setLoading(false);
+      if (reqGuard.isCurrent(seq)) setLoading(false);
     }
-  }, []);
+  }, [reqGuard]);
 
   useEffect(() => {
     if (open) void loadGenres();

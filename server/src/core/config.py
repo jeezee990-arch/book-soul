@@ -121,7 +121,12 @@ class Settings(BaseSettings):
                 continue
             # env 未设，用 yaml 填入 init kwargs
             kwargs.setdefault(k, v)
-        super().__init__(**kwargs)
+        # ⚠️ pydantic-settings 的 BaseSettings.__init__ 把每个入参（_env_prefix、
+        # _case_sensitive、_env_file 等）都标注成具体类型（bool | None / str | None ...），
+        # 展开 **kwargs 时 mypy 会拿 dict[str, object] 去逐个比对，一行报 12 条
+        # arg-type —— 属于第三方库标注过窄，不是我们的类型错误。
+        # 运行时 pydantic 会按各字段声明的类型自行校验，行为不受影响。
+        super().__init__(**kwargs)  # type: ignore[arg-type]
 
     @property
     def data_dir(self) -> Path:

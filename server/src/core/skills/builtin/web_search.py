@@ -56,7 +56,7 @@ class WebSearchSkill:
 
         limit = max(1, min(20, int(limit or 5)))
 
-        params = {
+        params: dict[str, str | int] = {
             "q": query,
             "api_key": api_key,
             "engine": engine or "google",

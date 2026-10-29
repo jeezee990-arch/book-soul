@@ -211,6 +211,8 @@ class OpenAICompatClient:
         :param requested: 业务层显式给的正文预算（None → 用 provider 默认）
         """
         hard_cap = self._resolve_max_tokens(model_name)
+        # "正文预算"（token 数）：provider 没配默认值时可能是 None
+        base: int | None
         if requested is not None:
             base = requested
         else:
@@ -268,7 +270,7 @@ class OpenAICompatClient:
             payload["max_tokens"] = effective_max_tokens
 
         if stream:
-            return self._stream_chat(payload)  # type: ignore[return-value]
+            return self._stream_chat(payload)
         return await self._non_stream_chat(payload)
 
     # ===================== 非流式 =====================

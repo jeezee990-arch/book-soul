@@ -88,6 +88,8 @@ def _intercept_std_logging(level: str) -> None:
 
     class _InterceptHandler(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
+            # loguru 的等级名（str）和标准 logging 的等级号（int）都能传给 .log()
+            level_no: str | int
             try:
                 level_no = logger.level(record.levelname).name
             except ValueError:

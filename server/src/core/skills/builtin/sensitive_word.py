@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..base import SkillResult
 
 # v1 内置词表（最小集）
@@ -67,7 +69,7 @@ class SensitiveWordSkill:
                 data={"has_sensitive": False, "matches": [], "checked": len(word_list)},
             )
 
-        matches: list[dict[str, int]] = []
+        matches: list[dict[str, Any]] = []
         for w in word_list:
             if not w:
                 continue
