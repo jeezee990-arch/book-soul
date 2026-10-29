@@ -4,7 +4,6 @@ import AppShell from "./components/app-shell";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Writing from "./pages/Writing";
 import NewBook from "./pages/NewBook";
-import Chat from "./pages/Chat";
 import Library from "./pages/Library";
 import Settings from "./pages/Settings";
 import { getBackendError, waitBackendReady } from "./api/backend";
@@ -21,8 +20,6 @@ import { getBackendError, waitBackendReady } from "./api/backend";
  * 路由（2026-10 UI 重设计）：6 个平铺页面收敛为 4 个 ——
  * 写作 / 开新书 / 素材库 / 设置。
  * 旧路径（/creation /quality /skills）保留重定向，避免书签与历史记录失效。
- *
- * 2026-10-25：新增第 5 个一级页面「聊天」（与模型探讨想法 + 项目管理）。
  */
 export default function App() {
   const [status, setStatus] = useState<"starting" | "ready" | "failed">("starting");
@@ -62,7 +59,6 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route path="/" element={<Writing />} />
             <Route path="/new" element={<NewBook />} />
-            <Route path="/chat" element={<Chat />} />
             <Route path="/library" element={<Library />} />
             <Route path="/settings" element={<Settings />} />
             {/* 旧路径兼容 */}

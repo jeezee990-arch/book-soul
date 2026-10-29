@@ -12,7 +12,6 @@ Phase 1.5：Inspiration
 from .base import Base, TimestampMixin
 from .chapter import CHAPTER_STATUSES, VERSION_TRIGGERS, Chapter, ChapterVersion
 from .character import CHARACTER_ROLES, Character, CharacterVersion
-from .chat import CHAT_ROLES, ChatConversation, ChatMessage, ChatProject
 from .inspiration import INSPIRATION_TYPES, Inspiration
 from .novel import Novel
 from .outline import OUTLINE_TYPES, Outline
@@ -32,8 +31,4 @@ __all__ = [
     "OUTLINE_TYPES",
     "Inspiration",
     "INSPIRATION_TYPES",
-    "ChatProject",
-    "ChatConversation",
-    "ChatMessage",
-    "CHAT_ROLES",
 ]

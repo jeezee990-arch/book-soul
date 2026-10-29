@@ -2,8 +2,7 @@
  * 应用外壳：52px 顶栏 + 56px 图标栏 + 内容区。
  *
  * 重设计要点（对比旧的 Layout.tsx）：
- * - 导航从 6 项平铺收敛为 5 项：写作 / 开新书 / 聊天 / 素材库 / 设置
- *   （2026-10-25 新增「聊天」：与模型探讨想法 + 项目管理）
+ * - 导航从 6 项平铺收敛为 4 项：写作 / 开新书 / 素材库 / 设置
  * - 顶栏承担**全局上下文**：作品切换器（全局唯一）+ 面包屑 + 模型状态灯
  * - 作品切换写入 workspaceStore 并持久化，跨页、跨启动都保持
  */
@@ -14,7 +13,6 @@ import {
   Moon,
   PenLine,
   Library,
-  MessagesSquare,
   Settings,
   Sparkles,
   Sun,
@@ -35,11 +33,10 @@ interface RailItem {
   end?: boolean;
 }
 
-/** 图标栏 5 项（顺序即使用频率） */
+/** 图标栏 4 项（顺序即使用频率） */
 const RAIL_ITEMS: RailItem[] = [
   { to: "/", label: "写作", icon: PenLine, end: true },
   { to: "/new", label: "开新书", icon: Sparkles },
-  { to: "/chat", label: "聊天", icon: MessagesSquare },
   { to: "/library", label: "素材库", icon: Library },
   { to: "/settings", label: "设置", icon: Settings },
 ];
