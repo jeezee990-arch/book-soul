@@ -19,6 +19,7 @@ from ..models.inspiration import INSPIRATION_TYPES
 
 _TYPE_MAX = 20
 _SOURCE_MAX = 500
+_TITLE_MAX = 200
 _TAG_MAX = 50
 _TAG_COUNT_MAX = 50  # 最多 50 个 tag
 
@@ -85,6 +86,11 @@ class InspirationBase(BaseModel):
         max_length=_TAG_COUNT_MAX,
         description="标签列表",
     )
+    title: str | None = Field(
+        default=None,
+        max_length=_TITLE_MAX,
+        description="自定义显示名；为空时前端按 content 派生摘要标签",
+    )
 
 
 class InspirationCreate(InspirationBase):
@@ -120,6 +126,8 @@ class InspirationUpdate(BaseModel):
     tags: list[str] | None = Field(default=None, max_length=_TAG_COUNT_MAX)
     content: dict[str, Any] | None = Field(default=None)
     novel_id: int | None = Field(default=None, gt=0)
+    title: str | None = Field(default=None, max_length=_TITLE_MAX, description="重命名用的显示名")
+    pinned: bool | None = Field(default=None, description="是否置顶")
 
 
 class InspirationRead(InspirationBase):
@@ -131,6 +139,39 @@ class InspirationRead(InspirationBase):
     novel_id: int | None
     content: dict[str, Any]
     created_at: datetime
+    pinned: bool
+    sort_order: int
+
+
+# ===== 素材库管理（2026-10-29）：批量删除 / 排序 =====
+
+
+class InspirationBatchDeleteRequest(BaseModel):
+    """批量删除请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[int] = Field(min_length=1, max_length=500, description="要删除的灵感 id 列表")
+
+
+class InspirationBatchDelete(BaseModel):
+    """批量删除结果。"""
+
+    deleted: int = Field(description="实际删除条数（不存在的 id 不计入）")
+
+
+class InspirationReorderRequest(BaseModel):
+    """排序请求：ids 为用户拖拽后的显示顺序。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[int] = Field(min_length=1, max_length=500, description="拖拽后的 id 顺序")
+
+
+class InspirationReorder(BaseModel):
+    """排序结果：按请求顺序返回更新后的灵感。"""
+
+    items: list[InspirationRead] = Field(description="按新顺序排列的灵感列表")
 
 
 # ===== Phase 3.3：剧情生成（不入库，仅生成） =====
@@ -222,4 +263,7 @@ class InspirationDetailRead(BaseModel):
     tags: list[str]
     content: dict[str, Any]
     created_at: datetime
+    title: str | None = None
+    pinned: bool = False
+    sort_order: int = 0
     novel: NovelContextSummary | None

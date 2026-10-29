@@ -6,6 +6,8 @@
 - GET    /inspirations/{id}             详情
 - PATCH  /inspirations/{id}             部分更新
 - DELETE /inspirations/{id}             删除（幂等）
+- POST   /inspirations/batch-delete     批量删除（2026-10-29 素材库管理）
+- POST   /inspirations/reorder          按新顺序重排（2026-10-29 素材库管理）
 - POST   /inspirations/generate-plot    Phase 3.3 剧情生成（不入库）
 - POST   /inspirations/generate-plot/stream  流式剧情生成（ndjson）
 
@@ -13,6 +15,9 @@
 - InspirationNotFoundError / NovelNotFoundError -> 404
 - InspirationValidationError -> 422
 - PlotGenerationError -> 500（LLM 失败）/ 422（参数错）
+
+注意：字面量路径（``/batch-delete``、``/reorder``）必须注册在 ``/{inspiration_id}``
+**之前**，否则会被 path param 吞掉。
 """
 
 from __future__ import annotations
@@ -23,8 +28,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas.inspiration import (
+    InspirationBatchDelete,
+    InspirationBatchDeleteRequest,
     InspirationCreate,
     InspirationRead,
+    InspirationReorder,
+    InspirationReorderRequest,
     InspirationUpdate,
     PlotGenerationRequest,
     PlotGenerationResponse,
@@ -35,9 +44,8 @@ from ..services.inspiration_service import (
     InspirationService,
     InspirationValidationError,
     NovelNotFoundError,
-    PlotGenerationError,
-    PlotService,
 )
+from ..services.plot_service import PlotGenerationError, PlotService
 from ._stream_helpers import ndjson_line, ndjson_response
 
 router = APIRouter(prefix="/inspirations", tags=["inspirations"])
@@ -90,6 +98,34 @@ async def list_inspirations(
     except InspirationValidationError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return [InspirationRead.model_validate(i) for i in inspirations]
+
+
+@router.post(
+    "/batch-delete",
+    response_model=InspirationBatchDelete,
+    summary="批量删除灵感（返回实际删除条数）",
+)
+async def batch_delete_inspirations(
+    payload: InspirationBatchDeleteRequest,
+    service: InspirationService = Depends(get_service),
+) -> InspirationBatchDelete:
+    """批量删除多条灵感；不存在的 id 自动忽略。"""
+    deleted = await service.batch_delete(payload.ids)
+    return InspirationBatchDelete(deleted=deleted)
+
+
+@router.post(
+    "/reorder",
+    response_model=InspirationReorder,
+    summary="按给定顺序重排灵感（sort_order = 下标）",
+)
+async def reorder_inspirations(
+    payload: InspirationReorderRequest,
+    service: InspirationService = Depends(get_service),
+) -> InspirationReorder:
+    """按用户拖拽后的顺序重排；返回按新顺序排列的灵感列表。"""
+    items = await service.reorder(payload.ids)
+    return InspirationReorder(items=[InspirationRead.model_validate(i) for i in items])
 
 
 @router.get(
@@ -304,5 +340,8 @@ async def get_inspiration_detail(
         tags=list(inspiration.tags or []),
         content=dict(inspiration.content or {}),
         created_at=inspiration.created_at,
+        title=inspiration.title,
+        pinned=bool(inspiration.pinned),
+        sort_order=int(inspiration.sort_order or 0),
         novel=novel_summary,
     )

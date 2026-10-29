@@ -31,6 +31,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.llm.streaming import KIND_THINK
+from ..core.llm.thinking import thinking_event
 from ..db import get_db
 from ..schemas.chapter import ChapterGenerateRequest, ChapterRewriteRequest
 from ..services.chapter_generator import (
@@ -79,8 +80,10 @@ async def _stream_chapter_generate(
             target_word_count=payload.target_word_count,
         ):
             if kind == KIND_THINK:
-                # 思考内容单独一路 —— 前端显示"模型思考中…"，不让界面空窗
-                yield _ndjson({"event": "thinking", "text": delta})
+                # 思考内容单独一路 —— 前端显示"模型思考中…"，不让界面空窗。
+                # ⚠️ 走 thinking_event 净身：模型的英文思考/代码不能漏给前端
+                #    （2026-10-29 用户实测图1）。
+                yield _ndjson(thinking_event(delta))
             else:
                 yield _ndjson({"text": delta})
         # 收尾帧
@@ -141,7 +144,7 @@ async def _stream_chapter_rewrite(
             user_prompt=payload.user_prompt,
         ):
             if kind == KIND_THINK:
-                yield _ndjson({"event": "thinking", "text": delta})
+                yield _ndjson(thinking_event(delta))
             else:
                 yield _ndjson({"text": delta})
         yield _ndjson({"done": True})

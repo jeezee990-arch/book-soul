@@ -137,3 +137,34 @@ class BaseLLMClient(Protocol):
     async def aclose(self) -> None:
         """关闭底层资源（httpx client 等）。"""
         ...
+
+
+class LLMClientLike(Protocol):
+    """LLM 客户端最小接口（**不含** ``aclose``）。
+
+    为什么比 :class:`BaseLLMClient` 宽松：业务模块（大纲生成等）只调 ``chat``，
+    生命周期由调用方（:mod:`src.core.llm.factory`）管；测试里的假客户端
+    也不会实现 ``aclose``。要"完整生命周期"的场景用 :class:`BaseLLMClient`。
+    """
+
+    provider: str
+
+    async def chat(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        stream: bool = False,
+    ) -> Any:
+        """发送聊天请求。
+
+        - ``stream=False``（默认）：返回完整 :class:`ChatResponse`
+        - ``stream=True``：返回 :class:`AsyncIterator[str]`，每次 yield 一个 delta 文本
+
+        返回类型写 ``Any`` 而不是联合类型：调用方要同时处理"流式迭代器"和
+        "完整响应"两种返回（用 ``getattr(resp, "content", "")`` 取正文更省事，
+        也不必在每个调用点写类型收窄）。
+        """
+        ...

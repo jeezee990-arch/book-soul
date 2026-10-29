@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
@@ -32,12 +31,8 @@ from ..core.llm.base import ChatMessage, describe_llm_error
 from ..core.llm.formatting import (
     extract_json_array,
     extract_yaml_block,
-    strip_thinking,
 )
-from ..core.llm.streaming import KIND_THINK, ThinkSplitter
 from ..core.paths import prompts_dir
-from ..core.queue_merge import merge_queue_events
-from ..core.skills import manager as skill_manager
 from ._character_helpers import (
     CharacterGenerationError,
     _LLMClientLike,
@@ -65,20 +60,6 @@ def _load_prompt(section: str) -> str:
     return str(data[section])
 
 
-class _CardQueueHandle:
-    """单张卡的流式句柄：内部 queue + producer task + name。
-
-    用于 ``stream_generate_from_outline`` 协调多张卡并行生成。
-    """
-
-    __slots__ = ("name", "q", "task")
-
-    def __init__(self, name: str, q: asyncio.Queue, task: asyncio.Task) -> None:
-        self.name = name
-        self.q = q
-        self.task = task
-
-
 class CharacterGenerator:
     """人物卡自动生成服务（Phase 3.5）。
 
@@ -98,6 +79,32 @@ class CharacterGenerator:
         self._llm_override = llm_client
         self._llm: _LLMClientLike | None = llm_client
 
+    # ===== 给流式模块用的公开访问口 =====
+    #
+    # 流式实现拆到了 :mod:`src.services.character_stream`（避免本文件超 500 行），
+    # 那边通过这几个属性访问本对象 —— 用公开属性而不是 ``_`` 私有字段，
+    # 是为了让"拆出去"这件事在类型层面就说得清楚。
+
+    @property
+    def llm(self) -> _LLMClientLike | None:
+        """当前 LLM 客户端（可能是 None）。"""
+        return self._llm
+
+    @llm.setter
+    def llm(self, value: _LLMClientLike | None) -> None:
+        """设置当前 LLM 客户端（流式路径用缓存单例时回填）。"""
+        self._llm = value
+
+    @property
+    def llm_override(self) -> _LLMClientLike | None:
+        """外部注入的客户端（测试用 mock；None = 用缓存单例）。"""
+        return self._llm_override
+
+    @staticmethod
+    def load_prompt(section: str) -> str:
+        """加载人物卡 prompt 模板（供流式模块复用同一份缓存）。"""
+        return _load_prompt(section)
+
     def _get_llm(self) -> _LLMClientLike:
         if self._llm is None:
             from ..core.llm import create_llm_client_for_scene
@@ -113,6 +120,10 @@ class CharacterGenerator:
                 await aclose()
             finally:
                 self._llm = None
+
+    async def release_llm(self, llm: _LLMClientLike, owns: bool) -> None:
+        """释放 LLM 客户端（流式模块用的公开入口）。"""
+        await self._release_llm(llm, owns)
 
     # ===== 主入口 =====
     async def generate_from_outline(
@@ -136,38 +147,48 @@ class CharacterGenerator:
         char_service = CharacterService(self.session)
         await char_service._ensure_novel_exists(novel_id)  # noqa: SLF001
 
-        # 2) Step 1：抽取人物列表
-        extracted = await self._extract_characters(outline)
-
-        if not extracted:
-            return {
-                "novel_id": novel_id,
-                "characters": [],
-                "provider": self._llm_provider_name(),
-                "model": self._llm_model_name(),
-            }
-
-        # 3) Step 2：并行生成每张卡
-        llm = self._llm
-        owns_client = self._llm_override is None and llm is not None
+        # 2) 取一次 LLM 客户端，抽取和生成卡**共用**它，最后统一释放。
+        #
+        # ⚠️ 2026-10-29 巡检抓到的真 bug：
+        #    旧代码里 ``_extract_characters`` 自己取客户端、用完在 finally 里
+        #    释放（``self._llm`` 置 None），而 Step 2 紧接着读 ``self._llm`` ——
+        #    生产路径（没有注入 mock 客户端）拿到的是 **None** →
+        #    ``None.chat(...)`` → AttributeError → 整条人物卡生成失败。
+        #    测试之所以没发现：所有用例都注入了 ``llm_client=mock``，
+        #    ``self._llm`` 一直是那个 mock，释放逻辑不会把它置空。
+        llm = self._llm if self._llm is not None else self._get_llm()
+        owns_client = self._llm_override is None
         try:
-            cards = await asyncio.gather(
-                *(
-                    self._generate_one_card(
-                        llm,
-                        name=item["name"],
-                        role=item["role"],
-                        genre=genre,
-                        outline=outline,
+            # 3) Step 1：抽取人物列表
+            extracted = await self._extract_characters(outline, llm)
+
+            if not extracted:
+                return {
+                    "novel_id": novel_id,
+                    "characters": [],
+                    "provider": self._llm_provider_name(),
+                    "model": self._llm_model_name(),
+                }
+
+            # 4) Step 2：并行生成每张卡
+            try:
+                cards = await asyncio.gather(
+                    *(
+                        self._generate_one_card(
+                            llm,
+                            name=item["name"],
+                            role=item["role"],
+                            genre=genre,
+                            outline=outline,
+                        )
+                        for item in extracted
                     )
-                    for item in extracted
                 )
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error("LLM call failed (character): {}", describe_llm_error(e))
-            raise CharacterGenerationError(describe_llm_error(e)) from e
+            except Exception as e:  # noqa: BLE001
+                logger.error("LLM call failed (character): {}", describe_llm_error(e))
+                raise CharacterGenerationError(describe_llm_error(e)) from e
         finally:
-            if owns_client and llm is not None:
+            if owns_client:
                 await self._release_llm(llm, owns=True)
 
         # 4) 入库（每张卡用 CharacterService.create，自动建初始版本）
@@ -201,25 +222,22 @@ class CharacterGenerator:
         }
 
     # ===== 内部：Step 1 抽取 =====
-    async def _extract_characters(self, outline: dict) -> list[dict[str, str]]:
-        """调 LLM 抽取人物列表；返回 ``[{"name": ..., "role": ...}, ...]``。"""
+    async def _extract_characters(self, outline: dict, llm: _LLMClientLike) -> list[dict[str, str]]:
+        """调 LLM 抽取人物列表；返回 ``[{"name": ..., "role": ...}, ...]``。
+
+        ⚠️ 客户端由调用方持有（:meth:`generate_from_outline` 统一取一次、统一释放）。
+        以前这里自己取自己放，抽取完把 ``self._llm`` 置成 None，
+        导致后面生成卡那一步拿到 None（生产路径必炸 —— 见上面的注释）。
+        """
         template = _load_prompt("extract_characters")
         outline_str = json.dumps(outline, ensure_ascii=False, indent=2)
         prompt = template.format(outline=outline_str)
 
-        llm = self._llm
-        owns_client = self._llm_override is None
-        if llm is None:
-            llm = self._get_llm()
-            owns_client = True
         try:
             resp = await llm.chat([ChatMessage("user", prompt)], temperature=0.5)
         except Exception as e:  # noqa: BLE001
             logger.error("LLM call failed (extract): {}", describe_llm_error(e))
             raise CharacterGenerationError(describe_llm_error(e)) from e
-        finally:
-            if owns_client:
-                await self._release_llm(llm, owns=True)
 
         raw = resp.content if isinstance(resp.content, str) else ""
         if not raw.strip():
@@ -304,244 +322,19 @@ class CharacterGenerator:
     ) -> AsyncIterator[dict[str, Any]]:
         """流式生成人物卡（边抽取边推 + 每张卡实时生成 + 入库）。
 
-        协议：
-        - ``{"event": "phase", "phase": "extract"}``
-        - ``{"event": "extract_delta", "text": "..."}``
-        - ``{"event": "extract_done", "characters": [{"name":..., "role":...}, ...]}``
-        - ``{"event": "card_start", "name": "...", "role": "..."}``
-        - ``{"event": "card_delta", "name": "...", "text": "..."}``
-        - ``{"event": "card_done", "name": "...", "id": <int>}``
-        - ``{"event": "done", "saved_count": n, "provider": "...", "model": "..."}``
-        - ``{"event": "error", "message": "..."}``
+        实现拆在 :mod:src.services.character_stream（避免本文件超 500 行），
+        这里只做一层薄封装，协议见那个模块的 docstring。
         """
-        if not isinstance(outline, dict):
-            yield {"event": "error", "message": "outline must be dict"}
-            return
-        if not genre:
-            yield {"event": "error", "message": "genre must be non-empty"}
-            return
+        from .character_stream import stream_generate_from_outline
 
-        char_service = CharacterService(self.session)
-        try:
-            await char_service._ensure_novel_exists(novel_id)  # noqa: SLF001
-        except Exception as e:  # noqa: BLE001
-            yield {"event": "error", "message": f"novel not found: {e}"}
-            return
-
-        # 流式版：使用缓存单例（不释放 → httpx 连接复用）
-        if self._llm_override is not None:
-            llm = self._llm_override
-            owns_client = True
-        else:
-            from ..core.llm import get_cached_llm_client
-
-            llm = get_cached_llm_client("character_generation")
-            self._llm = llm
-            owns_client = False
-        provider = str(getattr(llm, "provider", "unknown") or "unknown")
-        model = str(getattr(llm, "model", "") or "")
-
-        yield {"event": "phase", "phase": "extract"}
-        # 整个流程的计时起点（用户要求显示"当前模型耗时多少秒"）
-        t0 = time.monotonic()
-
-        # Step 1: 流式抽取人物
-        extracted: list[dict[str, str]] = []
-        try:
-            template = _load_prompt("extract_characters")
-            outline_str = json.dumps(outline, ensure_ascii=False, indent=2)
-            extra_block = ""
-            if user_extra.strip():
-                extra_block = f"\n\n【作者个人想法（请在生成时参考）】\n{user_extra.strip()}\n"
-            extract_prompt = template.format(outline=outline_str) + extra_block
-            full_text = ""
-            # 思考阶段用状态机拆出来 —— 思考期间不能一个字都不发
-            # （前端会显示"模型思考中…"而不是"卡住不动"）。
-            splitter = ThinkSplitter()
-            stream = await llm.chat(
-                [ChatMessage("user", extract_prompt)],
-                temperature=0.5,
-                stream=True,
-            )
-            async for delta in stream:  # type: ignore[attr-defined]
-                if not delta:
-                    continue
-                for kind, text in splitter.feed(delta):
-                    if kind == KIND_THINK:
-                        yield {"event": "thinking", "phase": "extract", "text": text}
-                        continue
-                    full_text += text
-                    yield {"event": "extract_delta", "text": text}
-            cleaned = strip_thinking(full_text)
-            if cleaned:
-                arr = extract_json_array(cleaned)
-                for item in arr:
-                    if not isinstance(item, dict):
-                        continue
-                    name = str(item.get("name", "")).strip()
-                    if not name:
-                        continue
-                    role = _normalize_role(str(item.get("role", "其他")))
-                    extracted.append({"name": name, "role": role})
-        except CharacterGenerationError as e:
-            yield {"event": "error", "message": str(e)}
-            if owns_client:
-                await self._release_llm(llm, owns=True)
-            return
-        except Exception as e:  # noqa: BLE001
-            yield {"event": "error", "message": describe_llm_error(e)}
-            if owns_client:
-                await self._release_llm(llm, owns=True)
-            return
-
-        if not extracted:
-            yield {"event": "done", "saved_count": 0, "provider": provider, "model": model}
-            if owns_client:
-                await self._release_llm(llm, owns=True)
-            return
-
-        yield {"event": "extract_done", "characters": extracted}
-
-        # Step 2: 并行流式生成每张卡；每个 card 用 queue 透出事件
-        yield {"event": "phase", "phase": "cards"}
-
-        # ⚠️ **写库必须串行**。
-        #    所有 card_runner 共用同一个 AsyncSession，而 AsyncSession 不是并发安全的 ——
-        #    两张卡同时 flush/commit 会抛 `InvalidRequestError: Session is already flushing`，
-        #    结果就是"4 张卡只存进去 1 张"（2026-10-24 实测复现）。
-        #    LLM 调用（最耗时的部分）保持并行，只把入库这一小段用锁串起来。
-        db_lock = asyncio.Lock()
-
-        async def card_runner(item: dict[str, str]) -> _CardQueueHandle:
-            """单卡流式生成 → 解析 → 入库。"""
-            q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-
-            async def produce() -> None:
-                try:
-                    await q.put({"event": "card_start", "name": item["name"], "role": item["role"]})
-                    full_text = ""
-                    splitter = ThinkSplitter()
-                    stream = await llm.chat(
-                        [
-                            ChatMessage(
-                                "user",
-                                self._build_card_prompt(
-                                    name=item["name"],
-                                    role=item["role"],
-                                    genre=genre,
-                                    outline=outline,
-                                    user_extra=user_extra,
-                                ),
-                            )
-                        ],
-                        temperature=0.7,
-                        stream=True,
-                    )
-                    async for delta in stream:  # type: ignore[attr-defined]
-                        if not delta:
-                            continue
-                        for kind, text in splitter.feed(delta):
-                            if kind == KIND_THINK:
-                                await q.put(
-                                    {
-                                        "event": "thinking",
-                                        "phase": "card",
-                                        "name": item["name"],
-                                        "text": text,
-                                    }
-                                )
-                                continue
-                            full_text += text
-                            await q.put(
-                                {
-                                    "event": "card_delta",
-                                    "name": item["name"],
-                                    "text": text,
-                                }
-                            )
-                    # 解析 + 入库
-                    cleaned = strip_thinking(full_text)
-                    # 自动调用 scene=character_generation 的 post-process skills
-                    post_cleaned = await skill_manager.apply_post("character_generation", cleaned)
-                    data = extract_yaml_block(post_cleaned)
-                    card = {
-                        "name": item["name"],
-                        "role": item["role"],
-                        "basic_info": _trim_to_str(data.get("basic_info")),
-                        "personality": _trim_to_str(data.get("personality")),
-                        "habits": _trim_to_str(data.get("habits")),
-                        "thinking": _trim_to_str(data.get("thinking")),
-                        "relationships": _trim_to_str(data.get("relationships")),
-                        "growth_arc": _trim_to_str(data.get("growth_arc")),
-                    }
-                    from ..schemas.character import CharacterCreate
-
-                    # 入库串行（见上面 db_lock 的说明）：共用一个 AsyncSession 不能并发写
-                    async with db_lock:
-                        character = await char_service.create(
-                            CharacterCreate(novel_id=novel_id, **card)
-                        )
-                    await q.put(
-                        {
-                            "event": "card_done",
-                            "name": item["name"],
-                            "id": character.id,
-                        }
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("card {} failed: {}", item["name"], describe_llm_error(e))
-                    await q.put(
-                        {
-                            "event": "error",
-                            "message": f"card {item['name']}: {describe_llm_error(e)}",
-                        }
-                    )
-                finally:
-                    await q.put(None)
-
-            task = asyncio.create_task(produce())
-            return _CardQueueHandle(name=item["name"], q=q, task=task)
-
-        handles = [await card_runner(item) for item in extracted]
-        # saved_count 按**实际存进去的张数**算（失败的卡不能算）
-        saved_count = 0
-        try:
-            async for payload in merge_queue_events([h.q for h in handles]):
-                if payload.get("event") == "card_done":
-                    saved_count += 1
-                yield payload
-        finally:
-            await asyncio.gather(*(h.task for h in handles), return_exceptions=True)
-            if owns_client:
-                await self._release_llm(llm, owns=True)
-
-        yield {
-            "event": "done",
-            "saved_count": saved_count,
-            "provider": provider,
-            "model": model,
-            # 耗时（用户明确要求："添加生成当前模型耗时多少秒"）
-            "elapsed_sec": round(time.monotonic() - t0, 2),
-        }
-
-    def _build_card_prompt(
-        self,
-        *,
-        name: str,
-        role: str,
-        genre: str,
-        outline: dict,
-        user_extra: str = "",
-    ) -> str:
-        """构造单卡 prompt（含 user_extra）。"""
-        template = _load_prompt("generate_card")
-        outline_ctx = json.dumps(outline, ensure_ascii=False)
-        if len(outline_ctx) > 2000:
-            outline_ctx = outline_ctx[:2000] + "\n... (truncated)"
-        prompt = template.format(name=name, role=role, genre=genre, outline_context=outline_ctx)
-        if user_extra.strip():
-            prompt += f"\n\n【作者个人想法（参考即可）】\n{user_extra.strip()}\n"
-        return prompt
+        async for event in stream_generate_from_outline(
+            self,
+            novel_id,
+            outline,
+            genre=genre,
+            user_extra=user_extra,
+        ):
+            yield event
 
 
 __all__ = [

@@ -143,6 +143,7 @@ def test_sanitize_keeps_suspense_hook_only_for_semi_open() -> None:
 
 
 def test_merge_details_uses_skeleton_for_missing_volume() -> None:
+    """失败的卷 → 补**占位概要**，不留"只有标题"的空章节（需求7）。"""
     skeleton = {
         "volumes": [
             {"name": "第一卷", "chapters": [{"title": "A"}]},
@@ -154,9 +155,10 @@ def test_merge_details_uses_skeleton_for_missing_volume() -> None:
     )
     assert merged["volumes"][0]["chapters"][0]["summary"] == "概要A"
     assert merged["volumes"][0]["chapters"][0]["key_events"] == ["x"]
-    # 第二卷没补上 → 保留骨架原样
+    # 第二卷没补上 → 占位概要（标注"待细化"），但**标题保留**
     assert merged["volumes"][1]["chapters"][0]["title"] == "B"
-    assert "summary" not in merged["volumes"][1]["chapters"][0]
+    assert "待细化" in merged["volumes"][1]["chapters"][0]["summary"]
+    assert merged["volumes"][1]["chapters"][0]["key_events"] == []
 
 
 def test_merge_details_keeps_title_from_skeleton() -> None:

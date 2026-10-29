@@ -1,5 +1,5 @@
 /**
- * 写作页右栏的小型复用 UI（字段、段落标题、分段控件、提示条、流式输出框）。
+ * 写作页右栏的小型复用 UI（字段、段落标题、提示条、流式输出框）。
  *
  * 单独抽出来是因为 6 个 Tab 都在用同样的排版节奏，
  * 内联复制会让每个 Tab 都多出 30 行样式代码。
@@ -8,44 +8,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-/** 分段控件（单选）。 */
-export function SegmentedControl<T extends string>({
-  value,
-  options,
-  onChange,
-  className,
-}: {
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (v: T) => void;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex gap-0.5 rounded-lg border border-neutral-200 bg-neutral-50 p-0.5 dark:border-neutral-800 dark:bg-neutral-800/40",
-        className,
-      )}
-    >
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          onClick={() => onChange(o.value)}
-          className={cn(
-            "flex-1 rounded-md px-1.5 py-1.5 text-[11.5px] transition-colors",
-            value === o.value
-              ? "bg-white font-medium text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-50"
-              : "text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200",
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** 表单字段（标签 + 内容）。 */
 export function Field({

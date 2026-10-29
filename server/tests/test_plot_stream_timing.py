@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from src.services.inspiration_service import PlotService
+from src.services.plot_service import PlotService
 
 
 class _StreamMockLLM:

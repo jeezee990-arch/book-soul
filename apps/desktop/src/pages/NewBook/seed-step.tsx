@@ -6,11 +6,12 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Library, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { wordbanksApi } from "@/api/wordbanks";
 import { GENRE_DESC, GENRE_PRIORITY, type GenreDef } from "@/config/genres";
 import { fetchRandomBatch } from "./wordbank";
+import WordbankManagerDialog from "./wordbank-manager-dialog";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -34,6 +35,7 @@ export default function SeedStep({
   const [categories, setCategories] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [managerOpen, setManagerOpen] = useState(false);
 
   /** 拉首批候选（切题材时） */
   const fetchInitial = useCallback(async (g: GenreDef) => {
@@ -181,15 +183,25 @@ export default function SeedStep({
                 点选加入上方
               </span>
             </h3>
-            <button
-              type="button"
-              onClick={() => void refresh()}
-              disabled={loading || categories.length === 0}
-              className="inline-flex items-center gap-1 text-[11.5px] text-neutral-400 transition-colors hover:text-neutral-700 disabled:opacity-40 dark:hover:text-neutral-200"
-            >
-              <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
-              刷新
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setManagerOpen(true)}
+                className="inline-flex items-center gap-1 text-[11.5px] text-neutral-400 transition-colors hover:text-neutral-700 dark:hover:text-neutral-200"
+              >
+                <Library className="h-3 w-3" />
+                种子库管理
+              </button>
+              <button
+                type="button"
+                onClick={() => void refresh()}
+                disabled={loading || categories.length === 0}
+                className="inline-flex items-center gap-1 text-[11.5px] text-neutral-400 transition-colors hover:text-neutral-700 disabled:opacity-40 dark:hover:text-neutral-200"
+              >
+                <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+                刷新
+              </button>
+            </div>
           </div>
           <div className="flex min-h-[62px] flex-wrap gap-1.5 rounded-lg border border-dashed border-neutral-200 p-3 dark:border-neutral-800">
             {loading && candidates.length === 0 ? (
@@ -221,6 +233,14 @@ export default function SeedStep({
           </div>
         </section>
       ) : null}
+
+      {/* 种子库管理弹窗（改动后立刻刷新候选词） */}
+      <WordbankManagerDialog
+        open={managerOpen}
+        onOpenChange={setManagerOpen}
+        genreId={genre?.id ?? null}
+        onChanged={() => void refresh()}
+      />
     </div>
   );
 }

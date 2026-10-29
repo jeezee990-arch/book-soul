@@ -10,18 +10,19 @@ import { Sparkles, X } from "lucide-react";
 import type { Chapter, Novel } from "@/lib/types";
 import type { ChapterStreamApi } from "../use-chapter-stream";
 import type { PanelTab } from "../types";
-import { Field, HintBar, SegmentedControl, StreamBox, ThinkingBox, panelInputClass } from "../ui";
+import { Field, HintBar, StreamBox, ThinkingBox, panelInputClass } from "../ui";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-/** 目标字数档位（1k-8k，硬上限来自 config/llm.yaml 的 chapter_limits）。 */
-const WORD_OPTIONS = [
-  { value: "1000", label: "1k" },
-  { value: "2000", label: "2k" },
-  { value: "4000", label: "4k" },
-  { value: "6000", label: "6k" },
-  { value: "8000", label: "8k" },
-];
+/**
+ * 目标字数范围（硬上限来自 config/llm.yaml 的 chapter_limits）。
+ *
+ * 2026-10-29 需求3：原来是 1k/2k/4k/6k/8k 五个固定档位，
+ * 想取 3500 字只能选 4000 —— 改成**滑动条**，1000~8000 连续可调、步进 100。
+ */
+const WORD_MIN = 1000;
+const WORD_MAX = 8000;
+const WORD_STEP = 100;
 
 interface Props {
   novel: Novel | null;
@@ -31,11 +32,10 @@ interface Props {
 }
 
 export default function GenerateTab({ novel, chapter, stream, onSwitchTab }: Props) {
-  const [target, setTarget] = useState("4000");
+  const [targetNum, setTargetNum] = useState(4000);
   const [prompt, setPrompt] = useState("");
 
   const busy = stream.generating || stream.rewriting;
-  const targetNum = Number(target);
 
   if (!chapter) {
     return (
@@ -82,12 +82,23 @@ export default function GenerateTab({ novel, chapter, stream, onSwitchTab }: Pro
           </div>
         ) : null}
 
-        <Field label="目标字数" hint="上限 8k">
-          <SegmentedControl
-            value={target}
-            options={WORD_OPTIONS}
-            onChange={setTarget}
-          />
+        <Field label="目标字数" hint={`${WORD_MIN}~${WORD_MAX} 字`}>
+          <div className="flex items-center gap-2.5">
+            <input
+              type="range"
+              min={WORD_MIN}
+              max={WORD_MAX}
+              step={WORD_STEP}
+              value={targetNum}
+              disabled={busy}
+              aria-label="目标字数"
+              onChange={(e) => setTargetNum(Number(e.target.value))}
+              className="h-1.5 w-full min-w-0 cursor-pointer rounded-full bg-neutral-200 accent-violet-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-neutral-700"
+            />
+            <span className="w-[62px] shrink-0 text-right font-mono text-[12px] font-medium text-violet-500">
+              {targetNum.toLocaleString()}
+            </span>
+          </div>
         </Field>
 
         <Field label="本章要点" hint="选填">

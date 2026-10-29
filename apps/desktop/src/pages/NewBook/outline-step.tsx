@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useRef } from "react";
-import { Check, Loader2, TriangleAlert } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import type { CharProgress, GenStats, NovelState } from "./types";
 import type { OutlineVolumeStatus } from "@/stores/newbook-store";
 import OutlineStructureView from "./outline-structure-view";
@@ -23,6 +23,23 @@ import type { OutlineMode } from "./outline-mode-picker";
 import { isNearBottom, scrollToBottom } from "@/lib/auto-scroll";
 import { checkOutlineCoverage, coveragePercent } from "@/lib/consistency";
 import { cn } from "@/lib/utils";
+
+/**
+ * 卷标签的配色：**蓝 / 绿交替**（2026-10-29 需求2）。
+ *
+ * 之前卷之间用 ⚠ 警告三角形当分割符 —— 一眼看去像"这里出错了"，
+ * 其实只是"这一卷还没细化完"。现在改成按卷序号交替蓝绿，
+ * 状态改用**小圆点 / 文字**表达（进行中 = 转圈，失败 = 空心圈 + "失败"字样）。
+ */
+const VOLUME_TONES = [
+  { chip: "bg-sky-500/15 text-sky-600 dark:text-sky-300", dot: "bg-sky-500" },
+  { chip: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300", dot: "bg-emerald-500" },
+] as const;
+
+/** 取第 index 个卷的配色（蓝绿交替）。 */
+function volumeTone(index: number) {
+  return VOLUME_TONES[index % VOLUME_TONES.length];
+}
 
 interface Props {
   /** 当前阶段 */
@@ -218,28 +235,31 @@ export default function OutlineStep({
         {volumeRows.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5 border-t border-neutral-200/70 px-3.5 py-2 dark:border-neutral-800/70">
             <span className="text-[10.5px] text-neutral-400">细化各卷</span>
-            {volumeRows.map((v) => (
-              <span
-                key={v.index}
-                className={cn(
-                  "inline-flex max-w-[180px] items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px]",
-                  v.status === "done"
-                    ? "bg-emerald-500/15 text-emerald-500"
-                    : v.status === "error"
-                      ? "bg-rose-500/15 text-rose-500"
-                      : "bg-violet-500/15 text-violet-400",
-                )}
-              >
-                {v.status === "done" ? (
-                  <Check className="h-2.5 w-2.5 shrink-0" />
-                ) : v.status === "error" ? (
-                  <TriangleAlert className="h-2.5 w-2.5 shrink-0" />
-                ) : (
-                  <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
-                )}
-                <span className="truncate">{v.name}</span>
-              </span>
-            ))}
+            {volumeRows.map((v) => {
+              const tone = volumeTone(v.index);
+              return (
+                <span
+                  key={v.index}
+                  className={cn(
+                    "inline-flex max-w-[180px] items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px]",
+                    tone.chip,
+                  )}
+                >
+                  {/* 状态用小圆点表达 —— 不用 ⚠ 警告符号（需求2） */}
+                  {v.status === "done" ? (
+                    <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", tone.dot)} />
+                  ) : v.status === "error" ? (
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full border border-current" />
+                  ) : (
+                    <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin opacity-70" />
+                  )}
+                  <span className="truncate">{v.name}</span>
+                  {v.status === "error" ? (
+                    <span className="shrink-0 opacity-80">失败</span>
+                  ) : null}
+                </span>
+              );
+            })}
           </div>
         ) : null}
 

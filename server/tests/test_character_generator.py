@@ -274,6 +274,45 @@ def test_extract_yaml_block_no_fence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_generate_from_outline_without_injected_client(
+    db_initialized: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """生产路径（**不注入** mock 客户端）必须也能跑通。
+
+    ⚠️ 2026-10-29 巡检抓到的真 bug：
+    旧实现里 ``_extract_characters`` 自己取客户端、用完在 finally 里把
+    ``self._llm`` 置成 None；Step 2 紧接着读 ``self._llm`` 拿到 **None** →
+    ``None.chat(...)`` → AttributeError → 人物卡生成整体失败。
+
+    之前没被发现，是因为所有用例都注入了 ``llm_client=mock``，
+    ``self._llm`` 一直是那个 mock，释放逻辑不会把它置空。
+    这个用例**不注入**客户端，只替换 ``_get_llm`` —— 复现生产路径。
+    """
+    from src.models.novel import Novel
+    from src.services.character_generator import CharacterGenerator
+
+    async with _session() as session:
+        novel = Novel(name="生产路径", genre="修仙")
+        session.add(novel)
+        await session.commit()
+        await session.refresh(novel)
+        novel_id = novel.id
+
+    mock = _make_mock_llm()
+    monkeypatch.setattr(CharacterGenerator, "_get_llm", lambda self: mock)
+
+    async with _session() as session:
+        gen = CharacterGenerator(session)  # ← 不注入 llm_client
+        result = await gen.generate_from_outline(
+            novel_id=novel_id,
+            outline={"outline_type": "complete", "volumes": []},
+            genre="修仙",
+        )
+
+    assert result["characters"], "生产路径应该真的生成出人物卡"
+
+
+@pytest.mark.asyncio
 async def test_generate_from_outline_creates_characters(
     db_initialized: Path,
 ) -> None:

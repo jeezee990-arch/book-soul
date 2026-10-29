@@ -107,6 +107,8 @@ htmlcov/
 # 用户上传的待扫描小说
 imports/
 uploads/
+# 词库管理写盘前的自动备份（config/wordbanks/.backup/）
+config/wordbanks/.backup/
 
 # ===== 临时 smoke test =====
 server/tests/_smoke_*.py

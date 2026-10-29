@@ -15,16 +15,19 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from functools import lru_cache
 from pathlib import Path
 
 __all__ = [
     "config_dir",
+    "data_dir",
     "genres_dir",
     "is_frozen",
     "prompts_dir",
     "repo_root",
+    "user_wordbanks_dir",
     "wordbanks_dir",
 ]
 
@@ -71,5 +74,47 @@ def genres_dir() -> Path:
 
 
 def wordbanks_dir() -> Path:
-    """词库目录（config/wordbanks/）。"""
+    """词库目录（config/wordbanks/）。
+
+    环境变量 ``BOOK_SOUL_WORDBANK_DIR`` 可覆盖（测试隔离 / 特殊部署用）。
+    """
+    override = os.environ.get("BOOK_SOUL_WORDBANK_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
     return config_dir() / "wordbanks"
+
+
+def data_dir() -> Path:
+    """可写数据目录。
+
+    - 环境变量 ``BOOK_SOUL_DATA_DIR`` 优先（桌面端 sidecar 一定会传）
+    - 打包态回落：exe 同级 ``data/``（便携模式）
+    - 开发态回落：``<repo>/data/dev``
+
+    每次调用都重新读环境变量（不缓存）—— 测试里改 env 能立刻生效。
+    """
+    override = os.environ.get("BOOK_SOUL_DATA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    if is_frozen():
+        return Path(sys.executable).resolve().parent / "data"
+    return repo_root() / "data" / "dev"
+
+
+def user_wordbanks_dir() -> Path:
+    """**用户可写**的词库目录（词库管理的写盘目标）。
+
+    为什么需要它：打包态下 ``config/`` 被 PyInstaller 打进了 exe（``sys._MEIPASS``），
+    那是只读的临时目录 —— 往里写词，重启就没了。所以：
+
+    - 打包态：``<data_dir>/wordbanks``（exe 同级 data/，随文件夹迁移）
+    - 开发态：``config/wordbanks``（仓库里的真实词库文件，改了能进 git）
+
+    环境变量 ``BOOK_SOUL_WORDBANK_DIR`` 优先（与 :func:`wordbanks_dir` 一致）。
+    """
+    override = os.environ.get("BOOK_SOUL_WORDBANK_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    if is_frozen():
+        return data_dir() / "wordbanks"
+    return wordbanks_dir()

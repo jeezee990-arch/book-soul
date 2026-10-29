@@ -30,10 +30,44 @@ export interface StreamError {
  * ⚠️ 思考内容**不能丢**（AGENTS.md §4.7）：推理模型先吐好几秒 ``<think>``
  * 再写正文，丢掉思考 → 前端一个字都收不到 → 用户看到"生成卡住不动"。
  * 章节生成 / 重写 / 剧情 / 大纲都走这个事件。
+ *
+ * ⚠️ ``text`` 一定是**纯中文**（2026-10-29 新增）：后端在转发前过了
+ * 一道净身器（``server/src/core/llm/thinking.py``），把模型思考里的英文
+ * 单词与代码痕迹删掉，只留中文。用户实测反馈过"卡片里流出英文规划文字"。
  */
 export interface StreamThinking {
   event: "thinking";
   text: string;
+  /**
+   * 思考内容被净身清空（模型想的是英文/代码）—— ``text`` 是空串，
+   * 但思考**仍在进行**。前端要用 {@link THINKING_PLACEHOLDER} 顶上，
+   * 否则"模型思考中…"的提示会整个消失，界面看着像卡死。
+   */
+  dirty?: boolean;
+}
+
+/**
+ * 思考内容被净身清空时用来顶替的占位符（纯中文，不泄漏任何原文）。
+ */
+export const THINKING_PLACEHOLDER = "正在思考……";
+
+/**
+ * 累加一段思考内容，必要时用 {@link THINKING_PLACEHOLDER} 顶上。
+ *
+ * 后端会把模型思考里的英文/代码净身成空串（2026-10-29）—— 这时不能什么都不显示，
+ * 否则"模型思考中…"的提示整个消失，界面看着像卡死（AGENTS.md §4.7 踩过的坑）。
+ *
+ * 后来有干净中文时，**把占位符换掉**（而不是接在占位符后面），
+ * 免得出现"正在思考……构思冲突"这种拼接怪。
+ *
+ * @param current 已累积的思考文本
+ * @param piece 本次新增的片段（可能已被净身成空串）
+ * @returns 新的累积文本
+ */
+export function appendThinking(current: string, piece: string): string {
+  if (!piece) return current || THINKING_PLACEHOLDER;
+  const base = current === THINKING_PLACEHOLDER ? "" : current;
+  return base + piece;
 }
 
 export type StreamEvent = StreamDelta | StreamDone | StreamError | StreamThinking;

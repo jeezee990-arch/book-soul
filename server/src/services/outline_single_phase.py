@@ -26,6 +26,7 @@ from ..core.llm.base import ChatMessage, describe_llm_error
 from ..core.llm.formatting import extract_json_object, strip_thinking
 from ..core.llm.partial_json import parse_partial_json
 from ..core.llm.streaming import KIND_THINK, ThinkSplitter
+from ..core.llm.thinking import thinking_event
 from .outline_errors import OutlineGenerationError
 
 __all__ = ["stream_single_phase"]
@@ -107,7 +108,7 @@ async def stream_single_phase(
                 continue
             for kind, text in splitter.feed(delta):
                 if kind == KIND_THINK:
-                    yield {"event": "thinking", "text": text}
+                    yield thinking_event(text)
                     continue
                 full_text += text
                 if first_delta_at is None:

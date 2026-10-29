@@ -22,6 +22,7 @@ vi.mock("../backend", () => ({
 }));
 
 import {
+  appendThinking,
   detectStreamFailure,
   isStreamDone,
   isStreamError,
@@ -29,6 +30,7 @@ import {
   parseOutlineStreamEvent,
   readNdjsonStream,
   streamRequestToOptions,
+  THINKING_PLACEHOLDER,
   type StreamEvent,
 } from "../streams";
 
@@ -372,5 +374,33 @@ describe("readNdjsonStream", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe('{"k":"v"}');
     expect((init.headers as Record<string, string>).Accept).toBe("application/x-ndjson");
+  });
+});
+
+/**
+ * 思考内容的"中文化净身"在前端的配合（2026-10-29）。
+ *
+ * 后端会把模型思考里的英文/代码净身成**空串**。前端不能因此什么都不显示 ——
+ * "模型思考中…"的提示一消失，界面就看着像卡死（AGENTS.md §4.7 踩过的坑）。
+ */
+describe("appendThinking", () => {
+  it("空片段且没有累积内容 → 用占位符顶上", () => {
+    expect(appendThinking("", "")).toBe(THINKING_PLACEHOLDER);
+  });
+
+  it("空片段但已有内容 → 保持原样（不重复堆占位符）", () => {
+    expect(appendThinking("构思冲突", "")).toBe("构思冲突");
+  });
+
+  it("有中文片段 → 正常累加", () => {
+    expect(appendThinking("构思", "冲突")).toBe("构思冲突");
+  });
+
+  it("占位符后来了中文 → 换掉占位符而不是拼接", () => {
+    expect(appendThinking(THINKING_PLACEHOLDER, "构思冲突")).toBe("构思冲突");
+  });
+
+  it("占位符本身是纯中文（不泄漏英文）", () => {
+    expect(/[A-Za-z]/.test(THINKING_PLACEHOLDER)).toBe(false);
   });
 });

@@ -51,7 +51,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.llm.base import ChatMessage, ChatResponse, describe_llm_error
+from ..core.llm.base import ChatMessage, describe_llm_error
 from ..core.llm.formatting import extract_json_object, strip_thinking
 from ..core.outline_scale import normalize_scale
 from ..core.paths import prompts_dir
@@ -103,7 +103,7 @@ class _LLMClientLike(Protocol):
         temperature: float = 0.7,
         max_tokens: int | None = None,
         stream: bool = False,
-    ) -> ChatResponse: ...
+    ) -> Any: ...
 
 
 class OutlineGenerator:

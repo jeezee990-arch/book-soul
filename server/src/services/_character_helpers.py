@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from ..core.llm.base import ChatMessage, ChatResponse
+from ..core.llm.base import ChatMessage
 from ..models.character import CHARACTER_ROLES
 
 
@@ -16,7 +16,12 @@ class CharacterGenerationError(Exception):
 
 
 class _LLMClientLike(Protocol):
-    """LLM 客户端最小接口（用于注入和 mock）。"""
+    """LLM 客户端最小接口（用于注入和 mock）。
+
+    返回类型写 ``Any``：真实客户端（:class:`src.core.llm.base.BaseLLMClient`）
+    的 ``chat`` 在流式/非流式下返回两种东西，业务代码要同时处理，
+    写死成 ``ChatResponse`` 会让真实客户端"不满足协议"。
+    """
 
     provider: str
 
@@ -28,7 +33,7 @@ class _LLMClientLike(Protocol):
         temperature: float = 0.7,
         max_tokens: int | None = None,
         stream: bool = False,
-    ) -> ChatResponse: ...
+    ) -> Any: ...
 
 
 def _normalize_role(role: str) -> str:

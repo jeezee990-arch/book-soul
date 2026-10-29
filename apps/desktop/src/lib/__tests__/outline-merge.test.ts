@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { mergeVolumeIntoStructure } from "../outline-merge";
+import { mergeVolumeIntoStructure, fillPendingChapters } from "../outline-merge";
 
 const skeleton = {
   volumes: [
@@ -51,5 +51,38 @@ describe("mergeVolumeIntoStructure", () => {
   it("下标越界时原样返回", () => {
     const merged = mergeVolumeIntoStructure(skeleton, 9, { chapters: [] });
     expect(merged).toBe(skeleton);
+  });
+});
+
+/**
+ * 需求7：失败的卷不能只剩标题 —— 流式阶段就要补占位概要，
+ * 与后端 merge_volume_details 保持一致。
+ */
+describe("fillPendingChapters", () => {
+  it("给没有概要的章节补占位（标注待细化）", () => {
+    const merged = fillPendingChapters(skeleton, 1);
+    const volumes = merged.volumes as { chapters: Record<string, unknown>[] }[];
+    expect(volumes[1].chapters[0].summary).toContain("待细化");
+    expect(volumes[1].chapters[0].title).toBe("C");
+    expect(volumes[1].chapters[0].key_events).toEqual([]);
+  });
+
+  it("已经有概要的章节不被覆盖", () => {
+    const withSummary = {
+      volumes: [{ name: "第一卷", chapters: [{ title: "A", summary: "已有概要" }] }],
+    };
+    const merged = fillPendingChapters(withSummary, 0);
+    const volumes = merged.volumes as { chapters: Record<string, unknown>[] }[];
+    expect(volumes[0].chapters[0].summary).toBe("已有概要");
+  });
+
+  it("不修改入参", () => {
+    fillPendingChapters(skeleton, 0);
+    const volumes = skeleton.volumes as { chapters: Record<string, unknown>[] }[];
+    expect(volumes[0].chapters[0].summary).toBeUndefined();
+  });
+
+  it("下标越界时原样返回", () => {
+    expect(fillPendingChapters(skeleton, 9)).toBe(skeleton);
   });
 });

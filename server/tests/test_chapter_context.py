@@ -157,6 +157,135 @@ async def test_get_chapter_outline_from_structure(db_initialized: Path) -> None:
     assert "主角觉醒血脉" in text
 
 
+# ===== 需求7：两阶段大纲的 volumes[].chapters[] 嵌套结构 =====
+
+
+@pytest.mark.asyncio
+async def test_get_chapter_outline_from_volumes_structure(db_initialized: Path) -> None:
+    """两阶段大纲的章在**卷里面** —— 必须能按位置找到本章（需求7 的核心）。
+
+    旧实现只找顶层 key（chapters / chapter_list / outlines / scenes），
+    对 ``volumes[].chapters[]`` 永远找不到 → 章节生成退化成"塞整份 JSON"，
+    正文完全没按本章大纲走。
+    """
+    from src.db import SessionLocal
+    from src.models.chapter import Chapter
+    from src.models.outline import Outline
+    from src.schemas.novel import NovelCreate
+    from src.services.novel_service import NovelService
+
+    structure = {
+        "volumes": [
+            {
+                "name": "第一卷 觉醒",
+                "summary": "主角觉醒。",
+                "chapters": [
+                    {"title": "第一章 废柴", "summary": "主角被逐出宗门", "key_events": ["被逐"]},
+                    {
+                        "title": "第二章 血脉",
+                        "summary": "主角觉醒血脉",
+                        "key_events": ["觉醒", "反击"],
+                    },
+                ],
+            },
+            {
+                "name": "第二卷 宗门",
+                "summary": "入宗。",
+                "chapters": [
+                    {"title": "第三章 入宗", "summary": "主角拜入宗门", "key_events": ["拜师"]},
+                ],
+            },
+        ]
+    }
+
+    async with SessionLocal() as session:
+        novel = await NovelService(session).create(NovelCreate(name="两阶段", genre="xuanhuan"))
+        outline = Outline(novel_id=novel.id, outline_type="complete", structure=structure)
+        session.add(outline)
+        await session.flush()
+        chapter = Chapter(novel_id=novel.id, chapter_number=3, title="第三章", status="outline")
+        session.add(chapter)
+        await session.commit()
+
+    async with SessionLocal() as session:
+        ch = await session.get(Chapter, chapter.id)
+        o = await session.get(Outline, outline.id)
+        text = await get_chapter_outline(session, ch, o)
+    # 第 3 章在第二卷 → 位置推断
+    assert "主角拜入宗门" in text
+    assert "第二卷 宗门" in text
+    assert "拜师" in text
+    # 不能把整份 JSON 塞进来
+    assert '"volumes"' not in text
+
+
+@pytest.mark.asyncio
+async def test_get_chapter_outline_volumes_respects_explicit_number(
+    db_initialized: Path,
+) -> None:
+    """章节条目带显式章号时，优先按章号匹配。"""
+    from src.db import SessionLocal
+    from src.models.chapter import Chapter
+    from src.models.outline import Outline
+    from src.schemas.novel import NovelCreate
+    from src.services.novel_service import NovelService
+
+    structure = {
+        "volumes": [
+            {
+                "name": "第一卷",
+                "chapters": [
+                    {"number": 1, "title": "第一章", "summary": "甲"},
+                    {"number": 5, "title": "第五章", "summary": "乙"},
+                ],
+            }
+        ]
+    }
+
+    async with SessionLocal() as session:
+        novel = await NovelService(session).create(NovelCreate(name="显式章号", genre="xuanhuan"))
+        outline = Outline(novel_id=novel.id, outline_type="complete", structure=structure)
+        session.add(outline)
+        await session.flush()
+        chapter = Chapter(novel_id=novel.id, chapter_number=5, title="第五章", status="outline")
+        session.add(chapter)
+        await session.commit()
+
+    async with SessionLocal() as session:
+        ch = await session.get(Chapter, chapter.id)
+        o = await session.get(Outline, outline.id)
+        text = await get_chapter_outline(session, ch, o)
+    assert "乙" in text
+    assert "甲" not in text
+
+
+def test_format_outline_is_readable_chinese_not_json() -> None:
+    """整体大纲进 prompt 时必须是**可读中文**，不是英文 JSON（需求1/需求7）。"""
+    from src.models.outline import Outline
+
+    o = Outline(
+        id=1,
+        novel_id=1,
+        outline_type="complete",
+        structure={
+            "volumes": [
+                {
+                    "name": "第一卷 觉醒",
+                    "summary": "主角觉醒血脉。",
+                    "chapters": [{"title": "第一章 废柴", "summary": "被逐出宗门"}],
+                }
+            ],
+            "overall_theme": "逆袭",
+        },
+    )
+    out = format_outline(o)
+    assert "第一卷 觉醒" in out
+    assert "被逐出宗门" in out
+    # 不能出现 JSON 结构
+    assert '"volumes"' not in out
+    assert "{" not in out
+
+
 @pytest.mark.asyncio
 async def test_get_chapter_outline_fallback_to_field(db_initialized: Path) -> None:
     """outline 为空 / structure 里没匹配项时，用 chapter.outline 字段。"""

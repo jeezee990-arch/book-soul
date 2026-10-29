@@ -24,7 +24,9 @@ import yaml
 from loguru import logger
 
 from src.core.llm.base import ChatMessage, ChatResponse
-from src.services.inspiration_service import (
+
+# PlotService 已从 inspiration_service 拆到 plot_service（单文件 ≤500 行约束）
+from src.services.plot_service import (
     PlotGenerationError,
     PlotService,
     _load_prompt,
@@ -53,7 +55,7 @@ def _clear_prompt_cache() -> None:
     """每个测试都 reload module + 清缓存，避免 conftest.temp_db 卸 src.* 后的污染。"""
     import importlib
 
-    import src.services.inspiration_service as _svc
+    import src.services.plot_service as _svc
 
     importlib.reload(_svc)
     _svc.PlotService.clear_prompt_cache()
@@ -157,7 +159,7 @@ def test_load_prompt_missing_file_raises(tmp_path: Path) -> None:
     """
     import importlib
 
-    import src.services.inspiration_service as _svc
+    import src.services.plot_service as _svc
 
     importlib.reload(_svc)
     _svc._PROMPTS_DIR = tmp_path  # type: ignore[attr-defined]
@@ -213,7 +215,7 @@ async def test_generate_uses_real_prompt_template(mock_llm: AsyncMock, tmp_path:
     )
     import importlib
 
-    import src.services.inspiration_service as _svc
+    import src.services.plot_service as _svc
 
     importlib.reload(_svc)
     _svc._PROMPTS_DIR = tmp_path  # type: ignore[attr-defined]
@@ -231,7 +233,7 @@ async def test_generate_uses_real_prompt_template(mock_llm: AsyncMock, tmp_path:
 
 
 def test_strip_thinking_removes_block() -> None:
-    from src.services.inspiration_service import _strip_thinking
+    from src.services.plot_service import _strip_thinking
 
     raw = "<think>The user wants X. Let me think.\n思路\n</think>\n\n这是最终剧情。主角是 X。"
     out = _strip_thinking(raw)
@@ -241,14 +243,14 @@ def test_strip_thinking_removes_block() -> None:
 
 
 def test_strip_thinking_passthrough_when_no_block() -> None:
-    from src.services.inspiration_service import _strip_thinking
+    from src.services.plot_service import _strip_thinking
 
     raw = "直接是正文，没有 think 块。"
     assert _strip_thinking(raw) == raw
 
 
 def test_strip_thinking_handles_multiple_blocks() -> None:
-    from src.services.inspiration_service import _strip_thinking
+    from src.services.plot_service import _strip_thinking
 
     raw = "<think>第一段</think>正文<think>第二段</think>尾巴"
     out = _strip_thinking(raw)
@@ -263,7 +265,7 @@ async def test_generate_strips_thinking_from_output(mock_llm: AsyncMock) -> None
     """回归：minimax 推理模型会输出 <think> 块，service 必须剥掉。"""
     import importlib
 
-    import src.services.inspiration_service as _svc
+    import src.services.plot_service as _svc
 
     importlib.reload(_svc)
 
@@ -285,7 +287,7 @@ async def test_generate_raises_if_only_thinking(mock_llm: AsyncMock) -> None:
     """剥掉 thinking 后如果全空（模型只输出思考）→ PlotGenerationError。"""
     import importlib
 
-    import src.services.inspiration_service as _svc
+    import src.services.plot_service as _svc
 
     importlib.reload(_svc)
 
@@ -489,4 +491,4 @@ async def test_stream_generate_forwards_thinking_as_separate_event() -> None:
 
 
 # 静默 logger 警告（如果有）
-logger.disable("src.services.inspiration_service")
+logger.disable("src.services.plot_service")

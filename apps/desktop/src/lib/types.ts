@@ -135,6 +135,12 @@ export interface Inspiration {
   tags: string[];
   content: Record<string, unknown>;
   created_at: string;
+  /** 自定义显示名；为空时前端按 content 派生摘要标签。 */
+  title: string | null;
+  /** 是否置顶（置顶项永远排在列表最前）。 */
+  pinned: boolean;
+  /** 手动排序序号（下标越小越靠前）。 */
+  sort_order: number;
 }
 
 // ===== 词库（Phase 3.1）=====
@@ -154,4 +160,38 @@ export interface WordbankMeta {
   name: string;
   categories: string[];
   counts: Record<string, number>;
+}
+
+/** 词库管理：某板块的全部词条（按分类分组）。 */
+export interface WordbankAllWords {
+  id: string;
+  name: string;
+  categories: string[];
+  words: Record<string, string[]>;
+  counts: Record<string, number>;
+}
+
+/** 一条词条（分类 + 文本）。 */
+export interface WordItem {
+  category: string;
+  word: string;
+}
+
+/** 词库写操作结果（新增 / 修改 / 删除）。 */
+export interface WordbankMutationResult {
+  added: number;
+  updated: number;
+  deleted: number;
+  duplicates: number;
+  errors: string[];
+  missing: string[];
+}
+
+/** 词库导入结果。 */
+export interface WordbankImportResult {
+  added: number;
+  duplicates: number;
+  failed: number;
+  errors: string[];
+  by_category: Record<string, number>;
 }

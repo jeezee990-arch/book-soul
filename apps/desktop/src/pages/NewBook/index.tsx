@@ -18,7 +18,7 @@ import { inspirationsApi } from "@/api/inspirations";
 import { outlinesApi } from "@/api/outlines";
 import { charactersApi } from "@/api/characters";
 import { chaptersApi } from "@/api/chapters";
-import { readNdjsonStream, detectStreamFailure, parseOutlineStreamEvent, type StreamRequest } from "@/api/streams";
+import { readNdjsonStream, detectStreamFailure, parseOutlineStreamEvent, appendThinking, type StreamRequest } from "@/api/streams";
 import { useNovelsStore } from "@/stores/novels-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNewBookStore, type NewBookStep } from "@/stores/newbook-store";
@@ -30,7 +30,7 @@ import OutlineScaleBar from "./outline-scale-bar";
 import IdeaChips from "./idea-chips";
 import { EMPTY_CHAR_PROGRESS } from "./types";
 import { parseScaleFromText } from "@/lib/outline-scale";
-import { mergeVolumeIntoStructure } from "@/lib/outline-merge";
+import { mergeVolumeIntoStructure, fillPendingChapters } from "@/lib/outline-merge";
 import { cn } from "@/lib/utils";
 
 const STEPS: { key: NewBookStep; label: string }[] = [
@@ -253,10 +253,12 @@ export default function NewBook() {
         } else if (event === "thinking") {
           // 推理模型的思考阶段：不能静默丢掉（否则前端一个字都收不到，
           // 用户看到的就是"卡住不动"）。存下来显示"模型思考中…"。
-          setPlotThinking((s) => ({
-            ...s,
-            [index!]: (s[index!] ?? "") + (text ?? ""),
-          }));
+          // ⚠️ 后端已把思考里的英文/代码净身掉（2026-10-29 用户实测图1）：
+          //    净身后为空时用中文占位符顶上，否则提示消失、界面像卡死。
+          setPlotThinking((s) => {
+            const next = appendThinking(s[index!] ?? "", text ?? "");
+            return { ...s, [index!]: next };
+          });
         } else if (event === "delta" && text) {
           setPlotStreaming((s) => ({
             ...s,
@@ -367,7 +369,8 @@ export default function NewBook() {
         }
         if (parsed.kind === "thinking") {
           // 推理模型思考阶段：显示"模型思考中…"，而不是让用户对着空白等待
-          setOutlineThinking((s) => s + parsed.text);
+          // ⚠️ 净身后为空时用中文占位符顶上（见 plot 分支的注释）
+          setOutlineThinking((s) => appendThinking(s, parsed.text));
         } else if (parsed.kind === "partial") {
           // 后端推的是**已解析好的结构**（不是原始 JSON 文本）——
           // 前端只管渲染中文剧情，不用解析半截 JSON。
@@ -388,6 +391,9 @@ export default function NewBook() {
         } else if (parsed.kind === "volume_error") {
           // 单卷失败不影响其它卷
           setOutlineVolumeStatus((s) => ({ ...s, [parsed.index]: "error" }));
+          // ⚠️ 需求7：失败的卷也要补占位概要 —— 否则用户看到的是
+          //    "一堆只有标题的空章节"（与后端 merge_volume_details 保持一致）
+          setOutlinePartial((prev) => fillPendingChapters(prev, parsed.index));
         } else if (parsed.kind === "done") {
           setOutlineBusy(false);
           setOutlineMeta({
@@ -463,7 +469,8 @@ export default function NewBook() {
           const event = obj.event as string | undefined;
           if (event === "thinking") {
             // 推理模型思考阶段：给个提示，别让用户以为卡死了
-            setCharThinking((s) => s + ((obj.text as string) ?? ""));
+            // ⚠️ 净身后为空时用中文占位符顶上
+            setCharThinking((s) => appendThinking(s, (obj.text as string) ?? ""));
           } else if (event === "extract_done") {
             setCharProgress((s) => ({
               ...s,

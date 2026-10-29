@@ -16,6 +16,7 @@ import {
   isStreamDone,
   isStreamThinking,
   detectStreamFailure,
+  appendThinking,
   type StreamEvent,
 } from "@/api/streams";
 import { chaptersApi } from "@/api/chapters";
@@ -240,7 +241,9 @@ export function useChapterStream({
           if (action.kind === "done") break;
           if (action.kind === "thinking") {
             // 思考内容单独显示，**不进正文**（正文里混进英文思考是灾难）
-            setThinkingText((t) => t + action.text);
+            // ⚠️ 后端已把英文/代码思考净身成空串（2026-10-29）——
+            //    这时用中文占位符顶上，否则"模型思考中"提示整个消失，界面像卡死。
+            setThinkingText((t) => appendThinking(t, action.text));
             continue;
           }
           if (action.kind !== "text") continue;
@@ -331,7 +334,8 @@ export function useChapterStream({
           }
           if (action.kind === "done") break;
           if (action.kind === "thinking") {
-            setThinkingText((t) => t + action.text);
+            // 同上：净身后为空时用中文占位符顶上
+            setThinkingText((t) => appendThinking(t, action.text));
             continue;
           }
           if (action.kind !== "text") continue;
