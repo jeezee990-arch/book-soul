@@ -24,8 +24,13 @@ interface RenameProps {
   open: boolean;
   /** 当前的标题（用于回填；空串表示还没命名过）。 */
   initialTitle: string;
-  /** 提交。传 null 表示用户取消。 */
-  onSubmit: (title: string) => void;
+  /**
+   * 提交。
+   *
+   * 传 `null` 表示**用户取消**（不改动任何数据）；
+   * 传空串表示"保存但清空标题"（回落到自动摘要）。
+   */
+  onSubmit: (title: string | null) => void;
 }
 
 /**
@@ -49,7 +54,10 @@ export function InspirationRenameDialog({
   const tooLong = value.length > TITLE_MAX;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onSubmit("")}>
+    // ⚠️ 2026-10-29 评审：关闭（ESC / 点遮罩）必须走 `onSubmit(null)`，
+    //    不能走 `onSubmit("")` —— 后者等于"保存空标题"，
+    //    会把用户自定义的标题**静默清空**（点取消反而丢数据）。
+    <Dialog open={open} onOpenChange={(o) => !o && onSubmit(null)}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-[15px]">重命名素材</DialogTitle>
@@ -71,7 +79,7 @@ export function InspirationRenameDialog({
           <p className="text-[11.5px] text-rose-500">标题不能超过 {TITLE_MAX} 字</p>
         ) : null}
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onSubmit("")}>
+          <Button variant="outline" size="sm" onClick={() => onSubmit(null)}>
             取消
           </Button>
           <Button size="sm" disabled={tooLong} onClick={() => onSubmit(trimmed)}>

@@ -286,6 +286,45 @@ def test_format_outline_is_readable_chinese_not_json() -> None:
     assert "{" not in out
 
 
+def test_format_outline_chapter_numbers_are_global_across_volumes() -> None:
+    """章号必须**全局累加**（第二卷不能又从 1 开始）。
+
+    ⚠️ 2026-10-29 评审：以前每卷都从 1 重排 —— "第二卷"下面又出现"第 1 章"，
+    而本章其实是全书第 6 章 → 模型会写错章节编号。
+    """
+    from src.models.outline import Outline
+
+    o = Outline(
+        id=1,
+        novel_id=1,
+        outline_type="complete",
+        structure={
+            "volumes": [
+                {
+                    "name": "第一卷",
+                    "chapters": [
+                        {"title": "甲", "summary": "一"},
+                        {"title": "乙", "summary": "二"},
+                    ],
+                },
+                {
+                    "name": "第二卷",
+                    "chapters": [
+                        {"title": "丙", "summary": "三"},
+                        {"title": "丁", "summary": "四"},
+                    ],
+                },
+            ]
+        },
+    )
+    out = format_outline(o)
+    # 第二卷的第一章应该是全书第 3 章
+    assert "3. 丙" in out
+    assert "4. 丁" in out
+    # 不能出现卷内重排的 "1. 丙"
+    assert "1. 丙" not in out
+
+
 @pytest.mark.asyncio
 async def test_get_chapter_outline_fallback_to_field(db_initialized: Path) -> None:
     """outline 为空 / structure 里没匹配项时，用 chapter.outline 字段。"""

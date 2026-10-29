@@ -217,3 +217,23 @@ export function toggleSelected(
   }
   return next;
 }
+
+/**
+ * 重命名提交时的**载荷判定**。
+ *
+ * ⚠️ 2026-10-29 评审事故：以前取消 / ESC / 点遮罩都传空串，
+ *    等于"保存空标题" → 用户自定义标题被**静默清空**（点取消反而丢数据）。
+ *    现在三态分明：
+ *    - `null` → 用户取消 → 返回 null（**不发请求**）
+ *    - `""` → 保存但清空标题（回落到自动摘要）
+ *    - 其他 → 保存新标题
+ *
+ * @param title - 对话框回传的值（null = 取消）
+ * @returns 要 PATCH 的载荷；取消时返回 null
+ */
+export function resolveRenamePayload(
+  title: string | null,
+): { title: string | null } | null {
+  if (title === null) return null;
+  return { title: title.trim() || null };
+}

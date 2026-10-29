@@ -61,6 +61,48 @@ async def test_title_can_be_cleared(db_initialized):
 
 
 @pytest.mark.asyncio
+async def test_create_persists_title(db_initialized):
+    """创建时传的 title 要真的落库。
+
+    ⚠️ 2026-10-29 评审事故：``InspirationService.create`` 构造 ORM 对象时
+    **漏传 title** —— schema 声明了、前端也发了，但入库时直接丢掉
+    （响应里 title 恒为 null）。
+    """
+    from src.db import get_session
+    from src.schemas.inspiration import InspirationCreate
+    from src.services.inspiration_service import InspirationService
+
+    async with get_session() as session:
+        svc = InspirationService(session)
+        c = await svc.create(
+            InspirationCreate(type="note", content=NOTE_CONTENT, title="创建即命名")
+        )
+
+    async with get_session() as session:
+        svc = InspirationService(session)
+        fetched = await svc.get(c.id)
+
+    assert c.title == "创建即命名"
+    assert fetched.title == "创建即命名"
+
+
+@pytest.mark.asyncio
+async def test_api_create_persists_title(db_initialized):
+    """POST /inspirations 带的 title 也要落库（接口契约不能说谎）。"""
+    from httpx import ASGITransport, AsyncClient
+
+    from src.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/inspirations",
+            json={"type": "note", "content": NOTE_CONTENT, "title": "接口也要记住"},
+        )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["title"] == "接口也要记住"
+
+
+@pytest.mark.asyncio
 async def test_api_patch_pinned_and_title(db_initialized):
     """PATCH /inspirations/{id} 能改置顶和标题。"""
     from httpx import ASGITransport, AsyncClient
@@ -291,6 +333,42 @@ async def test_reorder_persists_across_sessions(db_initialized):
         listed = await svc.list_all()
 
     assert [i.id for i in listed] == new_order
+
+
+@pytest.mark.asyncio
+async def test_reorder_pushes_unsent_items_to_the_end(db_initialized):
+    """没在重排列表里的条目必须**排到后面**，不能跳到最前面。
+
+    ⚠️ 2026-10-29 评审：前端一次最多只能拉 500 条（后端 limit 上限），
+    超过的那些 sort_order 恒为 0 → 排序（sort_order ASC）时跳到最前面，
+    把用户刚拖好的顺序搅乱。
+    """
+    from src.db import get_session
+    from src.schemas.inspiration import InspirationCreate
+    from src.services.inspiration_service import InspirationService
+
+    async with get_session() as session:
+        svc = InspirationService(session)
+        ids = []
+        for _ in range(4):
+            ins = await svc.create(InspirationCreate(type="note", content=NOTE_CONTENT))
+            ids.append(ins.id)
+
+    # 只重排前 3 条（模拟"前端只拉到一部分"）
+    async with get_session() as session:
+        svc = InspirationService(session)
+        await svc.reorder([ids[2], ids[0], ids[1]])
+
+    async with get_session() as session:
+        svc = InspirationService(session)
+        listed = await svc.list_all()
+
+    got = [i.id for i in listed]
+    # 前 3 条是新顺序，第 4 条（没发出去的）排最后
+    assert got[:3] == [ids[2], ids[0], ids[1]]
+    assert got[3] == ids[3]
+    # 关键：没发出去的那条 sort_order 必须 > 0（否则会排到最前面）
+    assert listed[3].sort_order == 3
 
 
 @pytest.mark.asyncio

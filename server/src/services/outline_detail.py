@@ -81,6 +81,52 @@ _DETAIL_PER_CHAPTER_BUDGET = 400
 _DETAIL_MIN_BUDGET = 4000
 DETAIL_MAX_BUDGET = 32000
 
+# 一次卷细化的**LLM 调用次数上限**。
+#
+# 为什么需要：失败处理链是「重试一次 → 对半拆批 → 再拆批」，
+# 一批 6 章最坏会打 12 次调用（1 + 1 重试 + 拆批树）。
+# 20 章的卷最坏 ≈ 40 次 —— 多卷并行时耗时飙升，还容易撞上游限流。
+# 超过这个数就**直接给占位概要**（诚实标注「待细化」），不再递归。
+#
+# ⚠️ 正常路径（模型不失败）只用「批次数」次调用，远低于这个上限，
+#    所以正常体验完全不受影响 —— 这只是给"模型一直失败"兜底。
+MAX_CALLS_PER_VOLUME = 24
+
+
+class _CallBudget:
+    """一卷细化的调用次数预算（可跨并发批次共享）。
+
+    为什么要单独一个类：卷内各批是**并行**跑的，
+    用一个普通整数在并发下会算错（``+=`` 不是原子的），必须走对象方法。
+
+    ⚠️ 单线程事件循环里"检查 + 自增"之间没有 await 点，
+    所以这里是**真原子**的（不会有两个批次抢到同一个额度）。
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._used = 0
+
+    def take(self) -> bool:
+        """占用一次调用额度；返回 False 表示预算已用尽。
+
+        :return: True = 额度已占用，可以继续调用；False = 预算耗尽
+        """
+        if self._used >= self._limit:
+            return False
+        self._used += 1
+        return True
+
+    @property
+    def used(self) -> int:
+        """已用掉的调用次数。"""
+        return self._used
+
+    @property
+    def remaining(self) -> int:
+        """还剩多少次可用。"""
+        return max(0, self._limit - self._used)
+
 
 def split_batches(
     chapters: list[dict[str, Any]], size: int = DETAIL_BATCH_SIZE
@@ -215,6 +261,7 @@ class VolumeDetailBuilder:
                 "chapters": [],
             }
         batches = split_batches(chapters)
+        budget = _CallBudget(MAX_CALLS_PER_VOLUME)
         results = await asyncio.gather(
             *(
                 self._detail_batch(
@@ -224,6 +271,7 @@ class VolumeDetailBuilder:
                     queue,
                     batch_no=i + 1,
                     batch_total=len(batches),
+                    budget=budget,
                 )
                 for i, batch in enumerate(batches)
             )
@@ -247,10 +295,16 @@ class VolumeDetailBuilder:
                 "chapters": [],
             }
         batches = split_batches(chapters)
+        budget = _CallBudget(MAX_CALLS_PER_VOLUME)
         results = await asyncio.gather(
             *(
                 self._detail_batch_nonstream(
-                    index, volume, batch, batch_no=i + 1, batch_total=len(batches)
+                    index,
+                    volume,
+                    batch,
+                    batch_no=i + 1,
+                    batch_total=len(batches),
+                    budget=budget,
                 )
                 for i, batch in enumerate(batches)
             )
@@ -276,20 +330,31 @@ class VolumeDetailBuilder:
         batch_no: int = 1,
         batch_total: int = 1,
         depth: int = 0,
+        budget: _CallBudget,
     ) -> list[dict[str, Any]]:
         """细化一批章节（失败处理链见模块 docstring）。
 
         ⚠️ LLM 的**系统级**错误（网络/鉴权）不在这里吞 —— 直接往上抛，
         由调用方转成 ``volume_error`` 事件（用户需要知道出事了）。
+
+        ⚠️ 调用预算用尽 → 整批直接给占位概要，不再递归（见 ``_CallBudget``）。
         """
-        budget = detail_budget(len(batch))
+        if not budget.take():
+            logger.warning(
+                "outline volume {} batch {}/{}: call budget exhausted, using placeholders",
+                index,
+                batch_no,
+                batch_total,
+            )
+            return [placeholder_chapter(c, volume) for c in batch]
+        batch_budget = detail_budget(len(batch))
         try:
             return await self._call_detail_batch(
                 index,
                 volume,
                 batch,
                 queue,
-                budget=budget,
+                budget=batch_budget,
                 batch_no=batch_no,
                 batch_total=batch_total,
             )
@@ -302,14 +367,15 @@ class VolumeDetailBuilder:
                 len(batch),
                 e,
             )
-            if depth == 0:
+            if depth == 0 and budget.take():
+                # 预算翻倍重试一次（思考吃额度是空内容的主因）
                 try:
                     return await self._call_detail_batch(
                         index,
                         volume,
                         batch,
                         queue,
-                        budget=min(budget * 2, DETAIL_MAX_BUDGET),
+                        budget=min(batch_budget * 2, DETAIL_MAX_BUDGET),
                         batch_no=batch_no,
                         batch_total=batch_total,
                     )
@@ -325,6 +391,7 @@ class VolumeDetailBuilder:
                     batch_no=batch_no,
                     batch_total=batch_total,
                     depth=depth + 1,
+                    budget=budget,
                 )
                 right = await self._detail_batch(
                     index,
@@ -334,6 +401,7 @@ class VolumeDetailBuilder:
                     batch_no=batch_no,
                     batch_total=batch_total,
                     depth=depth + 1,
+                    budget=budget,
                 )
                 return left + right
             return [placeholder_chapter(batch[0], volume)]
@@ -347,12 +415,26 @@ class VolumeDetailBuilder:
         batch_no: int = 1,
         batch_total: int = 1,
         depth: int = 0,
+        budget: _CallBudget,
     ) -> list[dict[str, Any]]:
         """非流式细化一批章节（与流式版同一套重试 / 拆批 / 占位策略）。"""
-        budget = detail_budget(len(batch))
+        if not budget.take():
+            logger.warning(
+                "outline volume {} batch {}/{}: call budget exhausted, using placeholders",
+                index,
+                batch_no,
+                batch_total,
+            )
+            return [placeholder_chapter(c, volume) for c in batch]
+        batch_budget = detail_budget(len(batch))
         try:
             return await self._call_detail_batch_nonstream(
-                index, volume, batch, budget=budget, batch_no=batch_no, batch_total=batch_total
+                index,
+                volume,
+                batch,
+                budget=batch_budget,
+                batch_no=batch_no,
+                batch_total=batch_total,
             )
         except TwoPhaseOutlineError as e:
             logger.warning(
@@ -363,13 +445,13 @@ class VolumeDetailBuilder:
                 len(batch),
                 e,
             )
-            if depth == 0:
+            if depth == 0 and budget.take():
                 try:
                     return await self._call_detail_batch_nonstream(
                         index,
                         volume,
                         batch,
-                        budget=min(budget * 2, DETAIL_MAX_BUDGET),
+                        budget=min(batch_budget * 2, DETAIL_MAX_BUDGET),
                         batch_no=batch_no,
                         batch_total=batch_total,
                     )
@@ -384,6 +466,7 @@ class VolumeDetailBuilder:
                     batch_no=batch_no,
                     batch_total=batch_total,
                     depth=depth + 1,
+                    budget=budget,
                 )
                 right = await self._detail_batch_nonstream(
                     index,
@@ -392,6 +475,7 @@ class VolumeDetailBuilder:
                     batch_no=batch_no,
                     batch_total=batch_total,
                     depth=depth + 1,
+                    budget=budget,
                 )
                 return left + right
             return [placeholder_chapter(batch[0], volume)]

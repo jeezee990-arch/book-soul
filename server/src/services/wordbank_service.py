@@ -343,9 +343,19 @@ class WordbankService:
         """导入词条（粘贴文本）。
 
         解析失败的行**逐行报告原因**；同分类里已有的词算重复（跳过）。
+
+        :raises WordbankValidationError: ``default_category`` 不在该板块的分类里
         """
         data = _load_for_write(genre)
         categories = _categories_of(data)
+        # ⚠️ 2026-10-29 评审：以前不校验 default_category，
+        #    板块里没有这个分类时 → `data[item.category]` KeyError → 500。
+        #    现在提前拦下来 → 422（前端能显示原因）。
+        if default_category not in categories:
+            raise WordbankValidationError(
+                f"Category {default_category!r} not found in genre {genre!r}; "
+                f"available: {categories}"
+            )
         parsed = parse_import_text(
             text, default_category=default_category, valid_categories=categories
         )
@@ -357,7 +367,16 @@ class WordbankService:
         )
         changed = False
         for item in parsed.words:
-            words = data[item.category]
+            words = data.get(item.category)
+            if not isinstance(words, list):
+                # 兜底：解析出的分类不在当前板块的 YAML 里（正常走不到，
+                # 因为 parse_import_text 已用 valid_categories 过滤过）。
+                # 真到了这里也不能让它变成 KeyError → 500。
+                report.errors.append(
+                    f"第 {item.line_no} 行「{item.word}」：分类「{item.category}」不存在"
+                )
+                report.failed += 1
+                continue
             if item.word in words:
                 report.duplicates += 1
                 continue

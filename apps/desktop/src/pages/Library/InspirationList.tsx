@@ -39,6 +39,7 @@ import { InspirationConfirmDialog, InspirationRenameDialog } from "./Inspiration
 import {
   computeReorderedIds,
   deriveInspirationTitle,
+  resolveRenamePayload,
   togglePinned,
   toggleSelected,
 } from "./inspiration-manage";
@@ -171,16 +172,25 @@ export default function InspirationList({
     });
   }
 
-  async function commitRename(title: string) {
+  /**
+   * 提交重命名。
+   *
+   * @param title 新标题；`null` 表示用户**取消**（不改任何数据）。
+   *   空串表示"保存但清空标题"（回落到自动摘要）。
+   */
+  async function commitRename(title: string | null) {
     const target = renameTarget;
     setRenameTarget(null);
+    // ⚠️ 2026-10-29 评审：取消 / ESC / 点遮罩都会走到这里 ——
+    //    以前一律传 ""，等于"保存空标题" → 用户自定义标题被**静默清空**。
+    //    现在 null = 取消，直接返回，一个字节都不改。
     if (!target) return;
+    const payload = resolveRenamePayload(title);
+    if (payload === null) return;
     try {
-      const updated = await inspirationsApi.update(target.id, {
-        title: title.trim() || null,
-      });
+      const updated = await inspirationsApi.update(target.id, payload);
       setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-      toast.success(title.trim() ? "已重命名" : "已恢复自动摘要");
+      toast.success(payload.title ? "已重命名" : "已恢复自动摘要");
     } catch (e: unknown) {
       toast.error("重命名失败", { description: errText(e) });
     }

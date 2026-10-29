@@ -132,6 +132,9 @@ class InspirationService:
             content=content,
             source=data.source,
             tags=list(data.tags),
+            # ⚠️ 2026-10-29 评审：以前漏传 title —— schema 声明了、前端也发了，
+            #    但入库时直接丢掉（响应里 title 恒为 null）。
+            title=data.title,
         )
         self.session.add(inspiration)
         await self.session.commit()
@@ -242,5 +245,21 @@ class InspirationService:
                 continue
             row.sort_order = index
             ordered.append(row)
+
+        # ⚠️ 2026-10-29 评审：没在列表里的条目必须**推到后面**。
+        #    前端一次最多只能拉 500 条（后端 limit 上限），超过的那些
+        #    sort_order 会一直是 0 → 排序时（sort_order ASC）跳到最前面，
+        #    把用户刚拖好的顺序搅乱。
+        #    现在给它们排到已排序条目之后（相对次序保持不变）。
+        others_stmt = (
+            select(Inspiration)
+            .where(Inspiration.id.notin_(unique_ids))
+            .order_by(Inspiration.sort_order.asc(), Inspiration.created_at.desc())
+        )
+        others = list((await self.session.execute(others_stmt)).scalars())
+        offset = len(ordered)
+        for i, row in enumerate(others):
+            row.sort_order = offset + i
+
         await self.session.commit()
         return ordered

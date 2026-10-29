@@ -163,7 +163,13 @@ def format_outline(outline: Outline | None) -> str:
             lines.append(f"{label}：{value.strip()}")
 
     # 卷 → 章（两阶段大纲的主结构）
+    #
+    # ⚠️ 2026-10-29 评审：章号必须**全局累加**。
+    #    以前每卷都从 1 重排 —— "第二卷"下面又出现"第 1 章"，
+    #    而本章其实是全书第 6 章 → 模型会写错章节编号。
+    #    （与 get_chapter_outline 的位置推断口径保持一致。）
     volumes = structure.get("volumes")
+    global_index = 0
     if isinstance(volumes, list):
         for v_index, volume in enumerate(volumes):
             if not isinstance(volume, dict):
@@ -173,8 +179,9 @@ def format_outline(outline: Outline | None) -> str:
             lines.append(f"\n{name}" + (f" —— {v_summary}" if v_summary else ""))
             chapters = volume.get("chapters")
             if isinstance(chapters, list):
-                for c_index, chapter in enumerate(chapters):
-                    text = _chapter_one_line(chapter, c_index + 1)
+                for chapter in chapters:
+                    global_index += 1
+                    text = _chapter_one_line(chapter, global_index)
                     if text:
                         lines.append(text)
 
@@ -184,8 +191,9 @@ def format_outline(outline: Outline | None) -> str:
         if not isinstance(ch_list, list) or not ch_list:
             continue
         lines.append("")
-        for c_index, chapter in enumerate(ch_list):
-            text = _chapter_one_line(chapter, c_index + 1)
+        for chapter in ch_list:
+            global_index += 1
+            text = _chapter_one_line(chapter, global_index)
             if text:
                 lines.append(text)
 
