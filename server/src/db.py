@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from loguru import logger
-from sqlalchemy import Column
+from sqlalchemy import Column, event
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -42,6 +42,33 @@ SessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
     expire_on_commit=False,
     class_=AsyncSession,
 )
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, connection_record) -> None:
+    """打开 SQLite 的外键约束（SQLite **默认是关的**）。
+
+    为什么必须开（2026-10-29 实测事故）
+    ----------------------------------
+    SQLite 为了历史兼容，``PRAGMA foreign_keys`` 默认为 **OFF**。
+    关着的时候，ORM 里写的 ``ondelete="CASCADE"`` / ``"SET NULL"``
+    **完全不生效** —— 删掉一本作品，它的章节、人物卡、大纲全留在库里。
+
+    更糟的是 SQLite 会**复用**被删掉的最大 id（模型里的 id 没有
+    ``AUTOINCREMENT``），于是"重建作品"会拿到同一个 id，
+    上一部作品遗留的章节就**串进了新作品**：
+
+    实测：删掉 novel 4 → 重建得到 novel 4 → 建章节直接 422
+    ``Chapter number 1 already exists in novel 4``
+    （冲突的是**上一部作品**留下的章节）。
+
+    开启约束后，删作品会级联清掉子表，不再留孤儿、不再串号。
+    """
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
 
 
 def _ensure_data_dir() -> Path:
@@ -226,6 +253,55 @@ def _ensure_missing_columns(sync_conn) -> None:
             logger.info("DB schema upgrade: added {}.{} column", table.name, col.name)
 
 
+def _purge_orphan_rows(sync_conn) -> None:
+    """清理"父行已删"的历史遗留孤儿行。
+
+    外键约束是**后来**才打开的，之前删掉的作品留下的子行还躺在库里。
+    这些行在任何列表里都看不到（所有查询都按 ``novel_id`` 过滤），
+    但会造成两个麻烦：
+
+    1. SQLite 复用被删掉的作品 id 时，旧章节会**串进新作品**；
+    2. 数据库无限膨胀。
+
+    处理规则按外键的 ``ondelete`` 语义走（从 ORM 元数据自动推导，不硬编码）：
+
+    - ``CASCADE``：父行没了子行也没意义 → **删掉**
+    - ``SET NULL``：父行没了只该脱离关系，**数据本身要保留** → 置 NULL
+      （例如 ``inspirations.novel_id`` —— 素材是用户写的，不能因为
+      删了作品就一起删掉）
+
+    :param sync_conn: 同步 SQLAlchemy 连接
+    """
+    for table in Base.metadata.sorted_tables:
+        for col in table.columns:
+            for fk in col.foreign_keys:
+                parent = fk.column.table
+                ondelete = (fk.ondelete or "").upper()
+                if ondelete == "CASCADE":
+                    sql = (
+                        f"DELETE FROM {table.name} "
+                        f"WHERE {col.name} IS NOT NULL "
+                        f"AND {col.name} NOT IN (SELECT id FROM {parent.name})"
+                    )
+                elif ondelete == "SET NULL":
+                    sql = (
+                        f"UPDATE {table.name} SET {col.name} = NULL "
+                        f"WHERE {col.name} IS NOT NULL "
+                        f"AND {col.name} NOT IN (SELECT id FROM {parent.name})"
+                    )
+                else:
+                    continue
+                result = sync_conn.exec_driver_sql(sql)
+                removed = result.rowcount or 0
+                if removed:
+                    logger.info(
+                        "DB cleanup: purged {} orphan row(s) in {}.{}",
+                        removed,
+                        table.name,
+                        col.name,
+                    )
+
+
 async def init_db() -> None:
     """应用启动时调用：准备数据目录 + 创建表 + 补列 + 校验连接。
 
@@ -236,7 +312,7 @@ async def init_db() -> None:
     data_dir = _ensure_data_dir()
     logger.info("DB init: data_dir={}, db_path={}", data_dir, settings.db_path)
 
-    # 1) 创建表（仅对未存在的；已存在则忽略）+ 幂等补列
+    # 1) 创建表（仅对未存在的；已存在则忽略）+ 幂等补列 + 清孤儿
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         try:
@@ -245,6 +321,10 @@ async def init_db() -> None:
             # 补列是"锦上添花"：create_all 已经建好表了，
             # 补列失败只影响"旧库缺新列"这一个场景，不能让整个应用起不来。
             logger.error("DB schema upgrade: backfill failed ({})", e)
+        try:
+            await conn.run_sync(_purge_orphan_rows)
+        except Exception as e:  # noqa: BLE001
+            logger.error("DB cleanup: purge orphans failed ({})", e)
     logger.info("DB tables ready: {}", list(Base.metadata.tables))
 
     # 2) 校验连接

@@ -117,6 +117,7 @@ async def merge_queue_events_milestone_ordered(
     *,
     milestone: str = "version_done",
     index_key: str = "index",
+    terminal_events: Sequence[str] | None = None,
 ) -> AsyncIterator[Any]:
     """内容事件**实时透传**，只有"里程碑"事件保序。
 
@@ -149,11 +150,20 @@ async def merge_queue_events_milestone_ordered(
     :param queues: 各生产者的事件队列
     :param milestone: 需要保序的事件名
     :param index_key: 里程碑事件里表示序号的字段名
+    :param terminal_events: 额外算作"到达终态"的事件名（参与保序）。
+        默认 ``("error",)`` —— **失败的版本也要能让保序指针前进**，
+        否则版本 1 失败时它永远不发 ``version_done``，
+        版本 2/3 的完成事件会被压到整条流结束才吐，
+        用户看到"另外两张卡明明写完了却一直转圈"（2026-10-29 复核发现）。
     """
+    # 保序指针认这些事件：到达即视为该版本到了终态
+    terminals = {milestone}
+    if terminal_events:
+        terminals.update(terminal_events)
     expected = 1
     buffered: dict[int, Any] = {}
     async for payload in merge_queue_events(queues):
-        if not isinstance(payload, dict) or payload.get("event") != milestone:
+        if not isinstance(payload, dict) or payload.get("event") not in terminals:
             yield payload
             continue
         index = payload.get(index_key)

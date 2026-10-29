@@ -142,3 +142,86 @@ async def test_milestone_without_index_passes_through():
     await task
 
     assert seen == [{"event": "version_done"}]
+
+
+@pytest.mark.asyncio
+async def test_failed_version_does_not_block_later_milestones():
+    """版本 1 失败时，版本 2/3 的完成事件**不能**被压到流结束才吐。
+
+    失败的生产者发的是 ``error`` 事件（不会发 ``version_done``）。
+    早先的实现只把 ``version_done`` 当里程碑，于是保序指针卡在版本 1：
+    版本 2/3 的完成事件一直缓冲着，用户看到"另外两张卡明明写完了却一直转圈"。
+    """
+    q1: asyncio.Queue = asyncio.Queue()
+    q2: asyncio.Queue = asyncio.Queue()
+    q3: asyncio.Queue = asyncio.Queue()
+
+    async def failed() -> None:
+        await asyncio.sleep(0.02)
+        await q1.put({"event": "error", "index": 1, "message": "模型炸了"})
+        await q1.put(None)
+
+    async def ok2() -> None:
+        await asyncio.sleep(0.04)
+        await q2.put({"event": "version_done", "index": 2})
+        await q2.put(None)
+
+    async def ok3() -> None:
+        await asyncio.sleep(0.06)
+        await q3.put({"event": "version_done", "index": 3})
+        await q3.put(None)
+
+    tasks = [asyncio.create_task(f()) for f in (failed, ok2, ok3)]
+    seen: list[dict] = []
+    async for ev in merge_queue_events_milestone_ordered([q1, q2, q3]):
+        seen.append(ev)
+    await asyncio.gather(*tasks)
+
+    # 版本 2/3 的完成事件必须在流结束前就已经吐出来（而不是被压到最后）
+    done_idx = [e["index"] for e in seen if e["event"] == "version_done"]
+    assert done_idx == [2, 3], f"版本 2/3 的完成事件被压到流末了：{seen}"
+
+
+@pytest.mark.asyncio
+async def test_error_event_still_reaches_the_consumer():
+    """error 事件参与保序，但它本身**必须**原样透传给前端（不能被吞）。"""
+    q1: asyncio.Queue = asyncio.Queue()
+
+    async def producer() -> None:
+        await q1.put({"event": "error", "index": 1, "message": "boom"})
+        await q1.put(None)
+
+    task = asyncio.create_task(producer())
+    seen: list[dict] = []
+    async for ev in merge_queue_events_milestone_ordered([q1]):
+        seen.append(ev)
+    await task
+
+    assert seen == [{"event": "error", "index": 1, "message": "boom"}]
+
+
+@pytest.mark.asyncio
+async def test_terminal_events_can_be_configured():
+    """``terminal_events`` 可以覆盖默认的 error 集合。"""
+    q1: asyncio.Queue = asyncio.Queue()
+    q2: asyncio.Queue = asyncio.Queue()
+
+    async def failed() -> None:
+        await asyncio.sleep(0.02)
+        await q1.put({"event": "error", "index": 1, "message": "boom"})
+        await q1.put(None)
+
+    async def ok2() -> None:
+        await asyncio.sleep(0.04)
+        await q2.put({"event": "version_done", "index": 2})
+        await q2.put(None)
+
+    tasks = [asyncio.create_task(failed()), asyncio.create_task(ok2())]
+    seen: list[dict] = []
+    # 不把 error 当终态 → 版本 2 的里程碑会被压到流末（这正是"覆盖默认"的语义）
+    async for ev in merge_queue_events_milestone_ordered([q1, q2], terminal_events=()):
+        seen.append(ev)
+    await asyncio.gather(*tasks)
+
+    # 事件都到了，但 version_done 是最后才吐的
+    assert [e["event"] for e in seen] == ["error", "version_done"]

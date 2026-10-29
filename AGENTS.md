@@ -2,6 +2,12 @@
 
 <!--
 修改记录
+- 2026-10-29：第七轮（质检续：外键 / 孤儿数据 / 里程碑保序）。主要变化：
+  · db.py 开启 SQLite 外键约束（默认是关的 → ondelete="CASCADE" 形同虚设，
+    删作品留孤儿；SQLite 又会复用被删的 id → 旧章节串进新作品）
+  · db.py 启动时清理"父行已删"的孤儿行（CASCADE 删行 / SET NULL 置空）
+  · §4.7 补：失败版本（error 事件）也要参与里程碑保序，
+    否则后续版本的完成事件被压到整条流结束才吐
 - 2026-10-29：第六轮（七项 UI 需求 + 质检）。主要变化：
   · §4.7 修正「并行保序」：内容实时透传 + 里程碑保序（`merge_queue_events_milestone_ordered`），
     明确禁用严格保序（`merge_queue_events_ordered`）—— 它就是「憋着最后一口气输出」的元凶
@@ -259,7 +265,17 @@ resp = await self._client.post(url, json=payload)
 > **"一口气"的直接成因就是这个**，不是模型慢，也不是前端缓冲。
 > → 拆成两件事：内容永远实时，里程碑才排序。
 
+> ⚠️ **失败版本也要参与保序**（2026-10-29 复核补）——
+> 失败的版本发的是 `error` 事件，**不会**发 `version_done`。
+> 如果保序指针只认 `version_done`，版本 1 失败时指针就卡住，
+> 版本 2/3 的完成事件会被压到**整条流结束**才吐 →
+> 用户看到"另外两张卡明明写完了却一直转圈"。
+> → `merge_queue_events_milestone_ordered` 的 `terminal_events`
+> 默认含 `error`：到达终态（成功或失败）都让指针前进。
+> 失败本身仍照常透传给前端（前端 `detectStreamFailure` 负责标记那张卡）。
+
 > 契约测试：`server/tests/test_think_splitter.py` + `test_queue_merge.py` +
+> `test_queue_merge_milestone.py`（含"失败版本不阻塞后续里程碑"）+
 > `test_plot_generation.py`（顺序 / thinking 事件）。
 >
 > **性能实测结论（2026-10-24，用本地 mock SSE provider 测）**：
