@@ -289,6 +289,11 @@ config/
 └── skill_template/       # Skill 脚手架
 ```
 
+> **venv 在仓库根，不在 `server/`** —— 根 `pyproject.toml` 是 uv workspace
+> （`[tool.uv.workspace] members = ["server"]`），`uv sync` 在**根目录**执行，
+> venv 落在 `<仓库根>/.venv/`。`scripts\dev.ps1` 和 `build_standalone.ps1` 都硬编码
+> `<仓库根>\.venv\Scripts\python.exe`，所以这个位置不能改。
+
 **提示词铁律**：所有 prompt 必须在 `config/prompts/*.yaml`，带 `version` + `changelog`。
 **绝对不要**把 prompt 散落在 Python 代码里。
 

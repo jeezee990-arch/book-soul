@@ -72,12 +72,16 @@ Book Soul 是一款为网文作者和严肃文学作者设计的 **AI 辅助写�
 git clone https://github.com/jeezee990-arch/book-soul.git
 cd book-soul
 
-# 后端（Python 依赖装到仓库根的 .venv）
-cd server && uv sync && cd ..
+# 后端 —— 根 pyproject.toml 是 uv workspace（members = ["server"]），
+# venv 统一落在**仓库根的 .venv/**，所以在根目录执行
+uv sync
 
 # 前端
 cd apps/desktop && pnpm install && cd ../..
 ```
+
+> `dev.ps1` / `build_standalone.ps1` 都硬编码用 `<仓库根>\.venv\Scripts\python.exe`，
+> 所以 venv 位置必须是仓库根 —— 这也是为什么要 `uv sync` 而不是在 `server/` 里单独建 venv。
 
 **启动**
 
