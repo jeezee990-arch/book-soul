@@ -8,49 +8,60 @@
 ┌─────────────────────────────────────────────────────────┐
 │  Tauri Desktop Shell (Rust)                              │
 │  - 单窗口 WebView（Chromium 内核）                       │
-│  - 启动后端进程 / IPC 桥                                  │
+│  - 启动后端进程（随机空闲端口）/ IPC 桥                  │
+│  - 端口下发 + 就绪握手（前端不硬编码地址）                │
 └─────────────────────────────────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────────────────────┐
 │  React 18 + Vite (SPA)                                   │
-│  - HashRouter（5 个主页面）                              │
-│  - Zustand（轻状态） / TanStack Query 风格手写            │
-│  - shadcn/ui + Tailwind                                   │
+│  - HashRouter（4 个一级页面：写作/开新书/素材库/设置）    │
+│  - Zustand（7 个 store）                                 │
+│  - shadcn/ui + Tailwind                                  │
 └─────────────────────────────────────────────────────────┘
-              │ fetch / SSE (ndjson)
+              │ fetch / SSE (ndjson) —— 流式不经过 Rust
               ▼
 ┌─────────────────────────────────────────────────────────┐
 │  FastAPI (async) + uvicorn                               │
-│  - 11 个路由模块（novel / chapter / character / ...）    │
-│  - 业务服务层 services/                                  │
+│  - 17 个路由模块（novel / chapter / character / ...）    │
+│  - 业务服务层 services/（27 个）                         │
 │  - LLM 抽象层 core/llm/                                  │
-│  - SQLAlchemy 2.0 + aiosqlite                            │
+│  - SQLAlchemy 2.0 + aiosqlite（外键约束已开启）          │
 └─────────────────────────────────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────────────────────┐
 │  SQLite (本地文件 data/book-soul.db)                    │
-│  + ChromaDB（向量库，预留 Phase 9+）                     │
-│  + 文件系统（data/novels/、logs/）                       │
+│  + 7 张业务表（novels / chapters / characters / ...）   │
+│  + 文件系统（data/secrets/、data/wordbanks/、logs/）      │
 └─────────────────────────────────────────────────────────┘
 ```
+
+> ⚠️ **没有 ChromaDB / 向量库** —— 早期设计里的 RAG 已移除：
+> 对个人网文收益低（要 50+ 章才体现）、负担重（embedding 依赖 + 向量库 + 检索调优）。
+> 当前用「人物卡 + 最近 3 章摘要 + 上一章尾部」的滑动窗口策略。
 
 ## 2. 目录分层
 
 ```
 server/src/
-├── api/         # 路由层（HTTP 接口、依赖注入、错误映射）
-├── services/    # 业务逻辑（CRUD、生成、扫描、备份）
-├── models/      # SQLAlchemy ORM（数据表）
+├── api/         # 路由层（HTTP 接口、依赖注入、错误映射）—— 17 个模块
+├── services/    # 业务逻辑（CRUD、生成、扫描、备份）—— 27 个
+├── models/      # SQLAlchemy ORM（7 张表）
 ├── schemas/     # Pydantic（API 输入输出契约）
 ├── core/        # 基础设施
-│   ├── llm/        # LLM 抽象（Provider Protocol + OpenAI 兼容实现 + Ollama）
-│   ├── quality/    # 质检 prompt 加载
-│   ├── chapter_context/  # 章节生成 prompt + 上下文
-│   ├── scanner/    # 本地扫描（detector / scanner / importer）
-│   └── skills/     # Skill 系统（base / registry / builtin 12 个）
-└── db.py        # SQLAlchemy async engine
+│   ├── llm/        # LLM 抽象（Provider Protocol + OpenAI 兼容 + Ollama）
+│   │               #   + thinking（思考净身）/ cache（健康缓存）/ partial_json
+│   ├── skills/     # Skill 系统（base / registry / manager / loader + builtin 12 个）
+│   ├── security/   # dpapi / secret_store / encryption / keyring_manager
+│   ├── scanner/    # 本地扫描
+│   ├── quality/    # 质检 prompt
+│   ├── versioning/ # 版本树 + diff
+│   ├── chapter_context.py  # 章节 prompt + 上下文组装（单文件）
+│   ├── paths.py    # 路径解析统一入口（开发态 / 打包态）
+│   ├── watchdog.py # 父进程看门狗（桌面端崩了后端自己退）
+│   └── config.py / logging.py
+└── db.py        # SQLAlchemy async engine + 通用补列 + 外键约束 + 孤儿清理
 ```
 
 **铁律**：
@@ -58,11 +69,13 @@ server/src/
 - DB 操作走 `models/`，service 不写原生 SQL
 - 文件 IO 集中在 service 层
 - LLM 抽象在 `core/llm/`，业务不直接 import openai SDK
+- 路径解析统一走 `core/paths.py`，禁止再写 `_find_repo_root()`
 
 ## 3. 数据模型
 
 ```
 novels ──┬─── characters ─── character_versions
+         │         (parent_version_id 自引用，链表)
          │
          ├─── outlines
          │
@@ -75,7 +88,29 @@ novels ──┬─── characters ─── character_versions
 inspirations  (独立：通用灵感 novel_id=NULL；关联灵感 FK)
 ```
 
-详见 `server/src/models/`。
+### 级联语义（外键必须显式开启）
+
+SQLite 的 `PRAGMA foreign_keys` **默认 OFF**，ORM 里的 `ondelete=` 不会生效 ——
+删作品会留孤儿，而 SQLite 还会复用被删掉的 id，导致旧章节串进新作品。
+`core/db.py` 在连接建立时开 pragma，并在启动时清理历史孤儿。
+
+| 外键 | ondelete | 语义 |
+|---|---|---|
+| `chapters.novel_id` / `characters.novel_id` / `outlines.novel_id` | CASCADE | 删作品 → 连带删子行 |
+| `chapter_versions.chapter_id` / `character_versions.character_id` | CASCADE | 删章节/人物 → 连带删版本 |
+| `*_versions.parent_version_id` / `*.current_version_id` | SET NULL | 断链但保留数据 |
+| `inspirations.novel_id` | SET NULL | **素材保留**，只脱离作品 |
+
+详见 `server/src/models/` 与 [PROJECT_PLAN.md](../PROJECT_PLAN.md) §4.1。
+
+### 启动时的 schema 自愈
+
+`init_db()` 依次做三件事，**任何一步失败都不阻断应用启动**：
+
+1. `Base.metadata.create_all` —— 建缺失的表（只建表，不加列）
+2. `_ensure_missing_columns` —— 从 ORM 元数据推导，ALTER 补上缺失的列
+   （不硬编码表名；SQLite 加不了 PK/UNIQUE 列，NOT NULL 列必须有默认值）
+3. `_purge_orphan_rows` —— 清"父行已删"的孤儿行（CASCADE 删行 / SET NULL 置空）
 
 ## 4. LLM 抽象
 
@@ -110,15 +145,31 @@ routing:
 
 ## 5. 流式协议
 
-**后端**：`StreamingResponse` + `application/x-ndjson`，每行一个 JSON：
-- 增量：`{"text": "..."}`
+**后端**：`StreamingResponse` + `application/x-ndjson`，每行一个 JSON。
+
+单结果流（章节生成 / 重写 / 质检）：
+- 正文增量：`{"text": "..."}`
 - 完成：`{"done": true, "provider": "...", "model": "..."}`
-- 错误：`{"error": "..."}`
+- 错误：`{"error": "..."}`（transport 类）
+
+多版本流（剧情 / 大纲 / 人物卡）用 `event` 字段区分：
+- `{"event": "thinking", "index": 1, "text": "..."}` —— 模型思考（**不能丢**）
+- `{"event": "delta", "index": 1, "text": "..."}` —— 正文增量
+- `{"event": "version_done", "index": 1, "summary": "..."}` —— 某版本完成
+- `{"event": "error", "index": 1, "message": "..."}` —— 某版本失败
+- `{"event": "done", "provider": ..., "model": ..., "elapsed_sec": ..., "first_delta_sec": ...}`
+
+> **保序语义**：内容事件（thinking / delta）**实时透传**；
+> 只有里程碑事件（`version_done` / `error`）按下标保序。
+> 用 `merge_queue_events_milestone_ordered`，**不要**用严格保序版本
+> （那是「队列 1 消费完才消费队列 2」，会让后面版本的内容憋到最后一口气涌出）。
 
 **前端**（`apps/desktop/src/api/streams.ts`）：
 - `fetch` + `ReadableStream.getReader()` + `TextDecoder` 按 `\n` 切
 - `readNdjsonStream(path, options)` 异步生成 `StreamEvent`
 - 调用方用 `for await` 消费
+- **`detectStreamFailure(ev)` 必须用** —— transport 与 server 两类失败都要认，
+  漏掉任何一类界面都会永远转圈
 
 ## 6. 关键设计决策
 
@@ -143,47 +194,78 @@ Phase 4.6 暂用标准库。中文场景精度可能不够，未来升级。
 ### 6.7 备份不重启服务
 导入备份后**不重启** Tauri（SQLite 连接池已建立）。前端弹 toast 提示用户手动重启。
 
+### 6.8 大纲两阶段：先骨架，后补细节
+阶段一 LLM 只出**卷章骨架**（便宜、快），阶段二**并行**给每卷补章节详情
+（`summary` + `key_events`）。这样章节不再只有标题。
+
+- 阶段二有**调用预算上限**（`MAX_CALLS_PER_VOLUME = 24`）：超预算的章节给占位概要
+  （诚实标注「【待细化】」，**不编剧情**）
+- 内容级失败走占位，**不报 volume_error**；系统级错误才上抛
+- 失败不阻塞其他卷 —— 阶段二各卷独立结算
+
+### 6.9 词库按板块分文件管理
+`config/wordbanks/{dushi,xiuxian,xuanyi,yanqing}.yaml` —— 修仙的词不会出现在都市板块。
+写盘位置：开发态落仓库 `config/wordbanks/`，打包态落 `<data_dir>/wordbanks/`。
+
 ## 7. 数据流：章节生成（典型场景）
 
 ```
-User → Creation 页 → "流式生成" 按钮
-  ↓ POST /chapters/{id}/generate (user_prompt, target_word_count)
+User → 写作页 → "生成正文" 按钮
+  ↓ POST /chapters/{id}/generate (user_prompt=本章要点, target_word_count)
   ↓
-ChapterGenerator.stream_generate(chapter_id, user_prompt)
-  ↓ 加载 chapter / novel / characters / outline
+ChapterGenerator.stream_generate_parts(chapter_id, user_prompt, target_word_count)
+  ↓ 加载 chapter / novel / characters
+  ↓ get_chapter_outline(...) 取**本章大纲**
+  │    ·作品有大纲 → 从 structure 里按章号定位（volumes[].chapters[] / 扁平 chapters[]）
+  │    ·没有大纲   → 用 chapter.outline 字段
+  ↓ select_relevant_characters(...) 只带**本章出场**人物卡
   ↓ 拼 prompt (chapter_generation.yaml)
-  ↓ create_llm_client_for_scene("chapter_generation") → mimo OpenAI 兼容
-  ↓ AsyncIterator[str] (delta chunks)
+  ↓ create_llm_client_for_scene("chapter_generation") → OpenAI 兼容
+  ↓ AsyncIterator[(kind, text)]  kind ∈ {thinking, text}
   ↓
 FastAPI StreamingResponse(ndjson)
-  ↓ HTTP chunked transfer
+  ↓ HTTP chunked transfer（前端直连 Python，不经过 Rust）
   ↓
-前端 readNdjsonStream
+前端 readNdjsonStream → classifyChapterStreamEvent
   ↓ for await 消费
-  ↓ editorRef.appendText(text) → Tiptap 末尾插入
+  ↓ 正文 → editorRef 末尾插入（Tiptap）
+  ↓ 思考 → "模型思考中…"面板（净身后的纯中文）
   ↓
 完成 → PATCH /chapters/{id}/content (trigger=llm_generate)
+  ↓ 取**编辑器全文**落库（不能用流式累积量 —— 生成是追加、重写是替换选区）
   ↓
 DB: chapter.current_version_id = 新版本
 ```
 
 ## 8. 安全
 
-- API Key 存系统 keyring（不存 .env）
+- API Key 存储优先级：**环境变量 > DPAPI 加密文件（打包版默认）> 系统 Keyring**；
+  明文永不落盘，打包版不含 `.env`
 - SQLAlchemy ORM（防 SQL 注入）
 - 路径检查（防 zip slip / 路径越界）
 - 文件大小限制（备份 ≤500MB / 读文件 ≤5MB）
 - API 输入 Pydantic 校验
-- 章节字数硬限 1k-8k
+- 章节字数硬限 1k-8k（唯一来源：`config/llm.yaml` 的 `chapter_limits`）
 - context_window ≥ 32k 才能生成章节（`model_checker`）
+- SQLite 外键约束已开启（见 §3）—— 删作品级联清理，不留孤儿
 
 详见 [SECURITY.md](../SECURITY.md)。
 
 ## 9. 性能
 
-- 后端 `asyncio.gather` 并行 5 维度质检（~30s）
-- 流式响应首字延迟 5-15s（mimo）
-- Tiptap 编辑器对长文档不友好（O(n) per insert），Phase 9+ 优化
+| 指标 | 目标 | 实测 |
+|---|---|---|
+| 首字延迟 | 发起生成 → 首字符 ≤ 3s | 推理模型思考期可能 > 3s（思考内容会转发，不空窗） |
+| 启动时间 | 双击 exe → UI 可交互 ≤ 5s | — |
+| 流式转发开销 | 每 token ≤ 1ms | 实测 **0.5ms/token**（40 delta，间隔 50.6ms vs mock 50ms） |
+| 章节生成 prompt | 只带**本章出场**人物卡 | `select_relevant_characters()`（一个都没匹配上时退回全部） |
+
+- 后端 `asyncio.gather` 并行 5 维度质检
+- **流式链路不是瓶颈 —— 慢在模型**：别再优化"转发"环节，
+  要优化的是模型选型、输出长度、思考时长
+- 并行 LLM 调用 + **串行写库**：`AsyncSession` 不是并发安全的，
+  并发 `flush()` 会抛 `Session is already flushing`（用 `asyncio.Lock` 或 for 循环）
+- Tiptap 编辑器对长文档 O(n) per insert，Phase 9+ 优化
 - 数据库单表 1k 章内无压力
 
 ## 10. 路线图（Phase 9+）

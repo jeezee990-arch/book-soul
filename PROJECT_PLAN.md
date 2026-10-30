@@ -228,188 +228,188 @@
 ```
 book-soul/
 ├── apps/
-│   ├── desktop/                          # Tauri 桌面壳
-│   │   ├── src-tauri/
-│   │   │   ├── src/main.rs
-│   │   │   ├── tauri.conf.json
-│   │   │   └── Cargo.toml
-│   │   └── package.json
-│   └── web/                              # React 前端
+│   └── desktop/                          # Tauri 桌面壳 + React 前端（唯一前端，无 web/）
 │       ├── src/
-│       │   ├── pages/
-│       │   │   ├── Inspiration/          # 灵感园
-│       │   │   ├── Creation/             # 创作
-│       │   │   ├── QualityCheck/         # 质量检测
-│       │   │   ├── Library/              # 仓库
-│       │   │   ├── Skills/               # 技能市场
-│       │   │   └── Settings/             # 设置
-│       │   ├── components/               # 通用组件
-│       │   ├── stores/                   # Zustand 状态
-│       │   ├── api/                      # Tauri Cmd 封装
-│       │   ├── lib/                      # 工具函数
-│       │   ├── types/                    # TS 类型
+│       │   ├── pages/                   # 一级导航只有 4 项
+│       │   │   ├── Writing/             # 写作（三栏：章节树 244px | 纸感编辑区 | 上下文面板 332px）
+│       │   │   │   ├── tabs/            # 右栏 6 个 Tab：生成/重写/质检/人物/大纲/版本
+│       │   │   │   ├── chapter-tree.tsx
+│       │   │   │   ├── context-panel.tsx
+│       │   │   │   ├── editor-pane.tsx
+│       │   │   │   ├── use-chapter-stream.ts
+│       │   │   │   └── ui.tsx
+│       │   │   ├── NewBook/             # 开新书（三步向导：种子 → 剧情 → 大纲与人物）
+│       │   │   │   ├── index.tsx        # 只做渲染；流程编排全在 use-newbook-flow.ts
+│       │   │   │   ├── use-newbook-flow.ts      # 组合三条流 + 步骤跳转
+│       │   │   │   ├── use-plot-stream.ts       # 剧情流
+│       │   │   │   ├── use-outline-stream.ts    # 大纲流
+│       │   │   │   ├── use-character-stream.ts  # 人物卡流
+│       │   │   │   ├── use-elapsed-timer.ts     # 三条流共用计时器
+│       │   │   │   ├── stream-abort.ts          # AbortController 注册表（按身份清除）
+│       │   │   │   ├── first-chapter.ts         # 取第一章（纯函数，兼容两种结构）
+│       │   │   │   ├── wordbank-manager-dialog.tsx   # 种子库管理（按板块分 Tab）
+│       │   │   │   ├── wordbank-manager-list.tsx
+│       │   │   │   ├── wordbank-manager-import.tsx
+│       │   │   │   ├── wordbank-parse.ts        # 导入文本解析（纯逻辑）
+│       │   │   │   ├── wordbank-selection.ts
+│       │   │   │   ├── outline-step.tsx         # 卷标签蓝绿交替
+│       │   │   │   └── outline-structure-view.tsx
+│       │   │   ├── Library/             # 素材库（三 Tab：作品 / 灵感 / 导入）
+│       │   │   │   ├── InspirationCard.tsx         # 右键菜单 + 拖动排序
+│       │   │   │   ├── InspirationContextMenu.tsx # 重命名 / 置顶 / 删除
+│       │   │   │   ├── InspirationDialogs.tsx
+│       │   │   │   ├── InspirationList.tsx
+│       │   │   │   ├── inspiration-manage.ts     # 纯逻辑（重命名语义、排序）
+│       │   │   │   └── ScannerConfig.tsx
+│       │   │   └── Settings/            # 设置（四分区：LLM 与密钥 / 数据与备份 / AI 增强 / 外观）
+│       │   ├── components/
+│       │   │   ├── ui/                  # shadcn/ui 原子组件
+│       │   │   └── layout/
+│       │   ├── stores/                  # Zustand（7 个：workspace / novels / newbook / settings / ui / appearance / novel）
+│       │   ├── api/                     # 后端 API 封装（17 个：含 streams.ts 流式直连、wordbanks.ts）
+│       │   ├── lib/                     # 纯逻辑（utils / types / outline-merge / outline-scale /
+│       │   │                             #   auto-scroll / consistency / request-guard）
 │       │   ├── App.tsx
 │       │   └── main.tsx
-│       ├── index.html
-│       ├── tailwind.config.js
-│       ├── vite.config.ts
-│       ├── tsconfig.json
-│       └── package.json
+│       ├── src-tauri/
+│       │   ├── src/
+│       │   │   ├── lib.rs               # 桌面壳：command / 窗口事件 / 应用装配
+│       │   │   ├── sidecar.rs           # 后端定位与拉起：端口 / 数据目录 / sidecar 路径
+│       │   │   └── logging.rs           # 桌面端日志（release 无控制台）
+│       │   ├── tauri.conf.json
+│       │   ├── binaries/                # sidecar 构建产物（gitignore）
+│       │   └── Cargo.toml
+│       ├── package.json / pnpm-lock.yaml
+│       ├── vite.config.ts / vitest.config.ts
+│       └── tailwind.config.js / components.json
 ├── server/                               # Python 后端
 │   ├── src/
-│   │   ├── api/
-│   │   │   ├── novels.py
-│   │   │   ├── chapters.py
-│   │   │   ├── characters.py
-│   │   │   ├── outlines.py
-│   │   │   ├── inspirations.py
-│   │   │   ├── library.py
-│   │   │   ├── skills.py
-│   │   │   ├── quality.py
-│   │   │   ├── scanner.py
-│   │   │   ├── settings.py
-│   │   │   └── main.py
+│   │   ├── api/                         # 路由层（依赖注入 + 错误映射）
+│   │   │   ├── novels.py / chapters.py / chapter_generation.py / chapter_versioning.py
+│   │   │   ├── characters.py / outlines.py / inspirations.py / wordbanks.py
+│   │   │   ├── quality.py / scanner.py / settings.py / skills.py / llm.py
+│   │   │   ├── export.py / backup.py / main.py
+│   │   │   └── _stream_helpers.py       # NDJSON 流辅助（thinking / delta 事件）
 │   │   ├── core/
-│   │   │   ├── config.py                 # 配置加载
-│   │   │   ├── llm/
-│   │   │   │   ├── base.py
-│   │   │   │   ├── openai_compat.py
-│   │   │   │   ├── ollama.py
-│   │   │   │   ├── factory.py
-│   │   │   │   └── streaming.py
-│   │   │   ├── memory/
-│   │   │   │   ├── project_memory.py
-│   │   │   │   ├── rag_memory.py
-│   │   │   │   └── conversation_memory.py
-│   │   │   ├── workflow/
-│   │   │   │   ├── state_machine.py
-│   │   │   │   ├── new_book.py
-│   │   │   │   └── continue_book.py
-│   │   │   ├── versioning/
-│   │   │   │   ├── version_tree.py
-│   │   │   │   └── diff.py
-│   │   │   ├── security/
-│   │   │   │   ├── encryption.py
-│   │   │   │   └── keyring_manager.py
-│   │   │   ├── prompts/
-│   │   │   │   └── loader.py
-│   │   │   ├── skills/
-│   │   │   │   ├── base.py
-│   │   │   │   ├── registry.py
-│   │   │   │   ├── loader.py
-│   │   │   │   ├── executor.py
-│   │   │   │   └── builtin/
-│   │   │   │       ├── word_counter.py
-│   │   │   │       ├── sensitive_word.py
-│   │   │   │       ├── chapter_summarizer.py
-│   │   │   │       ├── character_extractor.py
-│   │   │   │       ├── plot_analyzer.py
-│   │   │   │       ├── web_search.py
-│   │   │   │       ├── read_local_file.py
-│   │   │   │       ├── consistency_checker.py
-│   │   │   │       ├── style_analyzer.py
-│   │   │   │       ├── pacing_visualizer.py
-│   │   │   │       ├── outline_structurer.py
-│   │   │   │       └── genre_classifier.py
-│   │   │   └── scanner/
-│   │   │       ├── novel_detector.py
-│   │   │       ├── novel_scanner.py
-│   │   │       └── novel_importer.py
-│   │   ├── models/                       # SQLAlchemy ORM
+│   │   │   ├── llm/                     # LLM 抽象（业务层禁止直接碰 httpx）
+│   │   │   │   ├── base.py / factory.py / openai_compat.py / ollama.py
+│   │   │   │   ├── streaming.py         # SSE 解析
+│   │   │   │   ├── thinking.py          # 思考内容净身（纯中文）
+│   │   │   │   ├── cache.py             # 健康/模型清单缓存（TTL + SWR）
+│   │   │   │   ├── partial_json.py      # 流式 JSON 增量解析
+│   │   │   │   ├── formatting.py / model_checker.py
+│   │   │   ├── skills/                  # Skill 系统
+│   │   │   │   ├── base.py / registry.py / manager.py / loader.py
+│   │   │   │   └── builtin/             # 12 个内置 skill
+│   │   │   ├── security/                # dpapi / secret_store / encryption / keyring_manager
+│   │   │   ├── scanner/                 # 本地扫描
+│   │   │   ├── quality/                 # 质检 prompt
+│   │   │   ├── versioning/              # 版本树 + diff
+│   │   │   ├── chapter_context.py       # 上下文组装（人物卡 → prompt）
+│   │   │   ├── paths.py                 # 路径解析统一入口（开发态/打包态）
+│   │   │   ├── watchdog.py              # 父进程看门狗
+│   │   │   ├── config.py / logging.py
+│   │   │   ├── memory/                  # ⚠️ 遗留：RAG 已移除，业务代码未引用（待清理）
+│   │   │   └── workflow/                # ⚠️ 遗留：未被任何业务/测试引用（待清理）
+│   │   ├── models/                       # SQLAlchemy ORM（7 张表）
 │   │   │   ├── base.py
 │   │   │   ├── novel.py
 │   │   │   ├── chapter.py
 │   │   │   ├── character.py
 │   │   │   ├── outline.py
-│   │   │   ├── inspiration.py
-│   │   │   └── version.py
+│   │   │   └── inspiration.py
 │   │   ├── schemas/                      # Pydantic
-│   │   │   ├── novel.py
-│   │   │   ├── chapter.py
-│   │   │   ├── character.py
-│   │   │   ├── outline.py
-│   │   │   ├── inspiration.py
-│   │   │   └── skill.py
-│   │   ├── services/                     # 业务逻辑
-│   │   │   ├── novel_service.py
-│   │   │   ├── chapter_service.py
-│   │   │   ├── character_service.py
-│   │   │   ├── outline_service.py
-│   │   │   ├── inspiration_service.py
-│   │   │   ├── library_service.py
-│   │   │   ├── quality_service.py
-│   │   │   ├── skill_service.py
+│   │   │   ├── novel.py / chapter.py / character.py
+│   │   │   ├── outline.py / inspiration.py / wordbank.py / skill.py
+│   │   ├── services/                     # 业务逻辑（27 个）
+│   │   │   ├── novel_service.py / chapter_service.py / character_service.py
+│   │   │   ├── chapter_generator.py / chapter_rewriter.py
+│   │   │   ├── outline_service.py / outline_generator.py / outline_skeleton.py
+│   │   │   ├── outline_detail.py        # 阶段二：分卷补细节 + 调用预算
+│   │   │   ├── outline_two_phase.py / outline_single_phase.py / outline_continuation.py
+│   │   │   ├── outline_prompts.py / outline_errors.py
+│   │   │   ├── plot_service.py           # 剧情生成（内容实时 + 里程碑保序）
+│   │   │   ├── character_generator.py / character_stream.py / _character_helpers.py
+│   │   │   ├── inspiration_service.py    # 素材（重命名/置顶/排序/批量删）
+│   │   │   ├── wordbank_service.py / wordbank_importer.py / wordbank_writer.py
+│   │   │   ├── quality_service.py / settings_service.py
+│   │   │   ├── export_service.py / export_docx.py / backup_service.py
 │   │   │   └── scanner_service.py
-│   │   └── db.py
-│   ├── tests/
-│   │   ├── test_config.py
-│   │   ├── test_llm.py
-│   │   ├── test_memory.py
-│   │   ├── test_skills.py
-│   │   ├── test_character_service.py
+│   │   └── db.py                        # 引擎 + 通用补列 + 外键约束 + 孤儿清理
+│   ├── tests/                           # 59 个测试文件
+│   │   ├── test_chapter_context.py / test_llm_streaming_contract.py
+│   │   ├── test_queue_merge.py / test_queue_merge_milestone.py
+│   │   ├── test_schema_backfill.py / test_foreign_keys.py
+│   │   ├── test_think_splitter.py / test_thinking_sanitize.py
+│   │   ├── test_wordbank_management.py / test_wordbank_import_validation.py
+│   │   ├── test_inspiration_manage.py / test_outline_detail.py
 │   │   └── ...
 │   ├── alembic/
 │   ├── alembic.ini
-│   ├── pyproject.toml
-│   └── README.md
+│   ├── book_soul.spec                   # PyInstaller 打包配置
+│   ├── run_server.py                    # 打包入口（绝对 import）
+│   └── pyproject.toml
 ├── config/
-│   ├── llm.yaml
-│   ├── genres/
-│   │   ├── xuanhuan.yaml
+│   ├── llm.yaml                         # provider 配置 + 场景路由 + 模型规格
+│   ├── app.yaml                         # 用户级默认配置
+│   ├── settings.example.yaml
+│   ├── genres/                          # 题材常识（4 个板块）
 │   │   ├── dushi.yaml
-│   │   ├── kehuan.yaml
+│   │   ├── xiuxian.yaml
 │   │   ├── xuanyi.yaml
 │   │   └── yanqing.yaml
-│   ├── wordbanks/
-│   │   ├── xuanhuan.yaml
+│   ├── wordbanks/                       # 种子词库（**按板块分开管理**，4 个板块）
 │   │   ├── dushi.yaml
-│   │   └── ...
-│   ├── styles/
-│   ├── prompts/
-│   │   ├── inspiration_keywords.yaml
+│   │   ├── xiuxian.yaml
+│   │   ├── xuanyi.yaml
+│   │   └── yanqing.yaml
+│   ├── prompts/                         # 13 个提示词（运行时依赖，打包时必须进包）
 │   │   ├── plot_generation.yaml
-│   │   ├── outline_complete.yaml
+│   │   ├── outline_skeleton.yaml        # 阶段一：卷章骨架
+│   │   ├── outline_volume_detail.yaml   # 阶段二：分卷补细节
+│   │   ├── outline_continue_skeleton.yaml
 │   │   ├── outline_freedom.yaml
 │   │   ├── character_generation.yaml
 │   │   ├── chapter_generation.yaml
 │   │   ├── chapter_rewrite.yaml
-│   │   ├── quality_writing.yaml
-│   │   ├── quality_logic.yaml
-│   │   ├── quality_pacing.yaml
-│   │   ├── quality_consistency.yaml
-│   │   ├── quality_genre.yaml
-│   │   └── ...
-│   └── skills/
-│       ├── builtin/
-│       │   └── *.yaml                    # 预装 skill 元数据
-│       └── user/                         # 用户自定义 skill（运行时生成）
+│   │   ├── quality_writing.yaml / quality_logic.yaml / quality_pacing.yaml
+│   │   └── quality_consistency.yaml / quality_genre.yaml
+│   ├── skills/                          # 用户自定义 skill
+│   └── skill_template/                  # skill 脚手架（manifest.yaml + handler.py）
 ├── data/                                 # 运行时数据（不入 git）
-│   ├── novels/
-│   ├── chroma/
-│   ├── logs/
-│   └── book-soul.db
+│   ├── book-soul.db                     # SQLite 单文件（全部业务数据）
+│   ├── secrets/                         # DPAPI 加密的 API Key
+│   ├── wordbanks/                       # 打包态词库写盘位置
+│   ├── skills/                          # 用户 skill
+│   └── logs/                            # 后端 / 桌面端日志
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml                        # CI（lint + test + build）
 │       └── release.yml                   # 自动发版
 ├── docs/
-│   ├── USER_GUIDE.md
-│   ├── API.md
-│   └── ARCHITECTURE.md
+│   ├── USER_GUIDE.md / START_GUIDE.md
+│   ├── API.md                            # API 参考
+│   ├── ARCHITECTURE.md                   # 架构说明
+│   └── SKILLS.md                         # Skill 手册
 ├── scripts/
-│   ├── setup.ps1                         # Windows 初始化脚本
-│   ├── dev.ps1                           # 开发启动脚本
-│   └── check.ps1                         # 检验脚本
+│   ├── dev.ps1 / start_backend.ps1       # 开发模式
+│   ├── build_sidecar.ps1 / build_standalone.ps1   # 打包（独立版产物在 dist/Book Soul/）
+│   ├── launcher.vbs / launcher_hidden.ps1        # 零控制台启动器
+│   ├── install_shortcut.ps1 / uninstall_shortcut.ps1
+│   ├── generate_icons.ps1
+│   ├── mock_provider.py / mock_content.py / perf_probe.py   # 无 Key 也能跑通全流程
 ├── .gitignore
 ├── .env.example
 ├── .gitleaks.toml
 ├── .pre-commit-config.yaml
 ├── .ruff.toml
 ├── AGENTS.md                             # ⭐ 项目规范
+├── DEVELOPMENT_CONSTRAINTS.md           # 行为约束（沟通 / 流程 / 决策）
 ├── LICENSE                               # MIT
 ├── PROJECT_PLAN.md                       # 本文档
 ├── USER_CHECKLIST.md                     # 用户准备清单
 ├── pyproject.toml                        # uv workspace 根
+├── uv.lock
 ├── README.md
 └── SECURITY.md
 ```
@@ -445,6 +445,9 @@ book-soul/
 
 ## 4. 数据库 Schema（最终态）
 
+> 与 ORM（`server/src/models/`）保持一致。共 **7 张表**。
+> Skill 注册走内存 registry，用户配置走 `data/.book-soul-settings.yaml`，**不入库**。
+
 ```sql
 -- 作品
 CREATE TABLE novels (
@@ -454,7 +457,7 @@ CREATE TABLE novels (
   style TEXT,
   description TEXT,
   status TEXT DEFAULT 'draft',
-  outline_mode TEXT,                     -- 'complete' / 'freedom'
+  outline_mode TEXT,                     -- 'complete' / 'semi_open' / 'freedom'
   file_path TEXT,                        -- 本地文件路径
   imported INTEGER DEFAULT 0,            -- 是否扫描接入
   read_only INTEGER DEFAULT 0,
@@ -478,7 +481,8 @@ CREATE TABLE characters (
   is_active INTEGER DEFAULT 1,
   created_at TIMESTAMP,
   updated_at TIMESTAMP,
-  FOREIGN KEY (novel_id) REFERENCES novels(id)
+  FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+  FOREIGN KEY (current_version_id) REFERENCES character_versions(id) ON DELETE SET NULL
 );
 
 -- 人物卡版本
@@ -490,7 +494,8 @@ CREATE TABLE character_versions (
   change_reason TEXT,
   trigger_event TEXT,
   created_at TIMESTAMP,
-  FOREIGN KEY (character_id) REFERENCES characters(id)
+  FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+  FOREIGN KEY (parent_version_id) REFERENCES character_versions(id) ON DELETE SET NULL
 );
 
 -- 大纲
@@ -500,7 +505,8 @@ CREATE TABLE outlines (
   outline_type TEXT NOT NULL,
   structure JSON NOT NULL,
   created_at TIMESTAMP,
-  updated_at TIMESTAMP
+  updated_at TIMESTAMP,
+  FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
 );
 
 -- 章节
@@ -514,7 +520,9 @@ CREATE TABLE chapters (
   word_count INTEGER DEFAULT 0,
   status TEXT DEFAULT 'outline',
   created_at TIMESTAMP,
-  updated_at TIMESTAMP
+  updated_at TIMESTAMP,
+  FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,
+  FOREIGN KEY (current_version_id) REFERENCES chapter_versions(id) ON DELETE SET NULL
 );
 
 -- 章节版本
@@ -527,10 +535,13 @@ CREATE TABLE chapter_versions (
   trigger TEXT,
   prompt TEXT,
   metadata JSON,
-  created_at TIMESTAMP
+  word_count INTEGER DEFAULT 0,
+  created_at TIMESTAMP,
+  FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+  FOREIGN KEY (parent_version_id) REFERENCES chapter_versions(id) ON DELETE SET NULL
 );
 
--- 灵感
+-- 灵感 / 素材
 CREATE TABLE inspirations (
   id INTEGER PRIMARY KEY,
   novel_id INTEGER,
@@ -538,53 +549,46 @@ CREATE TABLE inspirations (
   content JSON NOT NULL,
   source TEXT,
   tags TEXT,
-  created_at TIMESTAMP
-);
-
--- Skill 注册
-CREATE TABLE skills (
-  id INTEGER PRIMARY KEY,
-  name TEXT UNIQUE NOT NULL,
-  description TEXT,
-  source TEXT,                          -- 'builtin' / 'user'
-  enabled INTEGER DEFAULT 1,
-  config JSON,
-  created_at TIMESTAMP
-);
-
--- Skill 调用日志
-CREATE TABLE skill_calls (
-  id INTEGER PRIMARY KEY,
-  skill_name TEXT NOT NULL,
-  novel_id INTEGER,
-  input JSON,
-  output JSON,
-  duration_ms INTEGER,
-  created_at TIMESTAMP
-);
-
--- 用户配置
-CREATE TABLE settings (
-  key TEXT PRIMARY KEY,
-  value JSON,
-  updated_at TIMESTAMP
-);
-
--- 通用版本表（兼容大纲、人物卡、章节）
-CREATE TABLE versions (
-  id INTEGER PRIMARY KEY,
-  entity_type TEXT NOT NULL,
-  entity_id INTEGER NOT NULL,
-  parent_version_id INTEGER,
-  content TEXT NOT NULL,
-  diff TEXT,
-  trigger TEXT,
-  prompt TEXT,
-  metadata JSON,
+  title TEXT,                             -- 自定义标题（NULL = 回落自动摘要）
+  pinned INTEGER DEFAULT 0 NOT NULL,      -- 是否置顶（列表排序里置顶永远在前）
+  sort_order INTEGER DEFAULT 0 NOT NULL,  -- 手动排序序号（下标越小越靠前）
   created_at TIMESTAMP,
-  INDEX idx_entity (entity_type, entity_id)
+  FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE SET NULL
 );
+
+-- Skill 注册（❌ 不建表：实际走内存 registry + config/skills/ 元数据）
+
+-- Skill 调用日志（❌ 不建表）
+
+-- 用户配置（❌ 不建表：实际存 data/.book-soul-settings.yaml）
+
+-- 通用版本表（❌ 不建表：改用 chapter_versions / character_versions 两张专用表）
 ```
+
+### 4.1 SQLite 外键约束（必须显式开启）
+
+SQLite 的 `PRAGMA foreign_keys` **默认是 OFF**（历史兼容原因），SQLAlchemy 的
+SQLite 方言也不会改它 —— 这意味着 ORM 里写的 `ondelete="CASCADE"` /
+`"SET NULL"` **完全不生效**：
+
+- 删掉一部作品，它的章节 / 人物卡 / 大纲全留在库里；
+- 更糟的是模型里的 id 没有 `AUTOINCREMENT`，SQLite 会**复用**被删掉的最大 id
+  → 重建作品拿到同一个 id → **上一部作品的章节串进新作品**。
+
+实测事故：删 novel 4 → 重建得到 novel 4 → 建章节直接 422
+`Chapter number 1 already exists in novel 4`（冲突的是上一部作品留下的章节）。
+
+**实现要求**：
+
+1. `core/db.py` 在连接建立时执行 `PRAGMA foreign_keys=ON`；
+2. 启动时清理历史遗留的孤儿行 —— 按 `ondelete` 语义区分：
+   - `CASCADE` → **删掉**孤儿子行（章节 / 人物 / 大纲）
+   - `SET NULL` → **置 NULL**，数据本身保留（素材是用户写的，不能跟着删）
+3. 补列机制同样从 ORM 元数据自动推导，不硬编码表名；
+   SQLite 的 `ALTER TABLE ADD COLUMN` 不支持 PRIMARY KEY / UNIQUE，
+   带 REFERENCES 的列必须可空（默认值 NULL），否则跳过并记 error。
+
+契约测试：`server/tests/test_foreign_keys.py`、`server/tests/test_schema_backfill.py`。
 
 ---
 
@@ -2626,10 +2630,11 @@ CREATE TABLE versions (
 
 1. ruff format --check
 2. ruff check
-3. pytest --cov（覆盖率 > 60%）
-4. mypy src
+3. pytest --cov（覆盖率 ≥ 70%，核心模块 ≥ 80%）
+4. mypy src/core src/services（限定范围；CI 先告警不阻塞）
 5. 前端 tsc --noEmit
-6. 前端 pnpm build
+6. 前端 pnpm test（vitest）
+7. 前端 pnpm build
 
 **不通过 = 红色 ✗**。
 
@@ -3077,33 +3082,33 @@ pre-commit run --all-files
 
 > 用户可复制这个 checklist 跟踪进度
 
-### Phase 0：环境与基建
-- [ ] 0.1 创建 GitHub 仓库
-- [ ] 0.2 基础配置文件
-- [ ] 0.3 Python 后端初始化
-- [ ] 0.4 日志与配置
-- [ ] 0.5 LLM 抽象层
-- [ ] 0.6 数据库初始化
-- [ ] 0.7 Tauri 桌面壳
-- [ ] 0.8 质量门禁
-- [ ] 0.9 GitHub Actions CI
-- [ ] 0.10 Hello World 验证
+### Phase 0：环境与基建 ✅
+- [x] 0.1 创建 GitHub 仓库
+- [x] 0.2 基础配置文件
+- [x] 0.3 Python 后端初始化
+- [x] 0.4 日志与配置
+- [x] 0.5 LLM 抽象层
+- [x] 0.6 数据库初始化（含**通用补列** + **外键约束** + **孤儿清理**）
+- [x] 0.7 Tauri 桌面壳
+- [x] 0.8 质量门禁（pre-commit + ruff + gitleaks）
+- [x] 0.9 GitHub Actions CI
+- [x] 0.10 Hello World 验证
 
-### Phase 1：核心后端服务
-- [ ] 1.1 作品 CRUD
-- [ ] 1.2 人物卡 CRUD ⭐
-- [ ] 1.3 章节 CRUD + 版本
-- [ ] 1.4 大纲 CRUD
-- [ ] 1.5 灵感库 CRUD
-- [ ] 1.6 加密服务
-- [ ] 1.7 记忆系统骨架
+### Phase 1：核心后端服务 ✅
+- [x] 1.1 作品 CRUD
+- [x] 1.2 人物卡 CRUD ⭐
+- [x] 1.3 章节 CRUD + 版本
+- [x] 1.4 大纲 CRUD（两阶段：骨架 → 分卷补细节）
+- [x] 1.5 灵感库 CRUD（含重命名 / 置顶 / 排序 / 批量删）
+- [x] 1.6 加密服务（DPAPI 优先）
+- [x] 1.7 记忆系统骨架（⚠️ RAG 已移除，`core/memory/` 为遗留待清理）
 
-### Phase 2：桌面壳 + 前端骨架
-- [ ] 2.1 路由与基础布局
-- [ ] 2.2 shadcn/ui 集成
-- [ ] 2.3 Tauri ↔ Python 通信
-- [ ] 2.4 设置页基础
-- [ ] 2.5 Zustand 状态管理
+### Phase 2：桌面壳 + 前端骨架 ✅
+- [x] 2.1 路由与基础布局（AppShell：52px 顶栏 + 56px 图标栏）
+- [x] 2.2 shadcn/ui 集成
+- [x] 2.3 Tauri ↔ Python 通信（随机空闲端口 + 就绪握手）
+- [x] 2.4 设置页基础
+- [x] 2.5 Zustand 状态管理（7 个 store）
 
 ### Phase 3：灵感园 - 开新书（v1.2 三步流程）✅
 - [x] 3.1 灵感词选择步（题材+词库+保存关键词卡片）
@@ -3114,39 +3119,45 @@ pre-commit run --all-files
 - [x] 3.6 人物卡管理 UI
 - [x] 3.7 状态机实现
 - [x] 3.8 保存导出
+- [x] 3.9 种子库管理（**按板块分 Tab**，批量增删改 + 导入）🆕
 
-### Phase 4：创作
-- [ ] 4.1 作品选择
-- [ ] 4.2 Tiptap 集成
-- [ ] 4.3 章节生成（流式）
-- [ ] 4.4 选区 AI 重写
-- [ ] 4.5 提示词框
-- [ ] 4.6 版本控制
-- [ ] 4.7 导出 md/word
+### Phase 4：创作 ✅
+- [x] 4.1 作品选择（顶栏全局唯一作品切换器）
+- [x] 4.2 Tiptap 集成（纸感编辑区，固定浅色）
+- [x] 4.3 章节生成（流式）⭐
+- [x] 4.4 选区 AI 重写
+- [x] 4.5 提示词框（本章要点作为额外提示词）
+- [x] 4.6 版本控制（版本树 + diff + 回滚）
+- [x] 4.7 导出 md/word
+- [x] 4.8 大纲两阶段细化（章节补全内容，不再只有标题）🆕
+- [x] 4.9 按本章大纲自动创作 ⭐ 🆕
+- [x] 4.10 目标字数滑动条（1000~8000，步进 100）🆕
 
-### Phase 5：质量检测
-- [ ] 5.1 检测范围选择
-- [ ] 5.2 多维度并行评分
-- [ ] 5.3 人设一致性
-- [ ] 5.4 题材合规性
-- [ ] 5.5 报告 UI
+### Phase 5：质量检测 ✅
+- [x] 5.1 检测范围选择
+- [x] 5.2 多维度并行评分
+- [x] 5.3 人设一致性
+- [x] 5.4 题材合规性
+- [x] 5.5 报告 UI
 
-### Phase 6：仓库
-- [ ] 6.1 灵感库
-- [ ] 6.2 藏书馆
-- [ ] 6.3 本地文件夹扫描 ⭐
-- [ ] 6.4 Skill 系统基础
+### Phase 6：仓库 ✅
+- [x] 6.1 灵感库（右键菜单 + 批量管理模式）🆕
+- [x] 6.2 藏书馆
+- [x] 6.3 本地文件夹扫描 ⭐
+- [x] 6.4 Skill 系统基础
+- [x] 6.5 素材右键菜单（重命名 / 置顶 / 删除）🆕
+- [x] 6.6 素材批量管理（勾选删除 + 拖动排序）🆕
 
-### Phase 7：优化与 Skill 完善
-- [ ] 7.1 剩余 9 个 Skill
-- [ ] 7.2 Skill 市场 UI
-- [ ] 7.3 错误处理
-- [ ] 7.4 备份恢复
+### Phase 7：优化与 Skill 完善 ✅
+- [x] 7.1 剩余 9 个 Skill（内置共 12 个）
+- [x] 7.2 Skill 市场 UI
+- [x] 7.3 错误处理（流式失败两类：transport + server）
+- [x] 7.4 备份恢复
 
-### Phase 8：打包与发布
-- [ ] 8.1 Tauri 打包配置
-- [ ] 8.2 自动 Release
-- [ ] 8.3 文档完善
+### Phase 8：打包与发布 ✅
+- [x] 8.1 Tauri 打包配置（`scripts/build_standalone.ps1` → `dist/Book Soul/`）
+- [x] 8.2 自动 Release
+- [x] 8.3 文档完善
 
 ---
 

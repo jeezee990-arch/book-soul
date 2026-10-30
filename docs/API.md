@@ -115,6 +115,24 @@ Response: `{"new_version": ChapterVersion, "rolled_back_to": int}`
 1. 抽取：从大纲抽人物列表
 2. 生成：逐个生成完整卡
 
+### `POST /novels/{id}/characters/generate-from-outline`
+**从已生成的大纲**抽取并生成人物卡（非流式）。
+
+### `POST /novels/{id}/characters/generate-from-outline/stream`
+流式从大纲生成人物卡（NDJSON）。
+
+| 事件 | 字段 | 说明 |
+|---|---|---|
+| `thinking` | `index`, `text` | 思考内容（净身后纯中文） |
+| `delta` | `index`, `text` | 人物卡正文增量 |
+| `card` | `index`, `character` | 某张卡完成（已落库） |
+| `error` | `index`, `message` | 某张卡失败 |
+| `done` | `provider`, `model`, `elapsed_sec` | 全部完成 |
+
+> **并行 LLM 调用 + 串行写库**：卡片是并发生成的，但**入库必须串行**
+> （`asyncio.Lock`）—— `AsyncSession` 不是并发安全的，并发 `flush()` 会抛
+> `Session is already flushing`。
+
 ---
 
 ## Outlines
@@ -150,19 +168,31 @@ Body:
 ### `POST /novels/outlines/generate/stream`
 流式生成大纲（NDJSON）。
 
-事件协议（2026-10-25 改版）：
+事件协议（2026-10-25 改版，2026-10-29 补两阶段细化事件）：
 
 | 事件 | 载荷 | 说明 |
 |------|------|------|
 | `start` | `phase`, `outline_type` | 开始 |
 | `thinking` | `text` | 模型思考中（推理模型的内容，**不丢**） |
+| `skeleton` | `structure` | **阶段一**：卷章骨架生成完成 |
+| `volume_start` | `index`, `name` | **阶段二**：某卷开始补细节 |
+| `volume_done` | `index`, `name` | 某卷补细节完成 |
 | `partial` | `structure`, `chapters_done` | **已解析好的**部分大纲结构（卷 → 章 → 关键事件） |
+| `structure_ready` | `structure` | 全部卷细化完成 |
 | `done` | `novel_id`, `outline_id`, `structure`, `provider`, `model`, `elapsed_sec`, `first_delta_sec` | 完成（含耗时统计） |
 | `error` | `message` | 失败 |
 
 > ⚠️ 2026-10-25 之前还有 `delta` 事件（LLM 吐的**原始 JSON** 文本）。
 > 现在不再发送 —— 前端拿到 `delta` 只会渲染出一堆 JSON 代码。
 > `partial` 里的 `structure` 已经是解析结果，直接渲染即可。
+
+> **两阶段细化**：阶段一只出卷章骨架，阶段二**并行**补每卷的章节详情
+> （`summary` + `key_events`），所以章节不再只有标题。
+> 阶段二有**调用预算上限**（`MAX_CALLS_PER_VOLUME = 24`）：超预算的章节
+> 给占位概要（诚实标注「【待细化】」，不编剧情）。
+
+### `POST /novels/{id}/outlines/{outline_id}/continue/stream`
+AI 辅助续写大纲（NDJSON；新增卷追加到原大纲末尾）。
 
 ---
 
@@ -182,12 +212,43 @@ Body:
 ### `POST /inspirations/generate-plot`
 生成 n 个剧情版本（不入库）。
 
+### `POST /inspirations/generate-plot/stream`
+流式生成剧情版本（NDJSON）。
+
+Body: `{"genre": "xuanhuan", "keywords": ["剑修"], "n_versions": 3, "user_extra": ""}`
+
+| 事件 | 字段 | 说明 |
+|---|---|---|
+| `version_start` | `index` | 某版本开始（1-based） |
+| `thinking` | `index`, `text` | 模型思考内容（**已净身，纯中文**，不丢内容） |
+| `delta` | `index`, `text` | 正文增量 |
+| `version_done` | `index`, `summary` | 某版本完成 |
+| `error` | `index`, `message` | **单个版本**失败（不影响其他版本） |
+| `done` | `provider`, `model`, `elapsed_sec`, `first_delta_sec` | 全部完成 |
+
+> **保序语义**：内容事件（thinking / delta）按到达顺序**实时**透传；
+> 只有里程碑事件（`version_done` / `error`）按下标保序。
+> 失败的版本同样参与保序（到达终态就让指针前进），不会卡住后续版本。
+
+### `POST /inspirations/reorder`
+手动排序（拖动 / 批量管理用）。
+
+Body: `{"ids": [3, 1, 2]}` —— 按数组顺序写 `sort_order`。
+
+> 未出现在列表里的条目会按原相对次序**推到后面**（不会因为 `sort_order=0` 跳到最前）。
+
+### `POST /inspirations/batch-delete`
+批量删除。Body: `{"ids": [1, 2, 3]}`
+
 ---
 
 ## Quality（Phase 5）
 
 ### `POST /novels/{id}/chapters/{cid}/quality`
 5 维度并行评分。返回 `QualityReport`（总分 + 维度分 + issues + suggestions）。
+
+### `POST /novels/{id}/chapters/{cid}/quality/stream`
+流式质检（NDJSON），逐维度出分。
 
 ---
 
@@ -253,11 +314,56 @@ Response: `{"files": int, "manifest_present": bool, "db_backed_up": bool}`
 
 ## LLM
 
-### `GET /llm/providers`
-列出配置的 provider。
+### `GET /llm/health?provider=xx`
+Provider 健康检查（**必须带 API Key** —— `/models` 端点需鉴权，否则无法区分
+"服务挂了"和"key 错了"）。
 
-### `GET /llm/test/{provider}`
-测试连通性。
+- 结果走 `core/llm/cache.py`：健康 **60s** / 模型清单 **300s** TTL + stale-while-revalidate
+- 过期时**先返回旧值再后台刷新** —— 前端永远不等网络
+- 改 key / 换 provider 后由 `services/settings_service.py` 作废缓存
+- `provider` 可省略（检查全部）
+
+### `GET /llm/models?provider=xx&refresh=1`
+列出该 provider 可用模型。`refresh=1` 绕过缓存（设置页「刷新列表」用）。
+
+### `POST /llm/test`
+测试连通性。Body: `{"provider": "minimax", "model": "..."}`
+
+---
+
+## WordBanks（种子库，按板块分开管理）
+
+> 板块（genre）互不相通 —— 修仙的词不会出现在都市板块里。
+
+### `GET /wordbanks`
+列出所有板块。Response: `{"genres": [{"id", "name", "count", ...}]}`
+
+### `GET /wordbanks/{genre}`
+列出该板块的词（按分类）。
+
+### `GET /wordbanks/{genre}/all-words`
+返回该板块**全部**词 + 分类列表（种子库管理弹窗用）。
+
+Response: `{"categories": [...], "words": {...}}`
+
+### `POST /wordbanks/{genre}/words`
+添加一个新词。Body: `{"category": "themes", "word": "新词"}`
+
+### `PATCH /wordbanks/{genre}/words`
+修改一个词。Body: `{"category": "themes", "word": "旧词", "new_word": "新词"}`
+
+### `DELETE /wordbanks/{genre}/words`
+删除一个词。Body: `{"category": "themes", "word": "要删的词"}`
+
+### `POST /wordbanks/{genre}/import`
+批量导入（JSON）。Body:
+`{"items": [{"word": "...", "category": "themes"}], "default_category": "themes"}`
+
+- `default_category` 必须是该板块**实际存在**的分类，否则 **422**（带可用分类列表）
+- 返回 `{"imported": int, "skipped": int, "errors": [...]}`
+
+### `POST /wordbanks/{genre}/import-file`
+导入文件（原始 body 上传，**multipart**，字段名 `file`）。
 
 ---
 
