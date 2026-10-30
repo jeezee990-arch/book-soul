@@ -8,6 +8,15 @@
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-blueviolet.svg)](https://tauri.app/)
 [![Tests 979](https://img.shields.io/badge/tests-979%20passed-brightgreen.svg)](server/tests)
 
+<p align="center">
+  <img src="docs/screenshots/01-writing-dark.png" width="49%" alt="写作页三栏">
+  <img src="docs/screenshots/04-newbook-dark.png" width="49%" alt="开新书三步向导">
+</p>
+<p align="center">
+  <img src="docs/screenshots/02-library-light.png" width="49%" alt="素材库">
+  <img src="docs/screenshots/03-settings-dark.png" width="49%" alt="设置">
+</p>
+
 ## 项目简介
 
 Book Soul 是一款为网文作者和严肃文学作者设计的 **AI 辅助写作桌面应用**。
@@ -31,18 +40,19 @@ Book Soul 是一款为网文作者和严肃文学作者设计的 **AI 辅助写�
 
 | 页面 | 路由 | 内容 |
 |---|---|---|
-| ✍️ **写作** | `/` | 三栏：章节树 244px \| 纸感编辑区 \| 上下文面板 332px（右栏 6 个 Tab：生成 / 重写 / 质检 / 人物 / 大纲 / 版本） |
+| ✍️ **写作** | `/` | 三栏：章节树 244px \| 纸感编辑区 \| 上下文面板 332px（右栏 6 Tab：生成 / 重写 / 质检 / 人物 / 大纲 / 版本） |
 | 🆕 **开新书** | `/new` | 三步向导：种子 → 剧情 → 大纲与人物 |
 | 📚 **素材库** | `/library` | 三 Tab：作品 / 灵感 / 导入 |
 | ⚙️ **设置** | `/settings` | 四分区：LLM 与密钥 / 数据与备份 / AI 增强 / 外观 |
 
 > 质检、人物卡、大纲、版本都是「当前章节的上下文」，不是独立页面 —— 全部收在写作页右栏。
+> 设计决策与视觉规范见 [docs/DESIGN.md](./docs/DESIGN.md)。
 
 ---
 
 ## 快速启动
 
-### 方式 A：独立版（推荐给普通用户）
+### 方式 A · 独立版（推荐给普通用户）
 
 **不需要**装 Python / Node / Rust，**不需要**开终端，**不会**弹黑色控制台。
 
@@ -53,7 +63,7 @@ Book Soul 是一款为网文作者和严肃文学作者设计的 **AI 辅助写�
 
 > 安装模式是 `currentUser`，装到你的用户目录（不写 `Program Files`，避免只读导致数据写不进去）。
 
-### 方式 B：开发模式（改代码时用）
+### 方式 B · 开发模式（改代码时用）
 
 **环境要求**
 
@@ -121,7 +131,7 @@ cd apps/desktop && pnpm build
 cd apps/desktop/src-tauri && cargo check
 ```
 
-### 方式 C：构建独立版
+### 方式 C · 构建独立版
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_standalone.ps1
@@ -158,9 +168,9 @@ powershell -ExecutionPolicy Bypass -File scripts\uninstall_shortcut.ps1 # 卸
 book-soul/
 ├── apps/desktop/                    # Tauri 2 桌面壳 + React 前端
 │   ├── src/
-│   │   ├── App.tsx                  # 路由表（HashRouter）
+│   │   ├── App.tsx                  # 路由表（HashRouter，4 个一级页面）
 │   │   ├── components/              # 通用组件
-│   │   │   ├── layout/              # 应用外壳（顶栏 / 图标栏）
+│   │   │   ├── layout/              # 应用外壳（52px 顶栏 / 56px 图标栏）
 │   │   │   ├── ui/                  # shadcn/ui 原子组件
 │   │   │   ├── novel-switcher.tsx   # 全局作品切换器（唯一入口）
 │   │   │   ├── model-status-pill.tsx# 顶栏模型状态灯
@@ -230,21 +240,25 @@ book-soul/
 │   └── mock_provider.py             # 无 API Key 也能走完「开新书」三步
 │
 ├── docs/                            # 文档
+│   ├── DESIGN.md                    # 界面设计规范（信息架构 + 视觉规范）
 │   ├── PROJECT_STRUCTURE.md         # 项目结构详解（目录职责 + 数据流）
 │   ├── START_GUIDE.md               # 启动方式 + 人工验证清单
 │   ├── USER_GUIDE.md                # 功能使用说明
+│   ├── TROUBLESHOOTING.md           # 排障与应急手册
 │   ├── ARCHITECTURE.md              # 架构设计 / 数据模型 / 关键决策
 │   ├── API.md                       # 后端 API 参考
 │   ├── SKILLS.md                    # Skill 系统说明
-│   └── ui-redesign/                 # 2026-10 UI 重设计稿与截图
+│   └── screenshots/                 # 真机截图
 │
-├── data/                            # 运行时数据（不入 git）
-│   ├── dev/                         # 开发态数据（数据库 / 日志 / 密钥）
-│   └── ...
-├── dist/Book Soul/                  # 独立版产物（便携目录，gitignore）
-├── .github/workflows/               # ci.yml / release.yml
+├── pyproject.toml                   # uv workspace 根（members = ["server"]）
+├── uv.lock                          # Python 依赖锁定
 ├── AGENTS.md                        # 技术规范（强制）
-└── DEVELOPMENT_CONSTRAINTS.md       # 行为约束（沟通 / 流程 / 决策）
+├── DEVELOPMENT_CONSTRAINTS.md       # 行为约束（沟通 / 流程 / 决策）
+├── PROJECT_PLAN.md                  # 项目计划书（历史快照 + 决策记录）
+├── SECURITY.md                      # 安全策略
+├── data/                            # 运行时数据（不入 git）
+├── dist/Book Soul/                  # 独立版产物（便携目录，gitignore）
+└── .github/workflows/               # ci.yml / release.yml
 ```
 
 ### 分层铁律
@@ -272,7 +286,7 @@ book-soul/
 | 打包 | PyInstaller（后端 sidecar）+ Tauri bundler（应用壳） |
 | 包管理 | uv（Python）/ pnpm（Node） |
 | 测试 | pytest 766 + vitest 213 = **979 个用例** |
-| CI | GitHub Actions |
+| CI | GitHub Actions（backend / frontend / packaging-smoke） |
 
 > **没有 ChromaDB / 向量库** —— 早期设计里的 RAG 已移除：个人网文收益低（要 50+ 章才体现）、
 > 负担重（embedding 依赖 + 向量库 + 检索调优）。当前用「人物卡 + 最近 3 章摘要 + 上一章尾部」的滑动窗口。
@@ -283,12 +297,17 @@ book-soul/
 
 | 文档 | 适合谁 |
 |---|---|
+| [快速开始（本文档）](#快速启动) | 第一次上手 |
+| [界面设计规范](docs/DESIGN.md) | 改 UI 前必读 —— 信息架构 + 视觉令牌 |
 | [项目结构详解](docs/PROJECT_STRUCTURE.md) | 想知道每个目录干什么、数据怎么流 |
-| [启动指南 + 人工验证清单](docs/START_GUIDE.md) | 装完怎么验证每一步都通 |
+| [启动指南 + 人工验证清单](docs/START_GUIDE.md) | 装完怎么逐步验证 |
+| [排障与应急手册](docs/TROUBLESHOOTING.md) | 出问题了查这里 |
+| [用户指南](docs/USER_GUIDE.md) | 各功能怎么用 |
 | [架构设计](docs/ARCHITECTURE.md) | 模块划分 / 数据模型 / 关键设计决策 |
 | [API 参考](docs/API.md) | 后端所有端点 |
-| [用户指南](docs/USER_GUIDE.md) | 各功能怎么用 |
 | [Skill 系统](docs/SKILLS.md) | 内置技能与自定义 Skill 写法 |
+| [项目计划书](PROJECT_PLAN.md) | 核心设计决策 + 模块完成状态（历史快照） |
+| [安全策略](SECURITY.md) | 密钥存储 / 数据流向 / 备份 |
 | [AGENTS.md](AGENTS.md) | 参与开发前必读的技术规范 |
 | [DEVELOPMENT_CONSTRAINTS.md](DEVELOPMENT_CONSTRAINTS.md) | 沟通 / 流程 / 决策约束 |
 
@@ -303,8 +322,8 @@ book-soul/
 | 设置 | ✅ | LLM provider / API Key（DPAPI）/ 主题 / 加密 / 数据备份 |
 | 开新书 | ✅ | 种子 → 剧情 → 大纲与人物三步流式流程 |
 | 写作 | ✅ | Tiptap / 流式生成 / 选区重写 / 版本控制 / diff / 多格式导出 |
-| 质检 | ✅ | 5 维度并行评分（文笔 / 逻辑 / 节奏 / 一致性 / 题材） |
-| 素材库 | ✅ | 作品库 / 灵感库 / 本地扫描导入 / 词库管理 |
+| 质检 | ✅ | 5 维度并行评分 + 一键重写闭环 |
+| 素材库 | ✅ | 作品库 / 灵感库 / 本地扫描导入 / 种子库管理 |
 | Skill 系统 | ✅ | 12 个内置技能 + 用户自定义扩展 |
 | 打包发布 | ✅ | 独立版 + NSIS 安装包 + GitHub Actions Release |
 

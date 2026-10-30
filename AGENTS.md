@@ -2,6 +2,17 @@
 
 <!--
 修改记录
+- 2026-10-30：第十轮（仓库清理 + 文档重整）。主要变化：
+  · 删除 `docs/ui-redesign/`（2026-10 的 UI 重设计提案 + 16 张 mockup 图 + prototype.html，
+    共 2.34 MB）—— 提案的视觉规范与实现**不一致**（色板方案未落地，实为 shadcn/ui zinc 灰阶），
+    留着会误导人。现行规范改为 `docs/DESIGN.md`（全部按代码实测重写）
+  · 5 张真机截图提升为 `docs/screenshots/`（真实界面，当前有效）
+  · `USER_CHECKLIST.md` → `docs/TROUBLESHOOTING.md`（只留排障 + 应急，砍掉进度追踪与对话模板）
+  · `PROJECT_PLAN.md` 精简为历史快照（3187 行 → 约 300 行），修正 ChromaDB 矛盾表述
+  · `.env.example` 按 `config/llm.yaml` 真实 provider 重写（补 mimo，删代码里不存在的
+    Anthropic/Tavily/LangSmith，web_search 实际用 SerpAPI）
+  · `SECURITY.md` 修正数据目录路径、漏洞报告方式、第三方 provider 列表
+  · 删除 8 个冗余 `.gitkeep`（目录里已有实际文件）
 - 2026-10-30：第九轮（文档同步 + 推送）。主要变化：
   · 新增 §2.2「用户可见文档必须跟 UI 同步」
     —— README / USER_GUIDE 描述的是重设计**之前**的 6 项导航，
@@ -141,7 +152,9 @@ book-soul/
 ├── scripts/                     # dev / build_standalone / build_sidecar / 快捷方式脚本
 ├── dist/Book Soul/              # 独立版产物（便携目录，gitignore）
 ├── data/                        # 运行时（不入 git）
-├── docs/                        # ARCHITECTURE / API / USER_GUIDE / SKILLS
+├── docs/                        # DESIGN / PROJECT_STRUCTURE / START_GUIDE / USER_GUIDE
+│                                #   / TROUBLESHOOTING / ARCHITECTURE / API / SKILLS
+│                                #   + screenshots/（真机截图）
 └── .github/workflows/           # ci.yml / release.yml
 ```
 
@@ -186,8 +199,10 @@ AppShell（52px 顶栏 + 56px 图标栏）
 | 文档 | 覆盖内容 | 漏了会怎样 |
 |---|---|---|
 | `README.md` | 快速启动 + 项目结构 + 界面结构表 | 新人按旧路径找不到功能 |
+| `docs/DESIGN.md` | 信息架构 + 视觉规范（改 UI 前必读） | 改了配色/尺寸没人知道，界面逐渐跑偏 |
 | `docs/USER_GUIDE.md` | 各页面怎么用 | 用户照着找不到按钮 |
 | `docs/START_GUIDE.md` | 启动方式 + 人工验证清单 | 验证步骤对不上界面，误判为 bug |
+| `docs/TROUBLESHOOTING.md` | 排障 + 应急处理 | 出问题只能来问人 |
 | `docs/PROJECT_STRUCTURE.md` | 目录职责 + 数据流 + 修改指引 | 改错文件 / 漏掉联动改动 |
 | `docs/ARCHITECTURE.md` | 架构 + 数据模型 | 设计与代码分叉 |
 
@@ -665,8 +680,10 @@ git push origin main
 
 ## 参考资料
 
-- 完整开发计划：`PROJECT_PLAN.md`
-- 用户准备清单：`USER_CHECKLIST.md`
+- 核心设计决策 + 模块完成状态：`PROJECT_PLAN.md`（历史快照）
 - 安全策略：`SECURITY.md`
+- 界面设计规范（改 UI 前必读）：`docs/DESIGN.md`
+- 项目结构 + 数据流：`docs/PROJECT_STRUCTURE.md`
+- 排障与应急：`docs/TROUBLESHOOTING.md`
 - 架构设计：`docs/ARCHITECTURE.md`
 - 开发行为约束：[DEVELOPMENT_CONSTRAINTS.md](./DEVELOPMENT_CONSTRAINTS.md)（沟通、流程、决策）

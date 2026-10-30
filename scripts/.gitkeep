@@ -1,5 +1,0 @@
-# 辅助脚本
-# setup.ps1 - Windows 初始化（装依赖、配 .env）
-# dev.ps1   - 启动开发模式
-# check.ps1 - 跑所有质量门禁
-# Phase 0 起会创建

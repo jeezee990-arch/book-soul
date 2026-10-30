@@ -101,7 +101,7 @@ SQLite 的 `PRAGMA foreign_keys` **默认 OFF**，ORM 里的 `ondelete=` 不会�
 | `*_versions.parent_version_id` / `*.current_version_id` | SET NULL | 断链但保留数据 |
 | `inspirations.novel_id` | SET NULL | **素材保留**，只脱离作品 |
 
-详见 `server/src/models/` 与 [PROJECT_PLAN.md](../PROJECT_PLAN.md) §4.1。
+详见 `server/src/models/`（ORM 定义）与 [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md) §3.4 数据层。
 
 ### 启动时的 schema 自愈
 

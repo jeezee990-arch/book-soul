@@ -69,9 +69,10 @@ git commit -m "Remove .env from tracking"
 | 模式 | 数据目录 | 说明 |
 |---|---|---|
 | **打包版（便携模式）** | `<Book Soul.exe 同级>/data/` | 整个 `data` 文件夹拷走 = 完整迁移 |
-| 开发模式 | `~/Documents/BookSoul/` | 后端默认 `data_dir` |
+| **开发模式（跑 `scripts\dev.ps1`）** | `<仓库根>/data/dev/` | 脚本会设 `BOOK_SOUL_DATA_DIR` |
+| **开发模式（手工 `uv run python -m src.main`）** | `~/Documents/BookSoul/` | 未设 `BOOK_SOUL_DATA_DIR` 时的回落值 |
 
-- 设置页有「打开数据目录」按钮，可直接定位到实际位置
+- 设置页「数据与备份」分区会显示**当前实际生效的路径**，以它为准
 - ⚠️ 只备份 `book-soul.db` 不够 —— `secrets/`（DPAPI 加密的 Key）、
   `wordbanks/`（打包态词库）、`skills/`（用户 Skill）也在同一目录下
 
@@ -79,16 +80,18 @@ git commit -m "Remove .env from tracking"
 
 - 所有 Python 依赖通过 `uv` 管理，锁定在 `pyproject.toml` / `uv.lock`
 - 所有 Node 依赖通过 `pnpm` 管理，锁定在 `pnpm-lock.yaml`
-- GitHub Dependabot 建议开启（未来）
+- CI 每次 push 跑 `ruff` / `pytest` / `pnpm test` / `cargo check`，
+  其中 `packaging-smoke` job 会真打 sidecar 并启动探活
 
 ## 报告漏洞
 
 如发现 Book Soul 存在安全漏洞：
 
-- 邮件：your-email@example.com（请替换为真实邮箱）
-- 或开 GitHub Issue 标记 `security`
+- 优先开 **GitHub Issue** 并标记 `security`
+- 或走 GitHub 的 [Private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
+  （仓库 Settings → Security 需要先启用）
 
-**不要**在公开 Issue 中泄露漏洞细节。
+**不要**在公开 Issue 中泄露漏洞细节（利用代码、影响范围、复现步骤）。
 
 ## 数据流向
 
@@ -102,6 +105,8 @@ git commit -m "Remove .env from tracking"
           md / docx 只是导出格式，不是运行时存储
 ```
 
-**注意**：使用云端 LLM 时，prompt 中的小说内容**会发送到第三方**（minimax/OpenAI/Anthropic）。
-- 如需完全本地化，请使用 Ollama 配置本地模型
+**注意**：使用云端 LLM 时，prompt 中的小说内容**会发送到第三方**
+（mimo / MiniMax / OpenAI —— 见 `config/llm.yaml` 的 `providers`）。
+- 如需完全本地化，请用 **Ollama** 配置本地模型
 - 本项目不收集任何遥测数据
+- `web_search` Skill 会把搜索关键词发给 **SerpAPI**（需自行配置 `SERPAPI_KEY`）

@@ -247,4 +247,4 @@
 - 技术规范：[AGENTS.md](./AGENTS.md)
 - 项目计划：[PROJECT_PLAN.md](./PROJECT_PLAN.md)
 - 安全策略：[SECURITY.md](./SECURITY.md)
-- 用户准备：[USER_CHECKLIST.md](./USER_CHECKLIST.md)
+- 排障与应急：[docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md)

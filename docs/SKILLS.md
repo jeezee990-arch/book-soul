@@ -81,7 +81,29 @@ triggers:
 
 ## 启停
 
-Web UI → **Skills 页面**：右侧开关切换启停。
+Web UI → **设置 → AI 增强** 分区：每个技能一个开关，右侧可展开看高级信息
+（触发场景 / 来源 / 类型）。
+
+> ⚠️ 原「Skills」一级页面已于 2026-10 UI 重设计时降级为设置里的一个分区 ——
+> 旧页面是**开发者视角**（内置 / 已预装 / 后处理 / 需 LLM），
+> 而普通作者只想知道「AI 会不会自动帮我做敏感词检查、字数统计」。
+
+界面上的中文名（`ai-section.tsx` 的 `DISPLAY_NAME`）：
+
+| 技术名 | 界面显示 |
+|---|---|
+| `word_counter` | 字数统计 |
+| `sensitive_word` | 敏感词检查 |
+| `chapter_summarizer` | 章节摘要 |
+| `character_extractor` | 角色抽取 |
+| `plot_analyzer` | 剧情分析 |
+| `web_search` | 联网搜索 |
+| `read_local_file` | 读取本地文件 |
+| `consistency_checker` | 一致性检查 |
+| `style_analyzer` | 文风分析 |
+| `pacing_visualizer` | 节奏可视化 |
+| `outline_structurer` | 大纲结构化 |
+| `genre_classifier` | 题材分类 |
 
 REST API：
 
@@ -110,4 +132,4 @@ POST   /skills/{name}/run       # debug：手动执行（一般不需要）
 | `read_local_file` | `all`（pre） | ❌ 关 |
 | `web_search` | `all`（pre） | ❌ 关 |
 
-需要哪个开哪个，去 Skills 页一键启用即可。
+需要哪个开哪个，去 **设置 → AI 增强** 一键启用即可。

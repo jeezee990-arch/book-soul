@@ -445,3 +445,43 @@ dist/Book Soul/                    # ★ 独立版成品（36 MB）—— 整个
 | `test_character_generator.py` | 并行生成时全部人物卡都要入库 |
 | `test_llm_cache.py` | 预检与 `/llm/health` 只探测一次 |
 | `test_foreign_keys.py` | SQLite 外键约束真的生效 |
+
+---
+
+## 9. 文档体系
+
+```
+docs/
+├── DESIGN.md            # 界面设计规范 —— 信息架构 + 视觉令牌（改 UI 前必读）
+├── PROJECT_STRUCTURE.md # 本文件
+├── START_GUIDE.md       # 三种启动方式 + 人工验证清单
+├── USER_GUIDE.md        # 各页面功能使用
+├── TROUBLESHOOTING.md   # 排障 + 应急处理
+├── ARCHITECTURE.md      # 分层 / 数据模型 / LLM 抽象 / 流式协议 / 关键决策
+├── API.md               # 后端端点参考
+├── SKILLS.md            # 12 个内置 Skill + 自定义写法
+└── screenshots/         # 真机截图（5 张，真实数据）
+```
+
+根目录的三份：
+
+| 文件 | 定位 |
+|---|---|
+| `AGENTS.md` | **技术规范**（强制）—— 技术栈 / 分层铁律 / LLM 调用规范 / 打包 / 测试 / 提交流程 |
+| `DEVELOPMENT_CONSTRAINTS.md` | **行为约束** —— 沟通 / 流程 / 决策 / agent 工作流 |
+| `PROJECT_PLAN.md` | **历史快照 + 决策记录** —— 核心设计决策、明确不做的事、69 个模块的完成状态 |
+| `SECURITY.md` | 安全策略 —— 密钥存储 / 数据流向 / 备份路径 |
+
+**分三层，别混**：
+
+| 层 | 回答什么问题 | 谁维护 |
+|---|---|---|
+| 现状层（`docs/` 除 PROJECT_PLAN 外） | **现在**是什么样 | 跟代码同步改 |
+| 决策层（`PROJECT_PLAN.md` §1） | **为什么**这么设计、不做什么 | 很少变 |
+| 约束层（`AGENTS.md` / `DEVELOPMENT_CONSTRAINTS.md`） | **必须**怎么做 | 改了要用户确认 |
+
+> **现状层必须随代码同步**，否则会出现「文档比代码更落后」——
+> 2026-10 的 UI 重设计把一级导航从 6 项砍到 4 项，README 和 USER_GUIDE
+> 却整整几周都在描述已经不存在的页面，用户照着点根本找不到。
+> `AGENTS.md` §2.2 有这条硬要求。
+

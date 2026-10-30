@@ -1,7 +1,0 @@
-# Python 后端
-# Phase 0.3 起会创建完整结构：
-# - src/ (api/, core/, models/, schemas/, services/, db.py)
-# - tests/
-# - alembic/
-# - pyproject.toml
-# - README.md
