@@ -388,13 +388,13 @@ Get-NetTCPConnection -LocalPort 8765 -ErrorAction SilentlyContinue
 - [ ] 0.10 Hello World 验证
 
 ### Phase 1：核心后端服务
-- [ ] 1.1 作品 CRUD
-- [ ] 1.2 人物卡 CRUD ⭐
-- [ ] 1.3 章节 CRUD + 版本
-- [ ] 1.4 大纲 CRUD
-- [ ] 1.5 灵感库 CRUD
-- [ ] 1.6 加密服务
-- [ ] 1.7 记忆系统骨架
+- [x] 1.1 作品 CRUD
+- [x] 1.2 人物卡 CRUD ⭐
+- [x] 1.3 章节 CRUD + 版本
+- [x] 1.4 大纲 CRUD
+- [x] 1.5 灵感库 CRUD
+- [x] 1.6 加密服务
+- [x] 1.7 记忆系统骨架 ❌ 已移除（RAG + 聊天相关，2026-10-30 整块删除）
 
 ### Phase 2：桌面壳 + 前端骨架
 - [ ] 2.1 路由与基础布局
@@ -410,7 +410,7 @@ Get-NetTCPConnection -LocalPort 8765 -ErrorAction SilentlyContinue
 - [ ] 3.4 完整版大纲生成
 - [ ] 3.5 人物卡自动生成 ⭐
 - [ ] 3.6 人物卡管理 UI
-- [ ] 3.7 状态机实现
+- [x] 3.7 状态机实现（前端 Zustand 编排；后端状态机 2026-10-30 已删除）
 - [ ] 3.8 保存导出
 
 ### Phase 4：创作

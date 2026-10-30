@@ -309,8 +309,7 @@ book-soul/
 │   │   │   ├── paths.py                 # 路径解析统一入口（开发态/打包态）
 │   │   │   ├── watchdog.py              # 父进程看门狗
 │   │   │   ├── config.py / logging.py
-│   │   │   ├── memory/                  # ⚠️ 遗留：RAG 已移除，业务代码未引用（待清理）
-│   │   │   └── workflow/                # ⚠️ 遗留：未被任何业务/测试引用（待清理）
+│   │   │   └── (无 memory/ workflow/ —— 2026-10-30 已清理死代码)
 │   │   ├── models/                       # SQLAlchemy ORM（7 张表）
 │   │   │   ├── base.py
 │   │   │   ├── novel.py
@@ -336,7 +335,7 @@ book-soul/
 │   │   │   ├── export_service.py / export_docx.py / backup_service.py
 │   │   │   └── scanner_service.py
 │   │   └── db.py                        # 引擎 + 通用补列 + 外键约束 + 孤儿清理
-│   ├── tests/                           # 59 个测试文件
+│   ├── tests/                           # 57 个测试文件
 │   │   ├── test_chapter_context.py / test_llm_streaming_contract.py
 │   │   ├── test_queue_merge.py / test_queue_merge_milestone.py
 │   │   ├── test_schema_backfill.py / test_foreign_keys.py
@@ -1551,13 +1550,16 @@ SQLite 方言也不会改它 —— 这意味着 ORM 里写的 `ondelete="CASCAD
   ```
 - **重要**：加密默认关闭，配置项 `encryption_enabled: bool = False`
 
-#### 模块 1.7：记忆系统骨架
+#### 模块 1.7：记忆系统骨架 ❌ 已移除（2026-10-30 清理）
 
-- **文件**：
-  - `server/src/core/memory/project_memory.py`
-  - `server/src/core/memory/rag_memory.py`
-  - `server/src/core/memory/conversation_memory.py`
-- **本期只实现接口和空实现**，Phase 4 完善
+- 原计划：`server/src/core/memory/{project_memory,rag_memory,conversation_memory}.py`
+- **实际落地时整块删除了**，原因：
+  - `rag_memory` / `project_memory` 是 ChromaDB 移除后剩下的**空壳 stub**
+    （RAG 对个人网文收益低：要 50+ 章才体现，负担重）
+  - `conversation_memory` 服务的是**已移除的聊天功能**（2026-10-29）
+  - 三个模块**业务代码零引用**，只有自己的单测在测自己
+- 替代方案：「人物卡 + 最近 3 章摘要 + 上一章尾部」的滑动窗口策略
+  （见 `core/chapter_context.py`）
 
 #### 阶段 1 产出物
 
@@ -1873,42 +1875,16 @@ SQLite 方言也不会改它 —— 这意味着 ORM 里写的 `ondelete="CASCAD
   - 手动添加
   - 性格变化记录入口
 
-#### 模块 3.7：状态机实现
+#### 模块 3.7：状态机实现 ❌ 已移除（2026-10-30 清理）
 
-- **文件**：
-  - `server/src/core/workflow/state_machine.py`
-  - `server/src/core/workflow/new_book.py`
-- **关键代码**：
-  ```python
-  class NewBookStateMachine:
-      # v1.2：状态与"三步分页流程"对齐（原 select_genre / generate_keywords 等
-      # 细粒度状态改为按步骤页组织）
-      STATES = [
-          "idle", "keyword_step", "plot_step", "outline_step",
-          "character_step", "edit_characters", "save", "done",
-      ]
-
-      TRANSITIONS = {
-          "idle": ["keyword_step"],
-          "keyword_step": ["plot_step"],                  # 保存关键词卡片后
-          "plot_step": ["keyword_step", "outline_step"],  # 可回上步重选 / 进入大纲
-          "outline_step": ["plot_step", "character_step"],
-          "character_step": ["edit_characters", "save"],
-          "edit_characters": ["character_step", "save"],
-          "save": ["done", "keyword_step"],               # 结束或再开一本
-      }
-
-      def __init__(self, session_id: str):
-          self.session_id = session_id
-          self.current_state = "idle"
-          self.context: dict = {}
-
-      def transition(self, to: str, **context):
-          if to not in self.TRANSITIONS.get(self.current_state, []):
-              raise ValueError(f"Invalid transition: {self.current_state} -> {to}")
-          self.current_state = to
-          self.context.update(context)
-  ```
+- 原计划：`server/src/core/workflow/{state_machine,new_book}.py`
+- **实际落地时整块删除了** —— 后端这套状态机**业务代码零引用**：
+  - 开新书的三步流程实际由**前端 Zustand** 编排
+    （`pages/NewBook/use-newbook-flow.ts` + `stores/newbook-store.ts`），
+    后端状态机是另一套并行实现，留着只会让人误以为该改它
+  - 通用 `StateMachine` 基类同样无人使用
+- 状态流转逻辑现在集中在 `use-newbook-flow.ts` 的
+  `handleBackToPlot` / `handleFinish` / `handleBackToSeed`
 
 #### 模块 3.8：保存到灵感库 + 导出 md
 
@@ -3101,7 +3077,7 @@ pre-commit run --all-files
 - [x] 1.4 大纲 CRUD（两阶段：骨架 → 分卷补细节）
 - [x] 1.5 灵感库 CRUD（含重命名 / 置顶 / 排序 / 批量删）
 - [x] 1.6 加密服务（DPAPI 优先）
-- [x] 1.7 记忆系统骨架（⚠️ RAG 已移除，`core/memory/` 为遗留待清理）
+- [x] 1.7 记忆系统骨架 ❌ 已移除（RAG + 聊天相关，整块删除 2026-10-30）
 
 ### Phase 2：桌面壳 + 前端骨架 ✅
 - [x] 2.1 路由与基础布局（AppShell：52px 顶栏 + 56px 图标栏）
@@ -3117,7 +3093,7 @@ pre-commit run --all-files
 - [x] 3.4 三步流程骨架与导航
 - [x] 3.5 人物卡自动生成 ⭐
 - [x] 3.6 人物卡管理 UI
-- [x] 3.7 状态机实现
+- [x] 3.7 状态机实现（前端 Zustand 编排；后端状态机 2026-10-30 已删除）
 - [x] 3.8 保存导出
 - [x] 3.9 种子库管理（**按板块分 Tab**，批量增删改 + 导入）🆕
 

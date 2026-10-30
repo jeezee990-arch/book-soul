@@ -2,6 +2,13 @@
 
 <!--
 修改记录
+- 2026-10-30：第八轮（清理死代码）。主要变化：
+  · 删除 `core/memory/`（project_memory / rag_memory / conversation_memory）
+    —— RAG 已移除后剩的空壳 + 聊天功能移除后的孤儿，业务零引用
+  · 删除 `core/workflow/`（state_machine / new_book）—— 开新书三步流程
+    实际由前端 Zustand 编排，后端状态机是另一套并行实现，留着会误导
+  · 一并删除只测自己的 test_memory.py / test_state_machine.py
+  · §2 目录约定同步删掉这两行 —— **别再重建它们**
 - 2026-10-29：第七轮（质检续：外键 / 孤儿数据 / 里程碑保序）。主要变化：
   · db.py 开启 SQLite 外键约束（默认是关的 → ondelete="CASCADE" 形同虚设，
     删作品留孤儿；SQLite 又会复用被删的 id → 旧章节串进新作品）
@@ -103,8 +110,6 @@ book-soul/
 │   │   │   ├── security/        # dpapi / secret_store / encryption / keyring
 │   │   │   ├── scanner/         # 本地扫描
 │   │   │   ├── versioning/      # 版本树 + diff
-│   │   │   ├── workflow/        # 状态机
-│   │   │   ├── memory/          # 项目/会话/RAG 记忆
 │   │   │   ├── quality/         # 质检 prompt
 │   │   │   ├── chapter_context.py  # 上下文组装（人物卡 → prompt）
 │   │   │   ├── paths.py         # **路径解析统一入口**（开发态/打包态）
