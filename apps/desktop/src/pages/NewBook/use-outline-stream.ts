@@ -53,7 +53,12 @@ export function useOutlineStream(
   const ideas = useNewBookStore((s) => s.ideas);
   const outlineMode = useNewBookStore((s) => s.outlineMode);
   const outlineScale = useNewBookStore((s) => s.outlineScale);
-  const novelName = useNewBookStore((s) => s.novelName);
+  /** 已经建出来的那本书（重生成时复用，不再新建） */
+  const novelId = useNewBookStore((s) => s.novelId);
+  /** 作者输入的书名（留空 = 自动命名） */
+  const novelTitleInput = useNewBookStore((s) => s.novelTitleInput);
+  /** 上次生成时实际生效的书名（用来判断作者有没有主动改过名字） */
+  const novelTitleApplied = useNewBookStore((s) => s.novelTitleApplied);
   const chosenPlotIdx = useNewBookStore((s) => s.chosenPlotIdx);
   const plotVersions = useNewBookStore((s) => s.plotVersions);
   const setOutlinePartial = useNewBookStore((s) => s.setOutlinePartial);
@@ -68,6 +73,9 @@ export function useOutlineStream(
   const setCharThinking = useNewBookStore((s) => s.setCharThinking);
   const setCharStats = useNewBookStore((s) => s.setCharStats);
   const setNovelName = useNewBookStore((s) => s.setNovelName);
+  const setNovelId = useNewBookStore((s) => s.setNovelId);
+  const setNovelTitleInput = useNewBookStore((s) => s.setNovelTitleInput);
+  const setNovelTitleApplied = useNewBookStore((s) => s.setNovelTitleApplied);
   const setStep = useNewBookStore((s) => s.setStep);
 
   /** 发给后端的"作者个人想法"。 */
@@ -109,8 +117,21 @@ export function useOutlineStream(
           genre: genre?.name ?? "通用",
           plot_summary: plot.summary,
           keywords: Array.from(keywords),
-          // 书名：同一向导内复用（后端按名 upsert → 覆盖同一本而不是新建）
-          novel_name: novelName ?? undefined,
+          // 书名 / 作品 id（2026-10-30）
+          //
+          // ⚠️ 靠 **id** 区分"重生成同一本"和"新建一本"：
+          //    以前只传名字 → 后端按名 upsert → 名字撞上素材库里已有的书时，
+          //    新书被合并进旧书（旧书大纲被冲掉，新书存不进素材库）。
+          //    现在：有 id = 复用这一本；没 id = 新建一本（后端保证名字唯一）。
+          novel_id: novelId ?? undefined,
+          // 只在作者**主动改过**书名时才传：
+          // 否则用户在素材库里给这本书改过名后，回到向导一重新生成，
+          // 名字会被悄悄改回旧名（作者在别处的改动被覆盖）。
+          novel_name:
+            novelTitleInput.trim() &&
+            novelTitleInput.trim() !== novelTitleApplied.trim()
+              ? novelTitleInput.trim()
+              : undefined,
           outline_type: outlineMode,
           user_extra: userExtra,
           // 规模是**硬指标**：写进 prompt 要求模型照做
@@ -170,8 +191,13 @@ export function useOutlineStream(
               name: parsed.novelName,
               outlineStructure: parsed.structure,
             });
-            // 记住书名：退回剧情页再生成时复用同一本书（而不是新建一本）
+            // 记住书名 + 作品 id：退回剧情页再生成时复用同一本书
+            // （靠 id 复用，不会因为撞名把内容写进别的书）
             setNovelName(parsed.novelName);
+            setNovelId(parsed.novelId);
+            // 把输入框同步成**最终书名**（自动命名时用户看不到程序取的名字）
+            setNovelTitleInput(parsed.novelName);
+            setNovelTitleApplied(parsed.novelName);
             setOutlineStats({
               model: parsed.model,
               elapsedSec: parsed.elapsedSec ?? elapsedValueRef.current,
@@ -208,7 +234,9 @@ export function useOutlineStream(
       userExtra,
       outlineMode,
       outlineScale,
-      novelName,
+      novelId,
+      novelTitleInput,
+      novelTitleApplied,
       startElapsed,
       elapsedValueRef,
       onOutlineDone,
@@ -224,6 +252,9 @@ export function useOutlineStream(
       setCharThinking,
       setCharStats,
       setNovelName,
+      setNovelId,
+      setNovelTitleInput,
+      setNovelTitleApplied,
       setStep,
     ],
   );

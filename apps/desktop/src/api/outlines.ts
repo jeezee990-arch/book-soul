@@ -17,6 +17,15 @@ export interface OutlineGenerationRequest {
   keywords?: string[];
   novel_name?: string;
   /**
+   * 要复用哪本书（2026-10-30 新增）。
+   *
+   * ⚠️ 靠 id 而不是名字区分"重生成同一本"和"新建一本"：
+   * 名字会撞车 —— 素材库里已经有一本同名书时，新书会被合并进旧书
+   * （旧书大纲被冲掉，新书存不进素材库）。
+   * 不传 = 新建一本（后端保证名字唯一）。
+   */
+  novel_id?: number;
+  /**
    * 大纲模式：
    * - `complete`：完整大纲，从开头写到全书结束（适合短篇小说）
    * - `semi_open`：半开放式，只写前期并留悬念，后续作者自行创作或 AI 续写

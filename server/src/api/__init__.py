@@ -14,7 +14,6 @@ from .main import router as main_router
 from .novels import router as novels_router
 from .outlines import generation_router
 from .outlines import router as outlines_router
-from .quality import router as quality_router
 from .scanner import router as scanner_router
 from .settings import router as settings_router
 from .skills import router as skills_router
@@ -34,7 +33,6 @@ router.include_router(inspirations_router)
 router.include_router(settings_router)
 router.include_router(wordbanks_router)
 router.include_router(export_router)
-router.include_router(quality_router)
 router.include_router(scanner_router)
 router.include_router(skills_router)
 router.include_router(backup_router)

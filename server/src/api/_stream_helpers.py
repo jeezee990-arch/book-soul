@@ -1,7 +1,7 @@
 """流式端点的 ndjson 助手（Phase 性能优化 / 流式输出简化）。
 
 所有流式端点（``/inspirations/generate-plot/stream``、``/novels/outlines/generate/stream``、
-``/novels/{id}/characters/generate-from-outline/stream``、``/novels/{id}/chapters/{id}/quality/stream``）
+``/novels/{id}/characters/generate-from-outline/stream``）
 都用这套事件协议。
 
 事件类型（统一 ``event`` 字段 + 业务字段）：
@@ -9,7 +9,6 @@
 - ``{"event": "delta", "phase": "...", "text": "..."}`` — 增量文本
 - ``{"event": "version_start", "index": 1}``      — 多版本流的某版本开始
 - ``{"event": "version_done", "index": 1, "summary": "..."}`` — 某版本完成
-- ``{"event": "dimension_done", "dim": "...", "score": ..., "issues": [...], "suggestions": [...], "error": null|"..."}`` — 单维度质检完成
 - ``{"event": "done", "novel_id": ..., "novel_name": ..., "structure": {...}, "provider": "...", "model": "..."}`` — 整流完成
 - ``{"event": "error", "message": "..."}``         — 失败
 

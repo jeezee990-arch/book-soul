@@ -22,7 +22,7 @@ from src.schemas.character import CharacterCreate
 from src.schemas.novel import NovelCreate
 from src.schemas.outline import OutlineCreate
 from src.services.character_service import NovelNotFoundError
-from src.services.export_service import NovelExportService
+from src.services.export_service import NovelExportService, chapter_heading
 from src.services.novel_service import NovelService
 from src.services.outline_service import OutlineService
 
@@ -306,3 +306,23 @@ def test_safe_filename_empty_fallback() -> None:
 
     assert _safe_filename("") == "untitled"
     assert _safe_filename("   ") == "untitled"
+
+
+# ===== 章节标题去重（2026-10-30）=====
+
+
+def test_chapter_heading_avoids_duplicate_prefix() -> None:
+    """章节标题本身带了「第 N 章」时，不能再叠一层前缀。
+
+    旧写法固定拼 ``第 {n} 章 · {title}``，用户自己把章节命名成
+    「第一章 灰光验凡根」时就会导出成「第 1 章 · 第一章 灰光验凡根」。
+    """
+    assert chapter_heading(1, "第一章 灰光验凡根") == "第一章 灰光验凡根"
+    assert chapter_heading(12, "第十二章 归途") == "第十二章 归途"
+    assert chapter_heading(3, "第三节 夜谈") == "第三节 夜谈"
+    # 没有章节前缀 → 照常加
+    assert chapter_heading(1, "开篇") == "第 1 章 · 开篇"
+    assert chapter_heading(7, "雨夜") == "第 7 章 · 雨夜"
+    # 缺标题 / 空白标题
+    assert chapter_heading(3, None) == "第 3 章 · （未命名）"
+    assert chapter_heading(3, "   ") == "第 3 章 · （未命名）"

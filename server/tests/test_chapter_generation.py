@@ -114,7 +114,59 @@ async def test_stream_generate_skips_empty_deltas(db_initialized: Path) -> None:
         chunks: list[str] = []
         async for d in gen.stream_generate(chapter_id=chapter_id):
             chunks.append(d)
-    assert chunks == ["  ", "正文"]  # 空串被过滤；"  " 视为有效文本
+    # 空串被过滤；连续空白被排版器压成一个（且挂到下一个有内容的增量上）
+    assert "".join(chunks).strip() == "正文"
+    assert all(c.strip() or c == " " for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_applies_prose_formatting(db_initialized: Path) -> None:
+    """生成链路必须过排版器：去汉字间空格 + 兜底断段（2026-10-30）。
+
+    用户实测：模型整章不给换行 → 正文挤成一行、无法阅读。
+    """
+    chapter_id = await _make_chapter(db_initialized)
+    # 模型输出：汉字之间塞空格，且整章不给任何换行
+    raw = (
+        "山 门 前 的 铜 钟 连 响 三 声"
+        "。"
+        "这是第二句话内容也足够长可以触发兜底断段规则。"
+        "这是第三句话同样足够长也应该被断开成新段落。"
+    )
+    mock = _mock_stream_llm(list(raw))
+    from src.db import SessionLocal
+
+    async with SessionLocal() as session:
+        gen = ChapterGenerator(session, llm_client=mock)
+        chunks: list[str] = []
+        async for d in gen.stream_generate(chapter_id=chapter_id):
+            chunks.append(d)
+
+    text = "".join(chunks)
+    # 汉字之间的空格被去掉
+    assert "山门前的铜钟连响三声" in text
+    assert " " not in text
+    # 长段落被兜底断段
+    assert "\n\n" in text
+
+
+@pytest.mark.asyncio
+async def test_stream_generate_preserves_model_paragraph_breaks(db_initialized: Path) -> None:
+    """模型自己给的段落分隔要保留。"""
+    chapter_id = await _make_chapter(db_initialized)
+    mock = _mock_stream_llm(["第一段内容。", "\n\n", "第二段内容。"])
+    from src.db import SessionLocal
+
+    async with SessionLocal() as session:
+        gen = ChapterGenerator(session, llm_client=mock)
+        chunks: list[str] = []
+        async for d in gen.stream_generate(chapter_id=chapter_id):
+            chunks.append(d)
+
+    text = "".join(chunks)
+    assert "第一段内容。" in text
+    assert "第二段内容。" in text
+    assert text.count("\n\n") == 1
 
 
 @pytest.mark.asyncio

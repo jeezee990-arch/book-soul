@@ -5,18 +5,41 @@
  * 唯一区别是"有没有章节"—— 对作者来说是同一个概念列表。
  * 现在合并为一份，用状态标签区分，藏书馆语义取消。
  *
+ * 2026-10-30 补齐管理能力（用户实测反馈）：
+ * - **右键菜单**：继续写 / 重命名 / 上移 / 下移 / 导出 / 删除
+ * - **排序**：手动顺序（持久化在后端 sort_order）+ 最近更新 / 最近创建 / 字数 / 书名
+ * - **删除**：二次确认（会级联删掉章节 / 人物卡 / 大纲）
+ *
  * 字数 / 章数是后端 Novel 模型里没有的字段，这里异步补齐
- *（逐本拉章节列表汇总），不阻塞首屏渲染。
+ * （逐本拉章节列表汇总），不阻塞首屏渲染。
  */
 
-import { useEffect, useState } from "react";
-import { BookOpen, FileDown, PenLine } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import { novelsApi, downloadExportFile } from "@/api/novels";
 import { chaptersApi } from "@/api/chapters";
 import { ApiError } from "@/api";
 import type { Novel } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useNovelsStore } from "@/stores/novels-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import NovelCard, { EMPTY_STAT, type NovelStat } from "./NovelCard";
+import NovelContextMenu, { type NovelMenuState } from "./NovelContextMenu";
+import { NovelConfirmDialog, NovelRenameDialog } from "./NovelDialogs";
+import {
+  NOVEL_SORT_OPTIONS,
+  moveNovel,
+  sortNovels,
+  type NovelSortKey,
+} from "./novel-sort";
 
 interface Props {
   onSelect: (novel: Novel) => void;
@@ -24,81 +47,92 @@ interface Props {
   onContinue: (novel: Novel) => void;
 }
 
-/** 作品的章节统计（异步补齐）。 */
-interface Stat {
-  words: number;
-  chapters: number;
-  written: number;
-}
+/** 排序方式在 localStorage 里的键。 */
+const SORT_KEY = "book-soul-library-works-sort";
 
-const EMPTY_STAT: Stat = { words: 0, chapters: 0, written: 0 };
-
-/** 状态 → 圆点颜色 + 中文 */
-function statusMeta(novel: Novel): { dot: string; label: string } {
-  if (novel.imported) return { dot: "bg-neutral-400", label: "已导入" };
-  switch (novel.status) {
-    case "draft":
-      return { dot: "bg-neutral-400", label: "草稿" };
-    case "writing":
-    case "serializing":
-      return { dot: "bg-violet-500", label: "连载中" };
-    case "done":
-    case "finished":
-      return { dot: "bg-emerald-500", label: "已完成" };
-    default:
-      return { dot: "bg-indigo-500", label: novel.status || "进行中" };
+/**
+ * 读上次选的排序方式。
+ *
+ * @returns 排序方式（读不到或非法就回"手动顺序"）
+ */
+function loadSortKey(): NovelSortKey {
+  try {
+    const raw = localStorage.getItem(SORT_KEY);
+    const hit = NOVEL_SORT_OPTIONS.find((o) => o.value === raw);
+    return hit?.value ?? "manual";
+  } catch {
+    return "manual";
   }
 }
 
 export default function LibraryList({ onSelect, onContinue }: Props) {
   const [items, setItems] = useState<Novel[]>([]);
-  const [stats, setStats] = useState<Record<number, Stat>>({});
+  const [stats, setStats] = useState<Record<number, NovelStat>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "writing" | "draft" | "imported">(
     "all",
   );
+  const [sortKey, setSortKey] = useState<NovelSortKey>(loadSortKey);
 
-  useEffect(() => {
-    let cancelled = false;
+  // 右键菜单 / 对话框
+  const [menu, setMenu] = useState<NovelMenuState | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Novel | null>(null);
+
+  const refreshNovels = useNovelsStore((s) => s.refresh);
+  const workspaceNovelId = useWorkspaceStore((s) => s.novelId);
+  const setWorkspaceNovelId = useWorkspaceStore((s) => s.setNovelId);
+
+  /** 拉列表 + 后台补章节统计。 */
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    novelsApi
-      .list()
-      .then((data) => {
-        if (cancelled) return;
-        setItems(data);
-        setLoading(false);
+    try {
+      const data = await novelsApi.list();
+      setItems(data);
+      setLoading(false);
 
-        // 后台补齐章节统计（不阻塞首屏）
-        void Promise.all(
-          data.map(async (n) => {
-            try {
-              const chs = await chaptersApi.list(n.id);
-              const stat: Stat = {
-                words: chs.reduce((sum, c) => sum + c.word_count, 0),
-                chapters: chs.length,
-                written: chs.filter((c) => c.word_count > 0).length,
-              };
-              if (!cancelled) setStats((prev) => ({ ...prev, [n.id]: stat }));
-            } catch {
-              // 单本失败忽略
-            }
-          }),
-        );
-      })
-      .catch((e: unknown) => {
-        const msg = e instanceof ApiError ? e.message : String(e);
-        if (!cancelled) {
-          setError(msg);
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+      // 后台补齐章节统计（不阻塞首屏）
+      void Promise.all(
+        data.map(async (n) => {
+          try {
+            const chs = await chaptersApi.list(n.id);
+            const stat: NovelStat = {
+              words: chs.reduce((sum, c) => sum + c.word_count, 0),
+              chapters: chs.length,
+              written: chs.filter((c) => c.word_count > 0).length,
+            };
+            setStats((prev) => ({ ...prev, [n.id]: stat }));
+          } catch {
+            // 单本失败忽略
+          }
+        }),
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof ApiError ? e.message : String(e);
+      setError(msg);
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /** 切换排序方式（记到 localStorage，下次进来还是这个）。 */
+  function changeSort(next: NovelSortKey) {
+    setSortKey(next);
+    try {
+      localStorage.setItem(SORT_KEY, next);
+    } catch {
+      // localStorage 不可用（隐私模式）时忽略
+    }
+  }
 
   async function handleExport(novel: Novel, format: "md" | "html" | "docx") {
     try {
@@ -111,25 +145,142 @@ export default function LibraryList({ onSelect, onContinue }: Props) {
     }
   }
 
-  const filtered = items.filter((n) => {
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
-      if (
-        !n.name.toLowerCase().includes(q) &&
-        !n.genre.toLowerCase().includes(q)
-      ) {
-        return false;
+  // ===== 搜索 + 筛选 =====
+  const matched = useMemo(() => {
+    return items.filter((n) => {
+      if (query.trim()) {
+        const q = query.trim().toLowerCase();
+        if (
+          !n.name.toLowerCase().includes(q) &&
+          !n.genre.toLowerCase().includes(q)
+        ) {
+          return false;
+        }
       }
+      if (filter === "imported") return n.imported;
+      if (filter === "draft") return !n.imported && n.status === "draft";
+      if (filter === "writing") return !n.imported && n.status !== "draft";
+      return true;
+    });
+  }, [items, query, filter]);
+
+  /** 字数表（给"字数最多"排序用）。 */
+  const wordCounts = useMemo(() => {
+    const map: Record<number, number> = {};
+    for (const [id, stat] of Object.entries(stats)) map[Number(id)] = stat.words;
+    return map;
+  }, [stats]);
+
+  const filtered = useMemo(
+    () => sortNovels(matched, sortKey, wordCounts),
+    [matched, sortKey, wordCounts],
+  );
+
+  // ===== 右键菜单 =====
+
+  /** 在指定坐标处打开某部作品的右键菜单。 */
+  function openMenuAt(novel: Novel, x: number, y: number) {
+    setMenu({ id: novel.id, x, y });
+  }
+
+  // ===== 重命名 =====
+
+  function openRename(novel: Novel) {
+    setRenameTarget({ id: novel.id, name: novel.name });
+  }
+
+  /**
+   * 提交重命名。
+   *
+   * @param name 新名字；`null` 表示**用户取消**（不改任何数据）。
+   */
+  async function commitRename(name: string | null) {
+    const target = renameTarget;
+    setRenameTarget(null);
+    if (!target || name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (trimmed === target.name) return;
+    try {
+      const updated = await novelsApi.update(target.id, { name: trimmed });
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+      void refreshNovels();
+      toast.success("已重命名", { description: updated.name });
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error("已有同名作品", {
+          description: `素材库里已经有《${trimmed}》，换个名字吧`,
+        });
+        return;
+      }
+      const msg = e instanceof ApiError ? e.message : String(e);
+      toast.error("重命名失败", { description: msg });
     }
-    if (filter === "imported") return n.imported;
-    if (filter === "draft") return !n.imported && n.status === "draft";
-    if (filter === "writing") return !n.imported && n.status !== "draft";
-    return true;
-  });
+  }
+
+  // ===== 删除 =====
+
+  async function commitDelete() {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (!target) return;
+    try {
+      await novelsApi.remove(target.id);
+      // 删掉的是当前选中的作品 → 清掉工作区选择（否则写作页会指向一本不存在的书）
+      if (workspaceNovelId === target.id) {
+        setWorkspaceNovelId(null);
+      }
+      await load();
+      void refreshNovels();
+      toast.success("已删除", { description: target.name });
+    } catch (e: unknown) {
+      const msg = e instanceof ApiError ? e.message : String(e);
+      toast.error("删除失败", { description: msg });
+    }
+  }
+
+  // ===== 上移 / 下移 =====
+
+  /**
+   * 移动作品位置（手动顺序，持久化到后端）。
+   *
+   * @param id 要移动的作品 id
+   * @param delta -1 上移，+1 下移
+   */
+  async function handleMove(id: number, delta: -1 | 1) {
+    // 全量顺序 = 后端返回的顺序（已按 sort_order 排好）
+    const allIds = items.map((n) => n.id);
+    // 可见顺序 = 搜索/筛选/排序之后的顺序（用户看到的）
+    const visibleIds = filtered.map((n) => n.id);
+    const nextOrder = moveNovel(allIds, visibleIds, id, delta);
+    if (!nextOrder) {
+      toast.info(delta < 0 ? "已经在第一本了" : "已经在最后一本了");
+      return;
+    }
+    try {
+      await novelsApi.reorder(nextOrder);
+      await load();
+      // 手动顺序和"按其它字段排"是互斥的 —— 移动后切回手动顺序，
+      // 否则用户会以为"点了没反应"（列表顺序没变）。
+      if (sortKey !== "manual") {
+        changeSort("manual");
+        toast.success("已移动", { description: "已切换到「手动顺序」" });
+      } else {
+        toast.success("已移动");
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof ApiError ? e.message : String(e);
+      toast.error("排序保存失败", { description: msg });
+    }
+  }
+
+  // 右键菜单的目标作品（用于判断上/下移是否到边界）
+  const menuNovel = menu ? (items.find((n) => n.id === menu.id) ?? null) : null;
+  const menuIndex = menuNovel ? filtered.findIndex((n) => n.id === menuNovel.id) : -1;
 
   return (
     <div>
-      {/* 搜索 + 筛选 */}
+      {/* 搜索 + 筛选 + 排序 */}
       <div className="mb-4 flex flex-wrap items-center gap-2.5">
         <div className="relative w-[280px]">
           <svg
@@ -175,6 +326,24 @@ export default function LibraryList({ onSelect, onContinue }: Props) {
             </button>
           ))}
         </div>
+
+        {/* 排序（2026-10-30 新增） */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11.5px] text-neutral-400">排序</span>
+          <Select value={sortKey} onValueChange={(v) => changeSort(v as NovelSortKey)}>
+            <SelectTrigger className="h-8 w-[7.5rem] text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {NOVEL_SORT_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <span className="ml-auto text-[11.5px] text-neutral-400">
           共 {filtered.length} 部
         </span>
@@ -209,94 +378,65 @@ export default function LibraryList({ onSelect, onContinue }: Props) {
 
       {!loading && filtered.length > 0 ? (
         <div className="grid grid-cols-4 gap-3">
-          {filtered.map((n) => {
-            const meta = statusMeta(n);
-            const stat = stats[n.id] ?? EMPTY_STAT;
-            const progress = stat.chapters
-              ? Math.round((stat.written / stat.chapters) * 100)
-              : 0;
-            return (
-              <div
-                key={n.id}
-                className="group relative overflow-hidden rounded-xl border border-neutral-200 bg-white transition-all hover:-translate-y-px hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700"
-              >
-                <button
-                  type="button"
-                  onClick={() => onSelect(n)}
-                  className="block w-full text-left"
-                >
-                  <div
-                    className="grid h-[98px] place-items-center"
-                    style={{
-                      background: `linear-gradient(150deg, hsl(${(n.id * 47) % 360} 32% 26%), hsl(${(n.id * 83) % 360} 38% 17%))`,
-                    }}
-                  >
-                    {/* 封面用书名首字：跨平台渲染一致，也不像 emoji 那样抢视觉 */}
-                    <span className="text-[36px] font-semibold tracking-tight text-white/85">
-                      {(n.name || "书").trim().charAt(0)}
-                    </span>
-                  </div>
-                  <div className="p-3">
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={cn("h-1.5 w-1.5 rounded-full", meta.dot)}
-                      />
-                      <span className="truncate text-[13px] font-semibold">
-                        {n.name}
-                      </span>
-                    </div>
-                    <div className="mt-1.5 flex gap-2 text-[11px] text-neutral-400">
-                      <span>{n.genre}</span>
-                      <span className="font-mono">
-                        {stat.words.toLocaleString()} 字
-                      </span>
-                      <span>
-                        {stat.written}/{stat.chapters} 章
-                      </span>
-                    </div>
-                    <div className="mt-2.5 h-[3px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
-                      <i
-                        className="block h-full rounded-full bg-indigo-500"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-                  </div>
-                </button>
-
-                {/* 悬停操作 */}
-                <div className="absolute top-2.5 right-2.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                  <button
-                    type="button"
-                    onClick={() => onContinue(n)}
-                    title="继续写"
-                    className="inline-flex h-6 items-center gap-1 rounded-md bg-white/90 px-2 text-[10.5px] text-neutral-700 shadow-sm backdrop-blur hover:bg-white dark:bg-neutral-800/90 dark:text-neutral-200"
-                  >
-                    <PenLine className="h-3 w-3" />
-                    继续写
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-0.5 border-t border-neutral-200/70 px-2 py-1 dark:border-neutral-800/70">
-                  {(["md", "html", "docx"] as const).map((fmt) => (
-                    <button
-                      key={fmt}
-                      type="button"
-                      onClick={() => void handleExport(n, fmt)}
-                      className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-                    >
-                      <FileDown className="h-2.5 w-2.5" />
-                      {fmt === "docx" ? "Word" : fmt.toUpperCase()}
-                    </button>
-                  ))}
-                  <span className="ml-auto text-[10px] text-neutral-400">
-                    {meta.label}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+          {filtered.map((n) => (
+            <NovelCard
+              key={n.id}
+              novel={n}
+              stat={stats[n.id] ?? EMPTY_STAT}
+              onOpen={onSelect}
+              onContinue={onContinue}
+              onExport={(novel, fmt) => void handleExport(novel, fmt)}
+              onMenu={openMenuAt}
+            />
+          ))}
         </div>
       ) : null}
+
+      {/* 右键菜单（2026-10-30 新增） */}
+      <NovelContextMenu
+        state={menu}
+        atTop={menuIndex <= 0}
+        atBottom={menuIndex < 0 || menuIndex >= filtered.length - 1}
+        onClose={() => setMenu(null)}
+        onContinue={(id) => {
+          const n = items.find((i) => i.id === id);
+          if (n) onContinue(n);
+        }}
+        onRename={(id) => {
+          const n = items.find((i) => i.id === id);
+          if (n) openRename(n);
+        }}
+        onMoveUp={(id) => void handleMove(id, -1)}
+        onMoveDown={(id) => void handleMove(id, 1)}
+        onExport={(id, format) => {
+          const n = items.find((i) => i.id === id);
+          if (n) void handleExport(n, format);
+        }}
+        onDelete={(id) => {
+          const n = items.find((i) => i.id === id);
+          if (n) setDeleteTarget(n);
+        }}
+      />
+
+      {/* 重命名对话框 */}
+      <NovelRenameDialog
+        open={renameTarget !== null}
+        initialName={renameTarget?.name ?? ""}
+        onSubmit={(name) => void commitRename(name)}
+      />
+
+      {/* 删除确认 */}
+      <NovelConfirmDialog
+        open={deleteTarget !== null}
+        title="删除作品"
+        description={
+          deleteTarget
+            ? `将删除《${deleteTarget.name}》及其全部章节、人物卡、大纲，此操作不可恢复。`
+            : ""
+        }
+        onConfirm={() => void commitDelete()}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

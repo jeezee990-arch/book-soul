@@ -56,7 +56,6 @@ const SCENE_LABELS: Record<string, string> = {
   "scene:character_generation": "人物卡生成",
   "scene:chapter_generation": "章节正文生成",
   "scene:chapter_rewrite": "章节重写",
-  "scene:quality_check": "质量检测",
   "scene:summary": "摘要",
 };
 

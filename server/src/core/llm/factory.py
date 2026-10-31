@@ -10,9 +10,9 @@
 ``routing.<场景>`` 的值有三种含义：
 
 - ``"@settings"``（或没写这一项）→ **跟随用户在设置页的选择**。
-  用户在设置页选了 minimax，创作/质检/总结就全部走 minimax。
+  用户在设置页选了 minimax，创作/总结就全部走 minimax。
 - 具体 provider 名 → 该场景强制用那个 provider
-  （例：本机跑了 Ollama，把 ``quality_check`` 写成 ``ollama`` 走本地）。
+  （例：本机跑了 Ollama，把 ``summary`` 写成 ``ollama`` 走本地）。
 - 留空 → 等同 ``"@settings"``。
 
 模型名同理：场景用的 provider == 用户选的 provider 时用用户选的模型，
@@ -317,7 +317,7 @@ async def check_provider_health(provider: str) -> tuple[bool, str]:
     :return: ``(是否可用, 说明文字)``
 
     为什么要这个：本地 Ollama 经常"没装"或"没启动"，
-    而配置里 7 个质检场景默认路由到 ollama。启动时预检 + 明确提示，
+    而配置里有些场景默认路由到 ollama。启动时预检 + 明确提示，
     比让用户等 30 秒超时后才看到 "ConnectError" 友好得多。
     """
     import httpx

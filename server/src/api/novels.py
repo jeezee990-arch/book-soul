@@ -3,6 +3,7 @@
 端点：
 - POST   /novels                          创建
 - GET    /novels                          列表（支持 ?genre= &status= 过滤）
+- POST   /novels/reorder                  按新顺序重排（2026-10-30 素材库管理）
 - GET    /novels/{id}                     详情
 - PATCH  /novels/{id}                     部分更新
 - DELETE /novels/{id}                     删除（幂等）
@@ -11,6 +12,7 @@
 错误映射：
 - NovelNotFoundError -> 404
 - NovelValidationError -> 422（业务校验失败，与 Pydantic 422 区分用 detail 字段）
+- NovelNameConflictError -> 409（作品名撞车；素材库里只能有一本同名作品）
 """
 
 from __future__ import annotations
@@ -21,9 +23,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models.novel import Novel
-from ..schemas.novel import NovelCreate, NovelRead, NovelUpdate
+from ..schemas.novel import (
+    NovelCreate,
+    NovelRead,
+    NovelReorder,
+    NovelReorderRequest,
+    NovelUpdate,
+)
 from ..services.export_service import NovelExportService
 from ..services.novel_service import (
+    NovelNameConflictError,
     NovelNotFoundError,
     NovelService,
     NovelValidationError,
@@ -57,9 +66,28 @@ async def create_novel(
 ) -> NovelRead:
     try:
         novel = await service.create(payload)
+    except NovelNameConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except NovelValidationError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return NovelRead.model_validate(novel)
+
+
+@router.post(
+    "/reorder",
+    response_model=NovelReorder,
+    summary="按新顺序重排作品（sort_order = 下标）",
+)
+async def reorder_novels(
+    payload: NovelReorderRequest,
+    service: NovelService = Depends(get_service),
+) -> NovelReorder:
+    """按用户排好的顺序重排；返回按新顺序排列的作品列表。
+
+    ⚠️ 字面量路径必须注册在 ``/{novel_id}`` **之前**，否则会被 path param 吞掉。
+    """
+    items = await service.reorder(payload.ids)
+    return NovelReorder(items=[NovelRead.model_validate(i) for i in items])
 
 
 @router.get(
@@ -113,6 +141,8 @@ async def update_novel(
         novel = await service.update(novel_id, payload)
     except NovelNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except NovelNameConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except NovelValidationError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return NovelRead.model_validate(novel)

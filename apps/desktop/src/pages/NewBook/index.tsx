@@ -65,6 +65,15 @@ export default function NewBook() {
   const charStats = useNewBookStore((s) => s.charStats);
   const resetAll = useNewBookStore((s) => s.resetAll);
 
+  // ===== 命名（2026-10-30）=====
+  /** 作者输入的书名（留空 = 自动命名） */
+  const novelTitleInput = useNewBookStore((s) => s.novelTitleInput);
+  const setNovelTitleInput = useNewBookStore((s) => s.setNovelTitleInput);
+  /** 已经建出来的那本书（重生成时靠它复用，不再新建） */
+  const novelId = useNewBookStore((s) => s.novelId);
+  /** 那本书的名字（重名提示时要排除它自己） */
+  const novelName = useNewBookStore((s) => s.novelName);
+
   // ===== 瞬时状态（放 store：组件卸载后 set 依然有效，后台生成能跑完）=====
   const plotStreaming = useNewBookStore((s) => s.plotStreaming);
   const setPlotStreaming = useNewBookStore((s) => s.setPlotStreaming);
@@ -236,6 +245,9 @@ export default function NewBook() {
                 onToggleKeyword={toggleKeyword}
                 onRemoveKeyword={removeKeyword}
                 onClearKeywords={clearKeywords}
+                title={novelTitleInput}
+                onTitleChange={setNovelTitleInput}
+                excludeName={novelId !== null ? novelName : null}
               />
               <div className="mt-7 flex justify-end gap-2.5">
                 <button

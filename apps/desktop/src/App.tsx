@@ -19,7 +19,7 @@ import { getBackendError, waitBackendReady } from "./api/backend";
  *
  * 路由（2026-10 UI 重设计）：6 个平铺页面收敛为 4 个 ——
  * 写作 / 开新书 / 素材库 / 设置。
- * 旧路径（/creation /quality /skills）保留重定向，避免书签与历史记录失效。
+ * 旧路径（/creation /skills）保留重定向，避免书签与历史记录失效。
  */
 export default function App() {
   const [status, setStatus] = useState<"starting" | "ready" | "failed">("starting");
@@ -63,7 +63,6 @@ export default function App() {
             <Route path="/settings" element={<Settings />} />
             {/* 旧路径兼容 */}
             <Route path="/creation" element={<Navigate to="/" replace />} />
-            <Route path="/quality" element={<Navigate to="/" replace />} />
             <Route path="/skills" element={<Navigate to="/settings" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

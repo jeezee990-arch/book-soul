@@ -20,10 +20,39 @@ import { getBackendUrl } from "./backend";
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export class ApiError extends Error {
-  constructor(message: string) {
+  /**
+   * HTTP 状态码（能解析出来时）。
+   *
+   * ⚠️ 为什么需要：前端要区分**同一种错误的两种含义** ——
+   *    409「作品名已存在」和 422「参数不对」处理方式完全不同
+   *    （前者要提示"换个名字"，后者要提示"填错了"）。
+   *    只看 message 文本的话，两条通道（Tauri / 直连 HTTP）的文案还不一样。
+   */
+  readonly status: number | null;
+
+  constructor(message: string, status?: number | null) {
     super(message);
     this.name = "ApiError";
+    this.status = status ?? null;
   }
+}
+
+/**
+ * 从错误消息里抠出 HTTP 状态码。
+ *
+ * 两条通道的错误文案格式不同：
+ * - Tauri（Rust 侧）：``HTTP 409: {"detail":"…"}``
+ * - 纯浏览器（fetch）：``PATCH /novels/1 failed: {"detail":"…"}``
+ *
+ * @param message - 错误消息
+ * @returns 状态码；解析不出来时返回 null
+ */
+export function parseErrorStatus(message: string): number | null {
+  const rust = /HTTP (\d{3})/.exec(message);
+  if (rust) return Number(rust[1]);
+  const http = /failed: (\d{3}) /.exec(message);
+  if (http) return Number(http[1]);
+  return null;
 }
 
 /** 当前是否跑在 Tauri 运行时里（Tauri 2 会注入 `window.__TAURI_INTERNALS__`）。 */
@@ -74,7 +103,7 @@ async function callApiOverHttp<T>(
     } catch {
       // 忽略读 body 失败
     }
-    throw new ApiError(`${method} ${path} failed: ${detail}`);
+    throw new ApiError(`${method} ${path} failed: ${detail}`, resp.status);
   }
 
   if (resp.status === 204) {
@@ -112,6 +141,9 @@ export async function callApi<T = unknown>(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new ApiError(`${method} ${path} failed: ${message}`);
+    throw new ApiError(
+      `${method} ${path} failed: ${message}`,
+      parseErrorStatus(message),
+    );
   }
 }

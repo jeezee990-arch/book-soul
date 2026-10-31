@@ -161,10 +161,15 @@ async def test_generate_complete_creates_novel_and_outline(
 
 
 @pytest.mark.asyncio
-async def test_generate_upserts_novel_on_same_name(
+async def test_generate_same_name_creates_new_novel(
     db_initialized: Path, mock_llm_complete: AsyncMock
 ) -> None:
-    """同名 novel 复用，不重复创建。"""
+    """同名再生成 → **新建一本**（名字自动加序号），不覆盖旧书。
+
+    ⚠️ 2026-10-30 行为变更：以前这里按名字 upsert —— 名字撞上素材库里
+    已有的一本书时，新书会被合并进旧书（旧书的大纲被冲掉），
+    表现为"新书写不进素材库"。现在改成按 id 区分：不传 novel_id = 新建。
+    """
     from sqlalchemy import func, select
 
     from src.db import SessionLocal
@@ -178,7 +183,6 @@ async def test_generate_upserts_novel_on_same_name(
             novel_name="复用测试",
             outline_type="complete",
         )
-        novel_id_1 = r1["novel_id"]
 
     async with SessionLocal() as session:
         gen = OutlineGenerator(session, llm_client=mock_llm_complete)
@@ -188,25 +192,30 @@ async def test_generate_upserts_novel_on_same_name(
             novel_name="复用测试",  # 同名
             outline_type="complete",
         )
-        assert r2["novel_id"] == novel_id_1
 
-    # DB 里只有 1 个同名 novel
+    # 两本不同的书
+    assert r2["novel_id"] != r1["novel_id"]
+    # 第二本自动加了序号
+    assert r1["novel_name"] == "复用测试"
+    assert r2["novel_name"] == "复用测试 2"
+
+    # DB 里两本都还在（第一本没被覆盖掉）
     async with SessionLocal() as session:
         count = (
             await session.execute(select(func.count(Novel.id)).where(Novel.name == "复用测试"))
         ).scalar_one()
         assert count == 1
+        count2 = (
+            await session.execute(select(func.count(Novel.id)).where(Novel.name == "复用测试 2"))
+        ).scalar_one()
+        assert count2 == 1
 
 
 @pytest.mark.asyncio
-async def test_generate_complete_overrides_existing_outline(
+async def test_generate_reuses_novel_by_id(
     db_initialized: Path, mock_llm_complete: AsyncMock
 ) -> None:
-    """同 novel + 同 type 重复生成 → 删除旧的、再创（覆盖语义）。
-
-    注意：SQLite 的 INTEGER PRIMARY KEY 在删除记录后会复用 id，所以不能
-    用 outline_id != 来验证。改用 list 数量。
-    """
+    """传 novel_id → **复用同一本**（同一向导内重生成），同 type 覆盖旧大纲。"""
     from sqlalchemy import func, select
 
     from src.db import SessionLocal
@@ -226,7 +235,7 @@ async def test_generate_complete_overrides_existing_outline(
         r2 = await gen.generate(
             genre="修仙",
             plot_summary="第二版剧情内容描述。",
-            novel_name="覆盖测试",
+            novel_id=r1["novel_id"],  # 复用同一本
             outline_type="complete",
         )
 
@@ -243,6 +252,7 @@ async def test_generate_complete_overrides_existing_outline(
         assert count == 1
     # novel 仍是同一个
     assert r1["novel_id"] == r2["novel_id"]
+    assert r1["novel_name"] == r2["novel_name"]
 
 
 # ===== generate() freedom 模式 =====

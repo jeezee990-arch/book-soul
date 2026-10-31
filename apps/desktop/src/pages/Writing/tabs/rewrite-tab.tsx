@@ -28,18 +28,6 @@ export default function RewriteTab({ chapter, stream, selection }: Props) {
     setPrompt("");
   }, [selection?.from, selection?.to]);
 
-  // 质检 Tab 点「重写这段」→ 带问题描述切过来，预填指令
-  useEffect(() => {
-    const onHint = (e: Event) => {
-      const detail = (e as CustomEvent<string>).detail;
-      if (typeof detail === "string" && detail.trim()) {
-        setPrompt(detail.trim());
-      }
-    };
-    window.addEventListener("book-soul:rewrite-hint", onHint);
-    return () => window.removeEventListener("book-soul:rewrite-hint", onHint);
-  }, []);
-
   if (!chapter) {
     return (
       <div className="px-3.5 py-6 text-center text-[12px] text-neutral-400">

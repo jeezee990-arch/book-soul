@@ -71,6 +71,32 @@ interface NewBookState {
    *    存下来后：同一向导内重生成 → 复用同一本；换一本 → 「再写一本」清空。
    */
   novelName: string | null;
+  /**
+   * 本次向导建出来的**作品 id**（2026-10-30 新增）。
+   *
+   * ⚠️ 为什么要 id 而不是只靠名字：以前"重生成同一本"靠**名字**识别，
+   *    而名字会撞车 —— 素材库里已经有一本《修仙新作》时，新书会被
+   *    合并进旧书（旧书大纲被冲掉，新书存不进素材库）。
+   *    改成靠 **id** 区分：
+   *    - 有 id → 复用这一本（重生成）
+   *    - 无 id → 新建一本（名字自动避让重名）
+   */
+  novelId: number | null;
+  /**
+   * 作者在第一步输入的**书名**（2026-10-30 新增）。
+   *
+   * 留空 = 让程序自动命名（``题材新作``，撞名自动加序号）。
+   */
+  novelTitleInput: string;
+  /**
+   * 上次生成时**实际生效**的书名（2026-10-30 新增）。
+   *
+   * 用来区分"作者改过名字"和"名字没动"：
+   * 只有作者**主动改过**才把新名字发给后端。
+   * 否则用户在素材库里给这本书改过名后，回到向导一重新生成，
+   * 名字会被悄悄改回旧名（作者在别处的改动被覆盖）。
+   */
+  novelTitleApplied: string;
   /** 人物卡进度 */
   charProgress: CharProgress;
   /** 剧情阶段统计 */
@@ -160,6 +186,12 @@ interface NewBookState {
   setOutlineMeta: (meta: NovelState | null) => void;
   /** 记录本次向导建出来的书名（重生成时复用同一本作品） */
   setNovelName: (name: string | null) => void;
+  /** 记录本次向导建出来的作品 id（重生成时复用同一本作品） */
+  setNovelId: (id: number | null) => void;
+  /** 记录作者输入的书名（留空 = 自动命名） */
+  setNovelTitleInput: (title: string) => void;
+  /** 记录上次生成时实际生效的书名 */
+  setNovelTitleApplied: (title: string) => void;
   /** 设置人物卡进度（同样支持函数式更新） */
   setCharProgress: (
     p: CharProgress | ((prev: CharProgress) => CharProgress),
@@ -224,6 +256,9 @@ export function createNewBookStore(storage?: StateStorage) {
         outlineScaleTouched: false,
         outlineMeta: null,
         novelName: null,
+        novelId: null,
+        novelTitleInput: "",
+        novelTitleApplied: "",
         charProgress: EMPTY_CHAR_PROGRESS,
         plotStats: null,
         outlineStats: null,
@@ -278,6 +313,9 @@ export function createNewBookStore(storage?: StateStorage) {
         resetOutlineScaleTouched: () => set({ outlineScaleTouched: false }),
         setOutlineMeta: (outlineMeta) => set({ outlineMeta }),
         setNovelName: (novelName) => set({ novelName }),
+        setNovelId: (novelId) => set({ novelId }),
+        setNovelTitleInput: (novelTitleInput) => set({ novelTitleInput }),
+        setNovelTitleApplied: (novelTitleApplied) => set({ novelTitleApplied }),
         setCharProgress: (charProgress) =>
           set((s) => ({
             charProgress:
@@ -354,6 +392,9 @@ export function createNewBookStore(storage?: StateStorage) {
             outlineScaleTouched: false,
             outlineMeta: null,
             novelName: null,
+            novelId: null,
+            novelTitleInput: "",
+            novelTitleApplied: "",
             charProgress: EMPTY_CHAR_PROGRESS,
             plotStats: null,
             outlineStats: null,
@@ -391,6 +432,9 @@ export function createNewBookStore(storage?: StateStorage) {
           outlinePhase: s.outlinePhase,
           outlineMeta: s.outlineMeta,
           novelName: s.novelName,
+          novelId: s.novelId,
+          novelTitleInput: s.novelTitleInput,
+          novelTitleApplied: s.novelTitleApplied,
           charProgress: s.charProgress,
           plotStats: s.plotStats,
           outlineStats: s.outlineStats,

@@ -14,6 +14,8 @@ export interface Novel {
   file_path: string | null;
   imported: boolean;
   read_only: boolean;
+  /** 手动排序序号（下标越小越靠前）。素材库「作品」Tab 用它持久化用户排的顺序。 */
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }

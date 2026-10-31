@@ -30,6 +30,7 @@ from ..core.chapter_context import (
 )
 from ..core.llm.base import ChatMessage, describe_llm_error
 from ..core.llm.streaming import KIND_TEXT, ThinkSplitter
+from ..core.prose_format import ProseFormatter
 from ..models.chapter import Chapter
 from ..models.character import Character
 from ..models.novel import Novel
@@ -231,13 +232,28 @@ class ChapterGenerator:
         #    这里用 ThinkSplitter 拆成两路：**思考单独走一路**（不丢），
         #    正文走另一路 —— 正文里混进 "We need answer Chinese..." 是灾难。
         splitter = ThinkSplitter()
+        # ⚠️ 正文排版归一化（2026-10-30，用户实测反馈）：
+        #    模型可能整章不给一个换行（实测 MiniMax-M3.1-Flash 的输出里
+        #    **零个换行**），也可能在汉字之间塞空格。
+        #    排版器负责：去汉字间空格 + 段落分隔 + 兜底断段（模型不输出段落时）。
+        #    增量处理，所以流式界面里看到的就是规范排版的正文。
+        formatter = ProseFormatter()
         try:
             async for delta in stream_iter:
                 if not delta:
                     continue
                 for kind, text in splitter.feed(delta):
-                    if text:
+                    if not text:
+                        continue
+                    if kind == KIND_TEXT:
+                        formatted = formatter.feed(text)
+                        if formatted:
+                            yield (KIND_TEXT, formatted)
+                    else:
                         yield (kind, text)
+            tail = formatter.finish()
+            if tail:
+                yield (KIND_TEXT, tail)
         finally:
             await self._release_llm()
 

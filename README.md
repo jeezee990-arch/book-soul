@@ -6,7 +6,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev/)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-blueviolet.svg)](https://tauri.app/)
-[![Tests 979](https://img.shields.io/badge/tests-979%20passed-brightgreen.svg)](server/tests)
+[![Tests 1056](https://img.shields.io/badge/tests-1056%20passed-brightgreen.svg)](server/tests)
 
 <p align="center">
   <img src="docs/screenshots/01-writing-dark.png" width="49%" alt="写作页三栏">
@@ -20,17 +20,19 @@
 ## 项目简介
 
 Book Soul 是一款为网文作者和严肃文学作者设计的 **AI 辅助写作桌面应用**。
-从灵感发现、人物设定、大纲生成到章节创作、质检与版本回滚，提供完整创作闭环。
+从灵感发现、人物设定、大纲生成到章节创作与版本回滚，提供完整创作闭环。
 
 **本地优先**：数据全部存在你自己机器上的 SQLite 文件里，不依赖任何云端账号体系。
 
 ### 核心特色
 
 - 🎭 **人物卡驱动一致性** —— 所有创作严格按人物卡走（性格 / 习惯 / 思维 / 关系 / 成长弧线），AI 不会写出 OOC 的角色
+- 📐 **正文自动排版** —— 模型不输出段落时自动兜底断段，汉字间多余空格清掉，连续对白自动拆段；字数按**非空白字符数**统计，与 Word 一致（不会出现「提示 5338 字 / 实际 3309 字」）
 - 🛠 **Skill 工具箱** —— 内置 12 个技能（字数统计 / 敏感词检查 / 章节摘要 / 角色抽取 / 题材分类 / 一致性检查 …），支持用户自定义扩展
 - 🤖 **双模式 LLM** —— 云端（mimo / MiniMax / OpenAI 等任何 OpenAI 兼容端点）+ 本地（Ollama），按场景独立路由
 - 🔒 **密钥零明文** —— API Key 优先级：环境变量 > DPAPI 加密文件 > 系统 Keyring；打包版不含 `.env`
 - ✍️ **流式创作** —— 章节生成、选区重写、大纲补全全部实时流式输出，配合 Tiptap 富文本编辑器
+- 📚 **作品名唯一** —— 同一时间只能有一本同名作品（重名自动加序号），素材库里作品可**手动排序**、右键重命名 / 删除 / 导出
 - 🔄 **版本控制** —— 每次修改自动存版本，diff 视图对比，秒级回滚（回滚本身也生成新版本，审计链完整）
 - 📤 **多格式导出** —— Markdown / HTML / Word（.docx）/ 完整备份 zip
 - 🔍 **本地扫描** —— 一键扫描本地小说目录批量导入，自动识别作品与章节
@@ -40,12 +42,12 @@ Book Soul 是一款为网文作者和严肃文学作者设计的 **AI 辅助写�
 
 | 页面 | 路由 | 内容 |
 |---|---|---|
-| ✍️ **写作** | `/` | 三栏：章节树 244px \| 纸感编辑区 \| 上下文面板 332px（右栏 6 Tab：生成 / 重写 / 质检 / 人物 / 大纲 / 版本） |
-| 🆕 **开新书** | `/new` | 三步向导：种子 → 剧情 → 大纲与人物 |
-| 📚 **素材库** | `/library` | 三 Tab：作品 / 灵感 / 导入 |
+| ✍️ **写作** | `/` | 三栏：章节树 244px \| 纸感编辑区 \| 上下文面板 332px（右栏 5 Tab：生成 / 重写 / 人物 / 大纲 / 版本） |
+| 🆕 **开新书** | `/new` | 三步向导：种子 → 剧情 → 大纲与人物（第 1 步可**自己起书名**，重名自动加序号） |
+| 📚 **素材库** | `/library` | 三 Tab：作品 / 灵感 / 导入（作品卡支持右键菜单：重命名 / 删除 / 上移下移 / 导出；列表可排序） |
 | ⚙️ **设置** | `/settings` | 四分区：LLM 与密钥 / 数据与备份 / AI 增强 / 外观 |
 
-> 质检、人物卡、大纲、版本都是「当前章节的上下文」，不是独立页面 —— 全部收在写作页右栏。
+> 人物卡、大纲、版本都是「当前章节的上下文」，不是独立页面 —— 全部收在写作页右栏。
 > 设计决策与视觉规范见 [docs/DESIGN.md](./docs/DESIGN.md)。
 
 ---
@@ -119,10 +121,10 @@ cd apps/desktop && pnpm tauri dev
 **常用命令**
 
 ```bash
-# 后端测试（766 个用例）
+# 后端测试（781 个用例）
 cd server && uv run pytest -q --cov=src --cov-report=term-missing
 
-# 前端测试（213 个用例）
+# 前端测试（275 个用例）
 cd apps/desktop && pnpm test
 
 # 代码质量
@@ -176,18 +178,26 @@ book-soul/
 │   │   │   ├── model-status-pill.tsx# 顶栏模型状态灯
 │   │   │   └── ...                  # DiffViewer / CharacterCard / ErrorBoundary ...
 │   │   ├── pages/                   # 4 个一级页面
-│   │   │   ├── Writing/             # 写作（index + 6 个右栏 Tab + 流式 hook）
-│   │   │   ├── NewBook/             # 开新书三步向导（含 3 个流式 hook）
+│   │   │   ├── Writing/             # 写作（index + 5 个右栏 Tab + 流式 hook）
+│   │   │   ├── NewBook/             # 开新书三步向导（含 3 个流式 hook + 书名输入）
 │   │   │   ├── Library/             # 素材库（作品 / 灵感 / 导入）
+│   │   │   │   │                   #   + NovelCard / NovelContextMenu / novel-sort
 │   │   │   └── Settings/            # 设置（4 个分区）
-│   │   ├── api/                     # 后端 API 的 TS 客户端（17 个模块）
+│   │   ├── api/                     # 后端 API 的 TS 客户端（16 个模块）
 │   │   │   ├── backend.ts           # 后端地址解析 + 就绪握手
 │   │   │   ├── streams.ts           # NDJSON 流读取 + 失败检测
 │   │   │   └── ...                  # chapters / characters / outlines / llm / ...
 │   │   ├── stores/                  # Zustand（7 个 store）
 │   │   │   └── workspace-store.ts   # 当前作品（全局唯一状态）
-│   │   ├── lib/                     # 纯函数工具 + 类型
+│   │   ├── lib/                     # 纯函数工具 + 类型（10 个）
+│   │   │   ├── prose-text.ts        # 段落切分 + 真实字数（口径与后端一致）
+│   │   │   ├── prose-insert.ts      # ProseMirror 流式插入（不碰 DOM）
+│   │   │   ├── novel-name.ts        # 作品命名规则（前后端共用）
+│   │   │   └── ...                  # auto-scroll / consistency / outline-merge ...
 │   │   └── styles.css               # 全局样式（含 .novel-paper 纸面）
+│   ├── scripts/                     # 前端自证脚本（Node 直接跑，import 生产实现）
+│   │   ├── verify-append.mjs        # 流式插入自证
+│   │   └── repro-append.mjs         # 插入行为复现
 │   └── src-tauri/                   # Rust 桌面壳
 │       ├── src/
 │       │   ├── main.rs              # 入口
@@ -199,10 +209,10 @@ book-soul/
 │
 ├── server/                          # FastAPI 后端
 │   ├── src/
-│   │   ├── api/                     # 路由层（17 个模块，只做依赖注入 + 错误映射）
-│   │   ├── services/                # 业务逻辑（27 个模块）
+│   │   ├── api/                     # 路由层（16 个模块，只做依赖注入 + 错误映射）
+│   │   ├── services/                # 业务逻辑（26 个模块）
 │   │   ├── models/                  # SQLAlchemy 2 ORM（7 张业务表）
-│   │   ├── schemas/                 # Pydantic 契约（9 个模块）
+│   │   ├── schemas/                 # Pydantic 契约（7 个模块）
 │   │   ├── core/                    # 基础设施
 │   │   │   ├── llm/                 # LLM 抽象（base / factory / openai_compat / ollama
 │   │   │   │                        #   + streaming / thinking / cache / partial_json）
@@ -210,14 +220,14 @@ book-soul/
 │   │   │   ├── security/            # dpapi / secret_store / encryption / keyring_manager
 │   │   │   ├── scanner/             # 本地小说扫描与导入
 │   │   │   ├── versioning/          # 版本树 + diff
-│   │   │   ├── quality/             # 质检 prompt
 │   │   │   ├── chapter_context.py   # 章节上下文组装（人物卡 → prompt）
+│   │   │   ├── prose_format.py      # ★ 正文排版器（兜底断段 / 去空格 / 连续对白拆段）
 │   │   │   ├── queue_merge.py       # 多版本流合并（内容实时 + 里程碑保序）
 │   │   │   ├── paths.py             # 路径解析统一入口（开发态 / 打包态）
 │   │   │   └── watchdog.py          # 父进程看门狗
 │   │   ├── db.py                    # async engine + 外键约束 + schema 自愈
 │   │   └── main.py                  # 应用装配 + CLI
-│   ├── tests/                       # 766 个 pytest 用例
+│   ├── tests/                       # 781 个 pytest 用例
 │   ├── book_soul.spec               # PyInstaller 打包配置
 │   ├── run_server.py                # 打包入口（绝对 import）
 │   └── pyproject.toml
@@ -225,7 +235,7 @@ book-soul/
 ├── config/                          # 运行时配置（全部进包）
 │   ├── llm.yaml                     # provider 配置 + 场景路由 + 模型规格
 │   ├── app.yaml                     # 用户级默认配置
-│   ├── prompts/                     # 13 个提示词 YAML（按场景拆分）
+│   ├── prompts/                     # 8 个提示词 YAML（按场景拆分）
 │   ├── genres/                      # 题材常识（修仙 / 都市 / 悬疑 / 言情）
 │   ├── wordbanks/                   # 题材词库（按板块分文件）
 │   ├── skills/                      # 用户自定义 Skill
@@ -237,8 +247,9 @@ book-soul/
 │   ├── build_standalone.ps1         # 一键出独立版 → dist\Book Soul\
 │   ├── build_sidecar.ps1            # PyInstaller 打后端 sidecar
 │   ├── install_shortcut.ps1 / uninstall_shortcut.ps1
-│   └── mock_provider.py             # 无 API Key 也能走完「开新书」三步
-│
+│   ├── mock_provider.py             # 无 API Key 也能走完「开新书」三步
+│   └── repair_chapter_paragraphs.py # 修复历史章节被假段落破坏的排版
+││
 ├── docs/                            # 文档
 │   ├── DESIGN.md                    # 界面设计规范（信息架构 + 视觉规范）
 │   ├── PROJECT_STRUCTURE.md         # 项目结构详解（目录职责 + 数据流）
@@ -285,7 +296,7 @@ book-soul/
 | LLM 抽象 | 自研 Protocol（~200 行），不用 LangChain / LlamaIndex |
 | 打包 | PyInstaller（后端 sidecar）+ Tauri bundler（应用壳） |
 | 包管理 | uv（Python）/ pnpm（Node） |
-| 测试 | pytest 766 + vitest 213 = **979 个用例** |
+| 测试 | pytest 781 + vitest 275 = **1056 个用例** |
 | CI | GitHub Actions（backend / frontend / packaging-smoke） |
 
 > **没有 ChromaDB / 向量库** —— 早期设计里的 RAG 已移除：个人网文收益低（要 50+ 章才体现）、
@@ -320,10 +331,10 @@ book-soul/
 | 桌面壳 + 后端骨架 | ✅ | Tauri 壳 / FastAPI / LLM 抽象 / 随机端口 / 就绪握手 |
 | 数据层 | ✅ | 7 张表 / 外键级联 / schema 自愈 / 备份恢复 |
 | 设置 | ✅ | LLM provider / API Key（DPAPI）/ 主题 / 加密 / 数据备份 |
-| 开新书 | ✅ | 种子 → 剧情 → 大纲与人物三步流式流程 |
+| 开新书 | ✅ | 种子 → 剧情 → 大纲与人物三步流式流程 + **自定义书名**（重名自动加序号） |
 | 写作 | ✅ | Tiptap / 流式生成 / 选区重写 / 版本控制 / diff / 多格式导出 |
-| 质检 | ✅ | 5 维度并行评分 + 一键重写闭环 |
-| 素材库 | ✅ | 作品库 / 灵感库 / 本地扫描导入 / 种子库管理 |
+| 正文排版 | ✅ | 兜底断段 / 去汉字间空格 / 连续对白拆段 / **真实字数口径**（前后端一致） |
+| 素材库 | ✅ | 作品库（**右键菜单：重命名 / 删除 / 上移下移 / 导出** + 排序）/ 灵感库 / 本地扫描导入 / 种子库管理 |
 | Skill 系统 | ✅ | 12 个内置技能 + 用户自定义扩展 |
 | 打包发布 | ✅ | 独立版 + NSIS 安装包 + GitHub Actions Release |
 
@@ -333,9 +344,9 @@ book-soul/
 
 欢迎 PR / Issue！提交前请确保：
 
-1. `cd server && uv run pytest` 全过（766 个）
+1. `cd server && uv run pytest` 全过（781 个）
 2. `cd server && uv run ruff check .` 无 error
-3. `cd apps/desktop && pnpm test` 全过（213 个）
+3. `cd apps/desktop && pnpm test` 全过（275 个）
 4. `cd apps/desktop && pnpm build` 无 error
 5. `cd apps/desktop/src-tauri && cargo check` 无 error
 6. commit message 说清改了什么、关联哪个模块

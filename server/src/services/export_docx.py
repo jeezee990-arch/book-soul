@@ -14,8 +14,10 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.prose_format import split_paragraphs
 from ..models.chapter import Chapter, ChapterVersion
 from ..models.novel import Novel
+from .export_service import chapter_heading
 
 
 class WordExportUnavailableError(Exception):
@@ -69,7 +71,7 @@ async def build_docx_bytes(novel_id: int, session: AsyncSession) -> bytes:
 
     # 章节
     for ch in chapters:
-        doc.add_heading(f"第 {ch.chapter_number} 章 · {ch.title or '（未命名）'}", level=1)
+        doc.add_heading(chapter_heading(ch.chapter_number, ch.title), level=1)
         if ch.outline:
             p = doc.add_paragraph()
             run = p.add_run(f"【大纲】{ch.outline}")
@@ -80,11 +82,9 @@ async def build_docx_bytes(novel_id: int, session: AsyncSession) -> bytes:
         if not content.strip():
             doc.add_paragraph("（暂无内容）")
             continue
-        # 按 \n\n 切段
-        for para_text in content.split("\n\n"):
-            para_text = para_text.strip()
-            if para_text:
-                doc.add_paragraph(para_text)
+        # 按段落切（空行是段落分隔；单个 \n 也当分隔，兼容手写正文）
+        for para_text in split_paragraphs(content):
+            doc.add_paragraph(para_text)
         # 章节末尾分页（最后章节不分）
         if ch is not chapters[-1]:
             doc.add_page_break()

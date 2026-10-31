@@ -151,6 +151,7 @@ class OutlineGenerator:
         *,
         keywords: list[str] | None = None,
         novel_name: str | None = None,
+        novel_id: int | None = None,
         outline_type: str = "complete",
         user_extra: str = "",
         total_chapters: int | None = None,
@@ -195,10 +196,10 @@ class OutlineGenerator:
 
         structure = self._validate_and_tag(outline_type, structure)
 
-        name = await self._resolve_novel_name(genre, novel_name)
-        novel = await self._upsert_novel(
-            name=name,
+        novel = await self._resolve_novel(
             genre=genre,
+            novel_name=novel_name,
+            novel_id=novel_id,
             description=plot_summary[:500],
             outline_mode=outline_type,
         )
@@ -222,6 +223,7 @@ class OutlineGenerator:
         *,
         keywords: list[str] | None = None,
         novel_name: str | None = None,
+        novel_id: int | None = None,
         outline_type: str = "complete",
         user_extra: str = "",
         total_chapters: int | None = None,
@@ -312,10 +314,10 @@ class OutlineGenerator:
             yield {"event": "error", "message": str(e)}
             return
 
-        name = await self._resolve_novel_name(genre, novel_name)
-        novel = await self._upsert_novel(
-            name=name,
+        novel = await self._resolve_novel(
             genre=genre,
+            novel_name=novel_name,
+            novel_id=novel_id,
             description=plot_summary[:500],
             outline_mode=outline_type,
         )
@@ -409,24 +411,51 @@ class OutlineGenerator:
                 await outline_service.delete(o.id)
             return await outline_service.create(outline_payload)
 
-    async def _upsert_novel(
+    async def _resolve_novel(
         self,
         *,
-        name: str,
         genre: str,
+        novel_name: str | None,
+        novel_id: int | None,
         description: str,
-        outline_mode: str | None = None,
+        outline_mode: str | None,
     ) -> Novel:
-        """按 name 查重 novel。已存在 → 复用；否则创建。
+        """确定这次大纲要写到哪本书上。
 
-        :param outline_mode: 大纲模式（complete / semi_open / freedom）——
-            写进 novel，章节生成 prompt 会带上它（半开放式写出来的章节
-            要"只写前期、留悬念"，不能自己把故事写完）。
+        ⚠️ 2026-10-30 修掉的**数据丢失 bug**
+        ----------------------------------
+        以前这里是「**按书名 upsert**」：名字撞上了就**复用**那本书，
+        然后"同 type 覆盖"把它的大纲删掉重建、人物卡也写进它的 novel_id。
+
+        后果：用户在素材库里已经有一本《修仙新作》（程序自动命名生成的），
+        再走一次「开新书」→ 程序给出的自动名又撞上 → **新书写不进素材库**，
+        反而把旧书的大纲冲掉了。
+
+        现在的规则（**靠 id 而不是靠名字**区分"重生成同一本"和"新建一本"）：
+
+        - 传了 ``novel_id`` → **复用这一本**（同一向导内退回重生成）。
+          名字没变就不动；变了且没被占用就改名。
+        - 没传 ``novel_id`` → **新建一本**，名字保证唯一
+          （撞名就自动加序号：``修仙新作`` → ``修仙新作 2``）。
+
+        :raises OutlineGenerationError: novel_id 指向的作品不存在
         """
-        existing = await self.session.execute(select(Novel).where(Novel.name == name))
-        novel = existing.scalar_one_or_none()
-        if novel is not None:
-            return novel
+        if novel_id is not None:
+            novel = await self.session.get(Novel, novel_id)
+            if novel is None:
+                # ⚠️ 复用目标已经被删了（比如用户在素材库里删掉了这本书，
+                #    向导还留着上次的 id）→ 别报错打断流程，直接新建一本。
+                logger.warning("outline: novel {} not found, creating a new one", novel_id)
+            else:
+                # 大纲模式变了要跟着更新（章节生成 prompt 会带上它）
+                if outline_mode and novel.outline_mode != outline_mode:
+                    novel.outline_mode = outline_mode
+                await self._maybe_rename(novel, novel_name)
+                await self.session.flush()
+                await self.session.refresh(novel)
+                return novel
+
+        name = await self._resolve_novel_name(genre, novel_name)
         novel = Novel(
             name=name,
             genre=genre,
@@ -438,22 +467,35 @@ class OutlineGenerator:
         await self.session.refresh(novel)
         return novel
 
-    async def _resolve_novel_name(self, genre: str, novel_name: str | None) -> str:
-        """确定这次要用的作品名。
+    async def _maybe_rename(self, novel: Novel, novel_name: str | None) -> None:
+        """复用已有作品时，按需改名。
 
-        - **显式给了名字** → 原样用。同名会命中 :meth:`_upsert_novel` 的复用逻辑，
-          这正是"重新生成这本的大纲"的语义。
-        - **没给名字** → 生成**唯一**名字（``修仙新作`` / ``修仙新作 2`` …）。
+        - 没给名字 / 名字没变 → 不动
+        - 新名字被别人占了 → **保持原名**（不能把两本书改成同一个名字）
+
+        :param novel: 目标作品
+        :param novel_name: 用户想要的新名字（可空）
+        """
+        wanted = (novel_name or "").strip()
+        if not wanted or wanted == novel.name:
+            return
+        if await self._novel_exists(wanted):
+            logger.warning("outline: rename skipped, name already taken: {}", wanted)
+            return
+        novel.name = wanted
+
+    async def _resolve_novel_name(self, genre: str, novel_name: str | None) -> str:
+        """确定新作品的名字（**保证唯一**）。
+
+        - 显式给了名字 → 用它；撞名就自动加序号（``X`` → ``X 2`` → ``X 3`` …）
+        - 没给名字 → ``{genre}新作`` + 同样的加序号规则
 
         ⚠️ 2026-10-25 巡检发现的**阻断级 bug**：这里原来直接用 ``f"{genre}新作"``，
         而前端从不传书名 → 第二次用同题材走「开新书」会**复用第一本书**，
         然后"同 type 覆盖"把第一本的大纲删掉重建、人物卡也写进第一本的 novel_id
         —— 用户的第一本书被静默毁掉。
         """
-        explicit = (novel_name or "").strip()
-        if explicit:
-            return explicit
-        base = f"{genre}新作"
+        base = (novel_name or "").strip() or f"{genre}新作"
         name = base
         index = 1
         while await self._novel_exists(name):

@@ -22,6 +22,7 @@ import {
 import { chaptersApi } from "@/api/chapters";
 import { ApiError } from "@/api";
 import type { Chapter, ChapterVersion } from "@/lib/types";
+import { countProseWords } from "@/lib/prose-text";
 import type { NovelEditorHandle } from "@/components/NovelEditor";
 
 export interface ChapterSelection {
@@ -162,15 +163,15 @@ export function useChapterStream({
     setElapsed(0);
   }, []);
 
-  /** 写一条新版本（生成 / 重写结束后统一调用） */
+  /** 写一条新版本（生成 / 重写结束后统一调用）。返回保存后的版本。 */
   const persist = useCallback(
     async (
       content: string,
       trigger: string,
       prompt: string,
       metadata?: Record<string, unknown>,
-    ) => {
-      if (!chapter) return;
+    ): Promise<ChapterVersion | null> => {
+      if (!chapter) return null;
       try {
         const version = await chaptersApi.saveContent(chapter.id, {
           content,
@@ -179,9 +180,11 @@ export function useChapterStream({
           metadata,
         });
         onSaved(version);
+        return version;
       } catch (e: unknown) {
         const msg = e instanceof ApiError ? e.message : String(e);
         toast.error("保存版本失败", { description: msg });
+        return null;
       }
     },
     [chapter, onSaved],
@@ -261,8 +264,12 @@ export function useChapterStream({
         if (finalText) {
           // 存的是编辑器的完整正文（原有正文 + 本次新增）
           const full = readFullText(finalText);
-          await persist(full, "llm_generate", userPrompt);
-          toast.success("生成完成", { description: `本章共 ${full.length} 字` });
+          const version = await persist(full, "llm_generate", userPrompt);
+          // ⚠️ 字数用**真实口径**（非空白字符数，与 Word 一致）。
+          //    旧写法用 `full.length` → 把换行符和空格也算进去 → 虚高
+          //    （用户实测：正文 3309 字，界面显示 5338 字）。
+          const words = version?.word_count ?? countProseWords(full);
+          toast.success("生成完成", { description: `本章共 ${words} 字` });
         } else {
           toast.warning("生成未产生内容");
         }
@@ -353,13 +360,14 @@ export function useChapterStream({
         if (finalText) {
           // 存的是编辑器的完整正文（选区已被新内容替换）
           const full = readFullText(finalText);
-          await persist(full, "rewrite", userPrompt, {
+          const version = await persist(full, "rewrite", userPrompt, {
             from,
             to,
             original_length: originalText.length,
           });
+          const words = version?.word_count ?? countProseWords(full);
           toast.success("重写完成", {
-            description: `替换 ${originalText.length} → ${finalText.length} 字`,
+            description: `替换 ${originalText.length} → ${words} 字`,
           });
         } else {
           toast.warning("重写未产生内容");

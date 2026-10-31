@@ -90,3 +90,21 @@ class NovelRead(NovelBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    sort_order: int = 0
+    """手动排序序号（下标越小越靠前）。"""
+
+
+class NovelReorderRequest(BaseModel):
+    """手动排序请求（2026-10-30 素材库管理）。"""
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"ids": [3, 1, 2]}},
+    )
+
+    ids: list[int] = Field(min_length=1, max_length=500, description="用户排好的作品 id 顺序")
+
+
+class NovelReorder(BaseModel):
+    """手动排序结果：按新顺序返回作品。"""
+
+    items: list[NovelRead]

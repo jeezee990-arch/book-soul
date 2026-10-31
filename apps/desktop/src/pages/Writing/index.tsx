@@ -2,8 +2,8 @@
  * 写作页（主战场）：章节树 + 纸感编辑区 + 上下文面板。
  *
  * 2026-10 UI 重设计：
- * - 旧「创作」页 = 作品下拉 + 章节列表 + 编辑器，质检是另一个独立页面
- * - 现在所有章节级操作收进右栏 6 个 Tab（生成/重写/质检/人物/大纲/版本）
+ * - 旧「创作」页 = 作品下拉 + 章节列表 + 编辑器
+ * - 现在所有章节级操作收进右栏 5 个 Tab（生成/重写/人物/大纲/版本）
  * - 作品切换提到顶栏全局状态，这里只读不选
  */
 
@@ -157,15 +157,6 @@ export default function Writing() {
     [chapters, setChapterId, stream],
   );
 
-  /** 质检 → 重写：切到重写 Tab */
-  const handleRewriteFromQuality = useCallback((suggestion: string) => {
-    setPanelTab("rewrite");
-    // 把问题描述带到重写 Tab 的输入框（通过自定义事件）
-    window.dispatchEvent(
-      new CustomEvent("book-soul:rewrite-hint", { detail: suggestion }),
-    );
-  }, []);
-
   // ===== 空态（没选作品）=====
   if (novelId === null || !novel) {
     return (
@@ -211,7 +202,6 @@ export default function Writing() {
         stream={stream}
         selection={selection}
         versionTick={versionTick}
-        onRewriteFromQuality={handleRewriteFromQuality}
       />
 
       <CreateChapterDialog

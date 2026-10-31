@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import pytest
 
+from src.core.prose_format import count_prose_words
+
 # ===== helpers =====
 
 
@@ -69,7 +71,7 @@ async def test_create_chapter_with_content_creates_initial_version(db_initialize
         chapter = await svc.create(data)
 
     assert chapter.current_version_id is not None
-    assert chapter.word_count == len(content)
+    assert chapter.word_count == count_prose_words(content)
     assert chapter.status == "drafting"  # 写完自动 outline → drafting
 
     async with get_session() as session:
@@ -81,7 +83,7 @@ async def test_create_chapter_with_content_creates_initial_version(db_initialize
     assert v.trigger == "user_create"
     assert v.parent_version_id is None
     assert v.content == content
-    assert v.word_count == len(content)
+    assert v.word_count == count_prose_words(content)
 
 
 @pytest.mark.asyncio
@@ -285,7 +287,7 @@ async def test_update_content_creates_version_with_parent(db_initialized):
 
     assert v2.parent_version_id == original_vid
     assert v2.trigger == "user_edit"
-    assert v2.word_count == len("v2 - new content")
+    assert v2.word_count == count_prose_words("v2 - new content")
     assert c2.current_version_id == v2.id
     assert c2.word_count == v2.word_count
 
@@ -321,7 +323,7 @@ async def test_update_content_chains_versions(db_initialized):
     assert v2.parent_version_id == c.current_version_id  # 最初的初始版本
     # current 应是 v3
     assert c_final.current_version_id == v3.id
-    assert c_final.word_count == len("v3 - llm")
+    assert c_final.word_count == count_prose_words("v3 - llm")
 
 
 @pytest.mark.asyncio
@@ -508,7 +510,7 @@ async def test_api_update_content_creates_version(db_initialized):
     # 查 chapter 应能看到 word_count 变了
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         c2 = (await client.get(f"/chapters/{cid}")).json()
-    assert c2["word_count"] == len("v2 - rewritten")
+    assert c2["word_count"] == count_prose_words("v2 - rewritten")
 
 
 @pytest.mark.asyncio

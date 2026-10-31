@@ -1,7 +1,7 @@
 /**
  * 步骤 1 · 种子：选题材 + 挑关键词。
  *
- * 对应设计稿 s09。题材决定词库、题材常识与质检标准；
+ * 对应设计稿 s09。题材决定词库与题材常识；
  * 词条会写进后面每一步的 prompt。
  */
 
@@ -12,6 +12,7 @@ import { wordbanksApi } from "@/api/wordbanks";
 import { GENRE_DESC, GENRE_PRIORITY, type GenreDef } from "@/config/genres";
 import { fetchRandomBatch } from "./wordbank";
 import WordbankManagerDialog from "./wordbank-manager-dialog";
+import NovelNameField from "./novel-name-field";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -22,6 +23,11 @@ interface Props {
   onToggleKeyword: (kw: string) => void;
   onRemoveKeyword: (kw: string) => void;
   onClearKeywords: () => void;
+  /** 作者输入的书名（留空 = 自动命名） */
+  title: string;
+  onTitleChange: (title: string) => void;
+  /** 复用已有作品时排除它自己的名字 */
+  excludeName?: string | null;
 }
 
 export default function SeedStep({
@@ -31,6 +37,9 @@ export default function SeedStep({
   onToggleKeyword,
   onRemoveKeyword,
   onClearKeywords,
+  title,
+  onTitleChange,
+  excludeName,
 }: Props) {
   const [categories, setCategories] = useState<string[]>([]);
   const [candidates, setCandidates] = useState<string[]>([]);
@@ -88,12 +97,19 @@ export default function SeedStep({
 
   return (
     <div>
+      {/* 书名（2026-10-30 新增） */}
+      <NovelNameField
+        value={title}
+        onChange={onTitleChange}
+        excludeName={excludeName}
+      />
+
       {/* 题材 */}
       <section className="mb-6">
         <div className="mb-2.5 flex items-baseline gap-2">
           <h3 className="text-[12.5px] font-semibold">题材</h3>
           <span className="text-[11.5px] text-neutral-400">
-            决定词库、题材常识与质检标准
+            决定词库与题材常识
           </span>
         </div>
         <div className="grid grid-cols-4 gap-2.5">

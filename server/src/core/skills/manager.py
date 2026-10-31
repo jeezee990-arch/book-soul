@@ -27,7 +27,6 @@ SCENE_NAMES = frozenset(
         "character_generation",
         "chapter_generation",
         "chapter_rewrite",
-        "quality_check",
         "summary",
     }
 )

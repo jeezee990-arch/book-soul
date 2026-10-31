@@ -8,16 +8,38 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.prose_format import split_paragraphs
+from ..models.chapter import Chapter, ChapterVersion
 from ..models.character import Character
 from ..models.novel import Novel
 from .character_service import CharacterService, NovelNotFoundError
 from .outline_service import OutlineService
+
+# 章节标题里已经带「第 N 章」时不要再加前缀（否则会变成「第 1 章 · 第一章 xxx」）
+_CHAPTER_PREFIX_RE = re.compile(r"^\s*第\s*[0-9０-９零一二三四五六七八九十百千两]+\s*[章回节卷]")
+
+
+def chapter_heading(chapter_number: int, title: str | None) -> str:
+    """生成章节标题。
+
+    ⚠️ 章节标题本身常常已经写了"第一章 xxx"（用户自己起的名），
+    再拼一个"第 N 章"前缀就会重复。这里检测到已带前缀就只返回原标题。
+
+    :param chapter_number: 章节序号
+    :param title: 章节标题
+    :return: 章节标题文本
+    """
+    text = (title or "（未命名）").strip() or "（未命名）"
+    if _CHAPTER_PREFIX_RE.match(text):
+        return text
+    return f"第 {chapter_number} 章 · {text}"
 
 
 class ExportError(Exception):
@@ -46,8 +68,15 @@ class NovelExportService:
         # 4) 加载 characters（按角色排序）
         characters_section = await self._build_characters_section(novel_id)
 
-        # 5) 拼装 markdown
-        return self._render_markdown(novel, outline_section, characters_section)
+        # 5) 加载章节正文
+        #
+        # ⚠️ 2026-10-30：以前 md / html 导出**不含正文**（只有大纲+人物卡），
+        #    而 docx 含正文 —— 同一张作品卡上三个导出按钮内容不一致。
+        #    现在三种格式都是"全稿"。
+        chapters_section = await self._build_chapters_section(novel_id)
+
+        # 6) 拼装 markdown
+        return self._render_markdown(novel, outline_section, characters_section, chapters_section)
 
     async def export_html(self, novel_id: int) -> str:
         """导出指定 novel 为 HTML 文本（Phase 4.7，0 依赖）。"""
@@ -95,9 +124,53 @@ class NovelExportService:
             blocks.append(self._render_character(c))
         return "\n\n---\n\n".join(blocks)
 
+    async def _build_chapters_section(self, novel_id: int) -> str:
+        """渲染章节正文为 markdown section（段落之间空一行）。
+
+        ⚠️ 段落切分用 :func:`split_paragraphs` —— 正文里段落分隔符是空行
+        （``\\n\\n``），单个 ``\\n`` 也当分隔（兼容手写正文）。
+        """
+        stmt = (
+            select(Chapter)
+            .where(Chapter.novel_id == novel_id)
+            .order_by(Chapter.chapter_number.asc(), Chapter.id.asc())
+        )
+        result = await self.session.execute(stmt)
+        chapters: list[Chapter] = list(result.scalars())
+        if not chapters:
+            return "（无）"
+
+        blocks: list[str] = []
+        for ch in chapters:
+            blocks.append(f"### {chapter_heading(ch.chapter_number, ch.title)}")
+            content = await self._get_chapter_content(ch)
+            if not content.strip():
+                blocks.append("（暂无内容）")
+                continue
+            paragraphs = split_paragraphs(content)
+            if paragraphs:
+                blocks.append("\n\n".join(paragraphs))
+            else:
+                blocks.append("（暂无内容）")
+        return "\n\n---\n\n".join(blocks)
+
+    async def _get_chapter_content(self, chapter: Chapter) -> str:
+        """取章节当前版本的正文。"""
+        if chapter.current_version_id is None:
+            return ""
+        version = await self.session.get(ChapterVersion, chapter.current_version_id)
+        if version is None:
+            return ""
+        return version.content
+
     @staticmethod
-    def _render_markdown(novel: Novel, outline_md: str, chars_md: str) -> str:
-        """主模板：作品名 + 元信息 + 大纲 + 人物卡。"""
+    def _render_markdown(
+        novel: Novel,
+        outline_md: str,
+        chars_md: str,
+        chapters_md: str = "（无）",
+    ) -> str:
+        """主模板：作品名 + 元信息 + 大纲 + 人物卡 + 正文。"""
         created = novel.created_at.strftime("%Y-%m-%d") if novel.created_at else ""
         description = novel.description or "（无）"
         status_zh = {
@@ -122,6 +195,10 @@ class NovelExportService:
             "## 人物卡",
             "",
             chars_md,
+            "",
+            "## 正文",
+            "",
+            chapters_md,
             "",
         ]
         return "\n".join(parts)

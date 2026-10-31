@@ -23,6 +23,7 @@ from ..core.chapter_context import (
 )
 from ..core.llm.base import ChatMessage, describe_llm_error
 from ..core.llm.streaming import KIND_TEXT, ThinkSplitter
+from ..core.prose_format import ProseFormatter
 from ..models.chapter import Chapter
 from ..models.character import Character
 from ..models.novel import Novel
@@ -195,13 +196,26 @@ class ChapterRewriter:
         #    （见 core/llm/openai_compat.py）—— 思考单独走一路（不丢），
         #    正文走另一路：正文里混进一段英文思考比丢掉更糟。
         splitter = ThinkSplitter()
+        # ⚠️ 正文排版归一化（2026-10-30）：与章节生成同一条链路 ——
+        #    模型可能整章不给换行，也可能在汉字之间塞空格。
+        #    排版器负责去空格 + 段落分隔 + 兜底断段。
+        formatter = ProseFormatter()
         try:
             async for delta in stream_iter:
                 if not delta:
                     continue
                 for kind, text in splitter.feed(delta):
-                    if text:
+                    if not text:
+                        continue
+                    if kind == KIND_TEXT:
+                        formatted = formatter.feed(text)
+                        if formatted:
+                            yield (KIND_TEXT, formatted)
+                    else:
                         yield (kind, text)
+            tail = formatter.finish()
+            if tail:
+                yield (KIND_TEXT, tail)
         finally:
             await self._release_llm()
 

@@ -23,8 +23,8 @@
               ▼
 ┌─────────────────────────────────────────────────────────┐
 │  FastAPI (async) + uvicorn                               │
-│  - 17 个路由模块（novel / chapter / character / ...）    │
-│  - 业务服务层 services/（27 个）                         │
+│  - 16 个路由模块（novel / chapter / character / ...）    │
+│  - 业务服务层 services/（26 个）                         │
 │  - LLM 抽象层 core/llm/                                  │
 │  - SQLAlchemy 2.0 + aiosqlite（外键约束已开启）          │
 └─────────────────────────────────────────────────────────┘
@@ -45,8 +45,8 @@
 
 ```
 server/src/
-├── api/         # 路由层（HTTP 接口、依赖注入、错误映射）—— 17 个模块
-├── services/    # 业务逻辑（CRUD、生成、扫描、备份）—— 27 个
+├── api/         # 路由层（HTTP 接口、依赖注入、错误映射）—— 16 个模块
+├── services/    # 业务逻辑（CRUD、生成、扫描、备份）—— 26 个
 ├── models/      # SQLAlchemy ORM（7 张表）
 ├── schemas/     # Pydantic（API 输入输出契约）
 ├── core/        # 基础设施
@@ -55,9 +55,9 @@ server/src/
 │   ├── skills/     # Skill 系统（base / registry / manager / loader + builtin 12 个）
 │   ├── security/   # dpapi / secret_store / encryption / keyring_manager
 │   ├── scanner/    # 本地扫描
-│   ├── quality/    # 质检 prompt
 │   ├── versioning/ # 版本树 + diff
 │   ├── chapter_context.py  # 章节 prompt + 上下文组装（单文件）
+│   ├── prose_format.py     # 正文排版归一化（兜底断段 / 去空格 / 连续对白拆段）
 │   ├── paths.py    # 路径解析统一入口（开发态 / 打包态）
 │   ├── watchdog.py # 父进程看门狗（桌面端崩了后端自己退）
 │   └── config.py / logging.py
@@ -138,7 +138,7 @@ class BaseLLMClient(Protocol):
 routing:
   chapter_generation: mimo
   chapter_rewrite: mimo
-  quality_check: ollama
+  summarize: ollama
 ```
 
 业务代码不感知 provider，工厂 `create_llm_client_for_scene("chapter_generation")` 自动按路由解析。
@@ -147,7 +147,7 @@ routing:
 
 **后端**：`StreamingResponse` + `application/x-ndjson`，每行一个 JSON。
 
-单结果流（章节生成 / 重写 / 质检）：
+单结果流（章节生成 / 重写）：
 - 正文增量：`{"text": "..."}`
 - 完成：`{"done": true, "provider": "...", "model": "..."}`
 - 错误：`{"error": "..."}`（transport 类）
@@ -174,10 +174,27 @@ routing:
 ## 6. 关键设计决策
 
 ### 6.1 LLM 路由而不是硬编码
-业务场景可独立配置 provider（如质检走本地 ollama，章节生成走云端 mimo）。
+业务场景可独立配置 provider（如摘要走本地 ollama，章节生成走云端 mimo）。
 
-### 6.2 不存中间结果
-质检报告**不存 DB**（Phase 5 简化）。Phase 6.2 藏书馆再补 `quality_reports` 表。
+### 6.2 正文排版归一化，而不是原样落库
+LLM 返回的正文**不能原样存进编辑器** —— 模型爱犯三个毛病：
+汉字被空格拆开（"山 门 前 的"）、不给段落、连续对白挤在一段。
+
+所以 `core/prose_format.py::ProseFormatter` 做**增量**排版（边流边整理）：
+去汉字间空格（保留英文单词间的）、`\n` → 段落分隔、**兜底断段**（≥30 字遇句末标点）、
+**连续对白强制拆段**（`“甲？”“乙。”` → 两段，但 `将“沈”“砚”二字` 不拆 —— 引用不能拆断）。
+
+配套的两条硬约定：
+
+- **字数 = 非空白字符数**（`count_prose_words`），与 Word 的「字数」和网文平台一致。
+  禁用 `len(text)` —— 会把换行符算进去，界面字数虚高。
+- **前端 `countProseWords` 必须与后端完全一致**（JS 的 `\s` 不匹配全角空格 U+3000，
+  要单独覆盖）。
+
+前端插入也必须是**插进最后一个段落内部**，不能在文末 `insertText` ——
+后者每次 flush 都新建一个段落，1012 个假段落把 3314 字撑成 5338 字。
+
+详见 [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md) §5.4。
 
 ### 6.3 版本控制用软回滚
 每次"回滚"**生成新版本**而不是物理改原版本。完整审计链。
@@ -221,6 +238,7 @@ ChapterGenerator.stream_generate_parts(chapter_id, user_prompt, target_word_coun
   ↓ select_relevant_characters(...) 只带**本章出场**人物卡
   ↓ 拼 prompt (chapter_generation.yaml)
   ↓ create_llm_client_for_scene("chapter_generation") → OpenAI 兼容
+  ↓ ProseFormatter.feed(delta)  ★ 增量排版（去空格 / 兜底断段 / 连续对白拆段）
   ↓ AsyncIterator[(kind, text)]  kind ∈ {thinking, text}
   ↓
 FastAPI StreamingResponse(ndjson)
@@ -228,7 +246,7 @@ FastAPI StreamingResponse(ndjson)
   ↓
 前端 readNdjsonStream → classifyChapterStreamEvent
   ↓ for await 消费
-  ↓ 正文 → editorRef 末尾插入（Tiptap）
+  ↓ 正文 → prose-insert.ts 插进**最后一个段落内部**（Tiptap，不是文末新建段落）
   ↓ 思考 → "模型思考中…"面板（净身后的纯中文）
   ↓
 完成 → PATCH /chapters/{id}/content (trigger=llm_generate)
@@ -260,7 +278,7 @@ DB: chapter.current_version_id = 新版本
 | 流式转发开销 | 每 token ≤ 1ms | 实测 **0.5ms/token**（40 delta，间隔 50.6ms vs mock 50ms） |
 | 章节生成 prompt | 只带**本章出场**人物卡 | `select_relevant_characters()`（一个都没匹配上时退回全部） |
 
-- 后端 `asyncio.gather` 并行 5 维度质检
+- 后端 `asyncio.gather` 并行多版本 LLM 调用（剧情 / 大纲 / 人物卡）
 - **流式链路不是瓶颈 —— 慢在模型**：别再优化"转发"环节，
   要优化的是模型选型、输出长度、思考时长
 - 并行 LLM 调用 + **串行写库**：`AsyncSession` 不是并发安全的，

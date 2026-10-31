@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.chapter import Chapter, ChapterVersion
@@ -18,6 +19,23 @@ from .novel_detector import DetectedNovel
 
 class NovelImportError(Exception):
     """导入失败。"""
+
+
+async def _unique_novel_name(session: AsyncSession, title: str) -> str:
+    """导入用的作品名（撞名就加序号）。
+
+    ⚠️ 素材库里只能有一本同名作品（用户靠名字区分书）。
+    两个同名目录（比如《斗破》有两个副本）导入时必须区分开，
+    否则素材库里会出现两本一模一样的《斗破》，用户分不清哪本是哪个。
+    """
+    name = title
+    index = 1
+    while True:
+        result = await session.execute(select(Novel.id).where(Novel.name == name).limit(1))
+        if result.scalar_one_or_none() is None:
+            return name
+        index += 1
+        name = f"{title} {index}"
 
 
 async def import_detected_novel(
@@ -30,9 +48,9 @@ async def import_detected_novel(
     if detected.chapter_count == 0:
         raise NovelImportError(f"No chapters to import: {detected.dir_path}")
 
-    # 1) 创建 novel
+    # 1) 创建 novel（名字撞车就自动加序号）
     novel = Novel(
-        name=detected.title,
+        name=await _unique_novel_name(session, detected.title),
         genre=genre,
         description=f"从本地目录导入：{detected.dir_path}",
         read_only=True,

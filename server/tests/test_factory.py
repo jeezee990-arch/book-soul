@@ -126,7 +126,7 @@ def test_resolve_provider_for_scene_uses_user_choice(user_settings):
     user_settings("minimax", "MiniMax-M3")
     assert resolve_provider_for_scene("chapter_generation") == "minimax"
     assert resolve_provider_for_scene("plot_generation") == "minimax"
-    assert resolve_provider_for_scene("quality_check") == "minimax"
+    assert resolve_provider_for_scene("summarize") == "minimax"
 
 
 def test_resolve_provider_for_scene_pinned_provider_wins(user_settings, monkeypatch):
@@ -134,8 +134,8 @@ def test_resolve_provider_for_scene_pinned_provider_wins(user_settings, monkeypa
     from src.core.llm.factory import resolve_provider_for_scene
 
     user_settings("minimax", "MiniMax-M3")
-    _pin_routing(monkeypatch, "quality_check", "ollama")
-    assert resolve_provider_for_scene("quality_check") == "ollama"
+    _pin_routing(monkeypatch, "summarize", "ollama")
+    assert resolve_provider_for_scene("summarize") == "ollama"
 
 
 def test_resolve_model_for_scene_uses_user_model(user_settings):
@@ -151,8 +151,8 @@ def test_resolve_model_for_scene_falls_back_to_provider_default(user_settings, m
     from src.core.llm.factory import resolve_model_for_scene
 
     user_settings("minimax", "MiniMax-M3")
-    _pin_routing(monkeypatch, "quality_check", "ollama")
-    assert resolve_model_for_scene("quality_check") == "qwen2.5:14b"
+    _pin_routing(monkeypatch, "summarize", "ollama")
+    assert resolve_model_for_scene("summarize") == "qwen2.5:14b"
 
 
 def test_resolve_provider_for_scene_unknown_falls_back():
@@ -193,8 +193,8 @@ def test_create_llm_client_for_scene_uses_routing(monkeypatch):
 
     monkeypatch.setattr(factory_mod, "_resolve_api_key_for", lambda _: "sk-test-dummy")
 
-    client = factory_mod.create_llm_client_for_scene("quality_check")
-    # quality_check 默认跟随设置页 → 没设置时是 default_provider（mimo）
+    client = factory_mod.create_llm_client_for_scene("summarize")
+    # summarize 默认跟随设置页 → 没设置时是 default_provider（mimo）
     assert client.provider == "mimo"
 
 

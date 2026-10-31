@@ -84,7 +84,7 @@ Phase 0–8 **全部完成**。下表是模块清单与现状代码位置的对�
 | 0.7 Tauri 桌面壳 | ✅ | `apps/desktop/src-tauri/`（lib / sidecar / logging） |
 | 0.8 质量门禁 | ✅ | `.pre-commit-config.yaml`（ruff + gitleaks） |
 | 0.9 GitHub Actions CI | ✅ | `.github/workflows/ci.yml`（backend / frontend / packaging-smoke） |
-| 0.10 端到端验证 | ✅ | `server/tests/` 766 个用例 |
+| 0.10 端到端验证 | ✅ | `server/tests/` 781 个用例 |
 
 ### Phase 1 · 核心后端服务 ✅
 
@@ -136,15 +136,20 @@ Phase 0–8 **全部完成**。下表是模块清单与现状代码位置的对�
 | 4.6 版本控制 | ✅ | `core/versioning/` + `pages/Writing/tabs/version-tab.tsx` |
 | 4.7 导出 md / word | ✅ | `services/export_service.py` + `export_docx.py` |
 
-### Phase 5 · 质检 ✅
+### Phase 5 · 质检 ❌ 已移除
+
+> 2026-10-30：质检模块**整体下线**（用户指令「把质检模块删掉」）。
+> 后端 API / service / prompt / 路由、前端 Tab / 按钮、“质检 → 重写”闭环全部删除。
+> 质检原本**不落库**（不存历史报告），无需数据迁移或 DROP 表。
+> 下表保留为历史记录。
 
 | 模块 | 状态 | 位置 |
 |---|---|---|
-| 5.1 检测范围选择 | ✅ | `pages/Writing/tabs/quality-tab.tsx` |
-| 5.2 多维度并行评分 | ✅ | `services/quality_service.py`（5 维度 `asyncio.gather`） |
-| 5.3 人设一致性 | ✅ | `core/skills/builtin/consistency_checker.py` + `core/chapter_context.py` |
-| 5.4 题材合规性 | ✅ | `config/genres/` + `config/prompts/quality_genre.yaml` |
-| 5.5 报告 UI | ✅ | `quality-tab.tsx`（横向评分条 —— 332px 窄栏放雷达图看不清） |
+| 5.1 检测范围选择 | ❌ **已移除** | 原 `pages/Writing/tabs/quality-tab.tsx` |
+| 5.2 多维度并行评分 | ❌ **已移除** | 原 `services/quality_service.py`（5 维度 `asyncio.gather`） |
+| 5.3 人设一致性 | ✅ 保留 | `core/skills/builtin/consistency_checker.py` + `core/chapter_context.py`（与质检无关） |
+| 5.4 题材合规性 | ❌ **已移除** | 原 `config/prompts/quality_genre.yaml`（`config/genres/` 题材常识库本身保留） |
+| 5.5 报告 UI | ❌ **已移除** | 原 `quality-tab.tsx`（横向评分条） |
 
 ### Phase 6 · 素材库 ✅
 
@@ -170,7 +175,7 @@ Phase 0–8 **全部完成**。下表是模块清单与现状代码位置的对�
 |---|---|---|
 | 8.1 Tauri 打包配置 | ✅ | `src-tauri/tauri.conf.json` + `scripts/build_standalone.ps1` |
 | 8.2 自动 Release | ✅ | `.github/workflows/release.yml` |
-| 8.3 README + 文档 | ✅ | `README.md` + `docs/`（7 份） |
+| 8.3 README + 文档 | ✅ | `README.md` + `docs/`（8 份） |
 
 ### 未启动 · Phase 9+（待规划）
 
@@ -304,4 +309,5 @@ git push origin v0.X.0        # GitHub Actions 自动 build + release
 | v1.0 | 2026-09-02 | 初始计划书（Phase 0-9 完整施工图，3187 行） |
 | v1.1 | 2026-09-02 | 初始确认版（题材优先级、辅助模型 1M 上下文、模型警告机制） |
 | v1.2 | 2026-09-04 | 灵感园三步流程重构（模块 3.1-3.4 重新定义） |
+| **v2.1** | **2026-10-30** | **质检模块整体下线**：Phase 5 标记为已移除；后端 API / service / prompt / 路由、前端 Tab / 按钮、“质检 → 重写”闭环全部删除；写作页右栏 6 Tab → 5 Tab；质检原不落库，无需数据迁移 |
 | **v2.0** | **2026-10-30** | **精简为历史快照**：<br>· 删除约 2500 行逐模块施工步骤（已落地，代码即事实）<br>· 删除尾部 434 行 `USER_CHECKLIST.md` 重复副本（已独立成 `docs/TROUBLESHOOTING.md`）<br>· 修正 ChromaDB 矛盾表述（原写为核心决策，实际已移除）<br>· 模块清单改为「状态 + 代码位置」对照表，标注 3 个已移除模块<br>· 修正本机绝对路径 → `<仓库根>`<br>· 删除与 `AGENTS.md` 冲突的「单次不超过 300 行」限制<br>· 质量门禁改为对齐 `.github/workflows/ci.yml` 实际内容 |

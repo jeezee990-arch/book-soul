@@ -2,6 +2,43 @@
 
 <!--
 修改记录
+- 2026-10-30：第十三轮（质检模块整体下线）。主要变化：
+  · 删除质检模块全部代码：`api/quality.py`、`schemas/quality.py`、`services/quality_service.py`、
+    `core/quality/`（含 prompts.py）、前端 `api/quality.ts` 与 `pages/Writing/tabs/quality-tab.tsx`、
+    `server/tests/test_quality_service.py`、`config/prompts/quality_*.yaml`（5 个）
+  · 质检**不落库**（旧实现明确「不存历史报告」）→ 无需 DROP 表、无需数据备份
+  · 写作页右栏 6 Tab → 5 Tab（生成 / 重写 / 人物 / 大纲 / 版本）；编辑器顶部「质检」快捷按钮删除
+  · 「质检 → 重写」闭环整体移除（`book-soul:rewrite-hint` CustomEvent 一并删）
+  · `config/llm.yaml` 的 `routing` 删除 6 个 quality_* 场景；`skills/manager.py` 去掉 `quality_check` 场景
+  · **保留** `quality_tier`（模型规格的质量档位字段，与质检无关）与 `config/genres/`（题材常识资产）
+  · 文档同步：README / USER_GUIDE / API / ARCHITECTURE / DESIGN / PROJECT_STRUCTURE / SKILLS
+- 2026-10-30：第十二轮（正文排版与字数口径 —— 用户实测的重大质量事故）。主要变化：
+  · §4.11 新增「正文排版与字数口径」四条铁律：
+    字数 = 非空白字符数（禁用 len()）/ 编辑器追加要插进最后一个段落内部 /
+    正文必须过 ProseFormatter 兜底断段 / 正文是纯文本不是 HTML
+  · 新增 `server/src/core/prose_format.py`：增量排版器（去汉字间空格、段落分隔、
+    兜底断段、对白另起段）+ 统一字数口径
+  · `chapter_generator` / `chapter_rewriter` 接入排版器；`chapter_service._word_count`
+    从 `len()` 改为真实字数
+  · `config/prompts/chapter_generation.yaml` v2：强化「必须分段 / 对话独立成段 /
+    汉字之间不加空格 / 不少于目标字数」
+  · MD / HTML 导出补上章节正文（原来只有大纲+人物卡，与 Word 导出不一致）
+  · 导出章节标题去重：标题自带「第 N 章」时不再叠前缀
+    （`export_service.chapter_heading()`，避免「第 1 章 · 第一章 xxx」）
+  · 新增 `scripts/repair_chapter_paragraphs.py`：修复被假段落破坏的历史章节
+    （默认模式重排假段落；`--split-dialogue` 保留段落划分只拆连续对白）
+  · 排版器新增「连续对白强制断段」：引号**以句末标点收尾**才拆
+    （`“甲？”“乙。”` 拆；`将“沈”“砚”二字` 不拆 —— 引用不能拆断）
+- 2026-10-30：第十一轮（命名 + 素材库管理能力）。主要变化：
+  · §6.1 新增「作品名唯一」数据完整性铁律 —— 素材库里同一时间只能有一本同名作品；
+    禁止按名字 upsert 作品（那正是"新书存不进素材库 + 旧书被覆盖"的根因）
+  · 大纲生成改为**靠 id 区分**「重生成同一本」与「新建一本」：
+    传 `novel_id` → 复用该本；不传 → 新建且名字唯一（撞名自动加序号）
+  · 作品新增 `sort_order`（手动顺序，持久化在后端）+ `POST /novels/reorder`
+  · 开新书第 1 步加**书名输入框**（重名自动加序号，不覆盖旧书）
+  · 素材库「作品」Tab 补齐管理能力：右键菜单（重命名 / 删除 / 上移下移 / 导出）、
+    排序下拉、删除确认；作品卡拆成 `NovelCard.tsx`（新增可见的「⋯」入口 + 键盘菜单路径）
+  · 前端 `ApiError` 补 `status` 字段（区分 409 与其它错误）
 - 2026-10-30：第十轮（仓库清理 + 文档重整）。主要变化：
   · 删除 `docs/ui-redesign/`（2026-10 的 UI 重设计提案 + 16 张 mockup 图 + prototype.html，
     共 2.34 MB）—— 提案的视觉规范与实现**不一致**（色板方案未落地，实为 shadcn/ui zinc 灰阶），
@@ -128,7 +165,6 @@ book-soul/
 │   │   │   ├── security/        # dpapi / secret_store / encryption / keyring
 │   │   │   ├── scanner/         # 本地扫描
 │   │   │   ├── versioning/      # 版本树 + diff
-│   │   │   ├── quality/         # 质检 prompt
 │   │   │   ├── chapter_context.py  # 上下文组装（人物卡 → prompt）
 │   │   │   ├── paths.py         # **路径解析统一入口**（开发态/打包态）
 │   │   │   ├── watchdog.py      # 父进程看门狗（桌面端崩了后端自己退）
@@ -144,7 +180,7 @@ book-soul/
 ├── config/
 │   ├── llm.yaml                 # provider 配置 + 场景路由 + 模型规格
 │   ├── app.yaml                 # 用户级默认配置
-│   ├── prompts/                 # 12 个提示词 YAML
+│   ├── prompts/                 # 8 个提示词 YAML
 │   ├── genres/                  # 题材常识（修仙/都市/悬疑/言情）
 │   ├── wordbanks/               # 题材词库
 │   ├── skills/                  # 用户自定义 skill
@@ -165,7 +201,7 @@ book-soul/
 - LLM 抽象在 `core/llm/`，业务不直接 import httpx / 任何 LLM SDK
 - **路径解析统一走 `core/paths.py`**，禁止再写 `_find_repo_root()`（历史上散落 8 处，
   且打包态全部失效）
-- **一级导航只有 4 项**：写作 / 开新书 / 素材库 / 设置。质检、人物卡、大纲、版本
+- **一级导航只有 4 项**：写作 / 开新书 / 素材库 / 设置。人物卡、大纲、版本
   是"当前章节的上下文"，不是独立页面 —— 一律放写作页右栏面板（详见 §2.1）
 
 ### 2.1 前端 UI 架构（2026-10 重设计后）
@@ -179,8 +215,8 @@ AppShell（52px 顶栏 + 56px 图标栏）
 └── /settings  设置      四分区：LLM 与密钥 / 数据与备份 / AI 增强 / 外观
 ```
 
-**写作页右栏 6 个 Tab**：生成 / 重写 / 质检 / 人物 / 大纲 / 版本
-—— 全部围绕"当前章节"展开，质检发现的问题可一键带进重写（闭环）。
+**写作页右栏 5 个 Tab**：生成 / 重写 / 人物 / 大纲 / 版本
+—— 全部围绕"当前章节"展开。
 
 **硬约定**：
 
@@ -216,7 +252,7 @@ AppShell（52px 顶栏 + 56px 图标栏）
 - 一级导航、页面拆分、关键按钮文案、路由路径 —— 任何一项变了，
   上面 5 个文档里对应的段落**同一个 commit 内**改掉。
 - 文档里出现的数字（模块数 / 测试用例数 / 页面数）要**实测**再写，
-  别抄上一版（README 曾写"487 个测试"，实际已是 766）。
+  别抄上一版（README 曾写"487 个测试"，实际已是 802）。
 - 文档里引用的界面文案要**从源码里抄**，别凭印象写。
   例：按钮真叫「生成 3 个剧情」还是「生成 3 个剧情 →」，看 `pages/NewBook/index.tsx`。
 
@@ -416,6 +452,94 @@ if (failure) {
 契约测试：`apps/desktop/src/api/__tests__/streams.test.ts`
 （`detectStreamFailure` 覆盖 transport / server / 缺 message / 正常事件四类）。
 
+### 4.11 正文排版与字数口径（2026-10-30 新增，**用户实测的重大质量事故**）
+
+用户实测反馈：「生成的小说文本多出大量空余字符，没有分段分行，不同人物的对话无法区分」
++「目标字数 3600，程序提示 5338 字，实际 3309 字」。
+
+**取证**（用户真实库 `《骨仙传》第 1 章`）：`len(content)=5338`，其中 **2024 个字符是
+换行**（1012 组 `\n\n`），真实正文只有 **3314 字**（Word 统计 3309 是对的）。
+
+#### 铁律一：字数口径 = **非空白字符数**（含中文标点）
+
+```python
+# server/src/core/prose_format.py::count_prose_words
+return sum(1 for c in text if not c.isspace())
+```
+
+❌ **禁止用 `len(content)`** —— 它把换行符和空格全算进去，界面字数虚高，
+和 Word 导出对不上（这就是"提示 5338 / 实际 3309"的成因）。
+新口径与 Word 的「字数」、网文平台（起点/番茄）一致。
+
+⚠️ 前端 `lib/prose-text.ts::countProseWords` 必须**与后端完全一致**
+（注意 JS 的 `\s` **不匹配全角空格 U+3000**，要单独覆盖）。
+
+#### 铁律二：编辑器追加文本必须插进**最后一个段落内部**
+
+```tsx
+// ❌ 错：在文档末尾 insertText → ProseMirror 会「新建一个段落」
+const docSize = view.state.doc.content.size;
+tr.insertText(text, docSize);
+
+// ✅ 对：最后一个文本块的内容末尾位置
+const last = doc.content.lastChild;
+const pos = doc.content.size - last.nodeSize + 1 + last.content.size;
+```
+
+**为什么这是重大事故**：流式追加是每 16ms 一次 flush，每次 flush 新建一个段落 →
+Tiptap 的 `getText()` 又用 `"\n\n"` 拼块 → 正文被切成 **1012 个 1-7 字的假段落**。
+假换行把字数撑到 5338，重新载入时又因为纯文本被当 HTML 解析成一个大段落，
+界面变成"一行行挤在一起、字间有空格"。
+
+#### 铁律三：正文排版必须过 `ProseFormatter`
+
+`server/src/core/prose_format.py::ProseFormatter`（**增量**，边流边整理）：
+
+| 规则 | 为什么 |
+|---|---|
+| 去掉**汉字之间**的空格 | 模型常见毛病"山 门 前 的"→ 用户看到的"空余字符" |
+| 保留英文单词之间的空格 | 英文句子不能被粘在一起 |
+| 模型给的 `\n` → 段落分隔 | |
+| **兜底断段**（段落 ≥30 字遇句末标点） | 实测 MiniMax-M3.1-Flash **整章零换行**，只靠 prompt 靠不住 |
+| 对白 `”` / `」` 收尾后另起一段 | 多人对话能分辨谁在说话 |
+| **连续对白强制断段** | `“甲？”“乙。”` 直接拆成两段 —— 见下方铁律五 |
+
+生成与重写两条链路都要接：`chapter_generator.py` / `chapter_rewriter.py`。
+
+#### 铁律四：**连续对白**必须拆段，但**引用**不能拆
+
+用户实测的三个痛点之一是「不同人物的对话无法区分」。判据必须精确，否则会拆坏句子：
+
+| 文本 | 拆不拆 | 原因 |
+|---|---|---|
+| `“沈砚？”“沈家村，沈砚。”` | **拆** | 闭引号前是句末标点 `？` → 上一句说完了，换人了 |
+| `将“沈”“砚”二字划去` | **不拆** | 闭引号前是 `沈` → 引号内没有句末标点，这是**引用词语** |
+
+实现（`core/prose_format.py::_starts_new_dialogue`）：三个条件同时成立才断 ——
+① 当前字符是引号开头 `“ ‘ 「`；② 上一个非空白字符是引号收尾 `” ’ 」`；
+③ **收尾引号的前一个字符是句末标点** `。 ！ ？`。
+
+⚠️ 条件 ③ 是关键 —— 少了它，`将“沈”“砚”二字` 会被拆成两段，把词组拆断。
+
+已排版好的历史章节做二次修整用
+`split_consecutive_dialogue()`（**保留原有段落划分**，只拆对白），
+配套 CLI：`scripts/repair_chapter_paragraphs.py --split-dialogue`。
+
+#### 铁律五：正文是**纯文本**，不是 HTML
+
+后端存的是纯文本，段落分隔符是 `\n\n`。前端 `setContent` 必须先把纯文本**转成
+多个段落**再交给 Tiptap，否则纯文本会被当 HTML 解析成一个大段落，
+`\n` 渲染成空格 → 整章挤成一行。
+
+#### 契约测试
+
+- `server/tests/test_prose_format.py` —— 排版器 30 个用例（含连续对白 6 个）
+- `server/tests/test_chapter_generation.py` —— 生成链路确实过了排版器
+- `apps/desktop/src/lib/__tests__/prose-text.test.ts` —— 前端口径与后端一致
+- 历史数据修复：`scripts/repair_chapter_paragraphs.py`
+  - 默认模式：假段落 → 重新断段（还原被流式追加切碎的正文）
+  - `--split-dialogue`：保留段落划分，只拆连续对白
+  - 两种模式都**新建版本**，原版本留在历史里可回滚
 
 
 ---
@@ -513,6 +637,31 @@ cd apps/desktop && pnpm tauri build                                # 前端 + Ru
 - ✅ 章节字数硬限 1k-8k（**唯一来源：`config/llm.yaml` 的 `chapter_limits`**）
 - ✅ context_window 必须 ≥ 32k 才能生成章节
 - ✅ 加密默认关闭，开启后警告用户备份风险
+
+### 6.1 作品名唯一（2026-10-30 新增，数据完整性铁律）
+
+**素材库里同一时间只能有一本同名作品。** 名字去首尾空白后**精确匹配**（不做大小写折叠）。
+
+| 场景 | 必须的行为 | 位置 |
+|---|---|---|
+| 用户主动填名撞车 | 抛 `NovelNameConflictError` → HTTP **409**，前端提示"换个名字" | `services/novel_service.py` |
+| 程序自动命名撞车 | **自动加序号**（`X` → `X 2` → `X 3`），静默避让 | `novel_service.unique_name()` |
+| 导入本地小说撞名 | 同上，自动加序号 | `core/scanner/novel_importer.py` |
+
+**前后端规则必须完全一致** —— 前端的 `lib/novel-name.ts` 和后端的
+`novel_service.name_taken()` 是同一套规则的两份实现，改一处必须改另一处，
+否则会出现"前端说没重名、后端 409"。
+
+> ⚠️ **禁止按名字 upsert 作品**（2026-10-30 修掉的数据丢失 bug）。
+> 旧 `outline_generator._upsert_novel()` 是「`Novel.name == name` 就复用那本」，
+> 结果：程序自动命名撞上已有作品 → 复用旧书 → 同 type 大纲被删掉重建、
+> 人物卡也写进旧书的 `novel_id` → **新书存不进素材库，旧书数据被静默覆盖**。
+>
+> 现在**靠 id 而不是靠名字**区分"重生成同一本"和"新建一本"：
+> `outline_generator._resolve_novel()` —— 传 `novel_id` → 复用该本（名字没被占用才改名）；
+> 不传 → **新建一本**且名字保证唯一。
+> 契约测试：`server/tests/test_outline_generator.py::test_generate_same_name_creates_new_novel`
+> / `test_generate_reuses_novel_by_id`。
 
 ---
 

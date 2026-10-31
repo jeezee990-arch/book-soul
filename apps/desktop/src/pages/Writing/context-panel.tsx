@@ -1,15 +1,14 @@
 /**
  * 上下文面板（写作页右栏 332px）。
  *
- * 6 个 Tab 全部围绕"当前章节"展开：
- * 生成 / 重写 / 质检 / 人物 / 大纲 / 版本
+ * 5 个 Tab 全部围绕"当前章节"展开：
+ * 生成 / 重写 / 人物 / 大纲 / 版本
  *
- * 重设计要点：质检、人物卡、大纲原本是独立页面（或根本没有页面），
+ * 重设计要点：人物卡、大纲原本是独立页面（或根本没有页面），
  * 现在统一收进右栏 —— 用户不用跳页，章节上下文始终在。
  */
 
 import {
-  ListChecks,
   ScrollText,
   Sparkles,
   Users,
@@ -21,7 +20,6 @@ import type { PanelTab } from "./types";
 import type { ChapterStreamApi } from "./use-chapter-stream";
 import GenerateTab from "./tabs/generate-tab";
 import RewriteTab from "./tabs/rewrite-tab";
-import QualityTab from "./tabs/quality-tab";
 import CharacterTab from "./tabs/character-tab";
 import OutlineTab from "./tabs/outline-tab";
 import VersionTab from "./tabs/version-tab";
@@ -36,7 +34,6 @@ interface TabDef {
 const TABS: TabDef[] = [
   { key: "generate", label: "生成", icon: Sparkles },
   { key: "rewrite", label: "重写", icon: Wand2 },
-  { key: "quality", label: "质检", icon: ListChecks },
   { key: "characters", label: "人物", icon: Users },
   { key: "outline", label: "大纲", icon: ScrollText },
   { key: "versions", label: "版本", icon: History },
@@ -50,10 +47,8 @@ interface Props {
   stream: ChapterStreamApi;
   /** 当前选区（重写用） */
   selection: { from: number; to: number; text: string } | null;
-  /** 章节版本号变化时触发刷新（版本 Tab / 质检 Tab 用） */
+  /** 章节版本号变化时触发刷新（版本 Tab 用） */
   versionTick: number;
-  /** 从质检跳到重写（带问题描述预填） */
-  onRewriteFromQuality: (suggestion: string) => void;
 }
 
 export default function ContextPanel({
@@ -64,12 +59,11 @@ export default function ContextPanel({
   stream,
   selection,
   versionTick,
-  onRewriteFromQuality,
 }: Props) {
   return (
     <aside className="flex w-[332px] shrink-0 flex-col border-l border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
       {/* Tab 头 */}
-      <div className="grid shrink-0 grid-cols-6 border-b border-neutral-200 dark:border-neutral-800">
+      <div className="grid shrink-0 grid-cols-5 border-b border-neutral-200 dark:border-neutral-800">
         {TABS.map((t) => {
           const on = t.key === tab;
           return (
@@ -107,14 +101,6 @@ export default function ContextPanel({
             chapter={chapter}
             stream={stream}
             selection={selection}
-          />
-        ) : null}
-
-        {tab === "quality" ? (
-          <QualityTab
-            novel={novel}
-            chapter={chapter}
-            onRewriteFromQuality={onRewriteFromQuality}
           />
         ) : null}
 

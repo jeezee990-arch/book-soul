@@ -8,18 +8,50 @@
 - 错误响应：`{"detail": "..."}` + HTTP 状态码
   - `400` 参数错（业务校验）
   - `404` 资源不存在
+  - `409` **资源冲突**（作品名撞车 —— 素材库里同一时间只能有一本同名作品）
   - `422` Pydantic 校验失败 / 业务前置条件不满足
   - `500` 内部错误（LLM 失败等）
   - `501` 端点未启用
 - 时间格式：ISO 8601（UTC）
 - ID：自增整数
 
+### 字数口径（2026-10-30 起统一）
+
+`word_count` 一律 = **非空白字符数**（含中文标点，英文单词整体算一个字符位）。
+
+```python
+# server/src/core/prose_format.py
+count_prose_words(text)  # 后端唯一实现
+```
+```ts
+// apps/desktop/src/lib/prose-text.ts
+countProseWords(text)     // 前端唯一实现，必须与后端一致
+```
+
+与 Word 的「字数」以及网文平台的计字方式一致。
+⚠️ **禁止用 `len(text)`** —— 那会把换行和空格算进去（历史上界面显示 5338 字、
+Word 里实际只有 3309 字，差 61%）。
+
+### 正文格式
+
+- 章节正文（`chapter_versions.content`）是**纯文本**，**不是 HTML**
+- 段落之间用**空行**（`\n\n`）分隔；单个 `\n` 也算段落边界
+- 生成 / 重写链路会过 `ProseFormatter`（`server/src/core/prose_format.py`）：
+  去汉字间多余空格、模型没分段时兜底断段、对白单独成段
+- **连续对白会拆成独立段落**：`“甲？”“乙。”` → 两段。
+  判据是「引号以句末标点收尾」→ 换人说话；引号内无句末标点 → 是引用，不拆
+- 前端拿到正文后转成段落化 HTML 再交给编辑器，**后端不产出 HTML**
+
 ---
 
 ## Novels
 
+> **作品名唯一约束**：`name` 去首尾空白后**精确匹配**（不做大小写折叠）。
+> 用户主动命名撞车 → `409`；程序自动命名 / 导入撞车 → **自动加序号**
+> （`X` → `X 2` → `X 3` …），静默避让，不打断流程。
+
 ### `GET /novels`
-列出作品。
+列出作品。**按 `sort_order ASC, id ASC` 返回**（`sort_order` 即"手动顺序"）。
 
 Query: `?genre=修仙&status=draft&limit=100&offset=0`
 
@@ -33,14 +65,30 @@ Body:
 {"name": "凡人修仙传", "genre": "xiuxian", "description": "..."}
 ```
 
+- `name` 撞车 → **409** `{"detail": "..."}`
+- `sort_order` 由服务端分配（追加到末尾）
+
+### `POST /novels/reorder`
+按新顺序重排作品（素材库「上移 / 下移」用）。
+
+Body: `{"ids": [3, 1, 2]}` —— 按数组顺序写 `sort_order`。
+
+Response: `{"items": [Novel, ...]}`（按新顺序排列）
+
+> 未出现在 `ids` 里的作品按原相对次序**推到后面**（不会因为 `sort_order=0` 跳到最前）。
+> ⚠️ 路径必须注册在 `/{novel_id}` **之前**，否则会被 path param 吞掉。
+
 ### `GET /novels/{id}`
 详情。
 
 ### `PATCH /novels/{id}`
 部分更新。
 
+- 改名撞车 → **409** `{"detail": "..."}`
+- 不传 `name` 则不检查重名（其他字段更新不受影响）
+
 ### `DELETE /novels/{id}`
-删除（幂等）。
+删除（幂等）。级联删除该书的**章节 / 人物卡 / 大纲**；关联灵感置空（保留灵感本身）。
 
 ---
 
@@ -161,12 +209,27 @@ Body:
   "plot_summary": "...",
   "keywords": ["废柴", "逆袭"],
   "novel_name": "凡人修仙传",
+  "novel_id": null,
   "outline_type": "complete"
 }
 ```
 
+> ⚠️ **`novel_id` 决定是"重生成同一本"还是"新建一本"**（2026-10-30 修掉的数据丢失 bug）
+>
+> | 传法 | 行为 |
+> |---|---|
+> | `novel_id` 有值 | **复用这一本**（同一向导内退回重生成）。名字没变就不动；变了且未被占用才改名 |
+> | `novel_id` 为 null | **新建一本**，名字保证唯一（撞名自动加序号 `X` → `X 2`） |
+>
+> 旧实现是「**按书名 upsert**」：名字撞上就复用那本书，再把同 type 的大纲删掉重建、
+> 人物卡也写进它的 `novel_id` —— 新书存不进素材库，旧书的数据被静默覆盖。
+> 现在**靠 id 而不是靠名字**区分。
+>
+> `novel_id` 指向的作品已被删除 → 降级为新建一本（记 warning，不打断流程）。
+
 ### `POST /novels/outlines/generate/stream`
-流式生成大纲（NDJSON）。
+流式生成大纲（NDJSON）。请求体同 `POST /novels/outlines/generate`
+（**含 `novel_id`**，规则完全一致）。
 
 事件协议（2026-10-25 改版，2026-10-29 补两阶段细化事件）：
 
@@ -179,7 +242,7 @@ Body:
 | `volume_done` | `index`, `name` | 某卷补细节完成 |
 | `partial` | `structure`, `chapters_done` | **已解析好的**部分大纲结构（卷 → 章 → 关键事件） |
 | `structure_ready` | `structure` | 全部卷细化完成 |
-| `done` | `novel_id`, `outline_id`, `structure`, `provider`, `model`, `elapsed_sec`, `first_delta_sec` | 完成（含耗时统计） |
+| `done` | `novel_id`, `novel_name`, `outline_id`, `structure`, `provider`, `model`, `elapsed_sec`, `first_delta_sec` | 完成（含耗时统计） |
 | `error` | `message` | 失败 |
 
 > ⚠️ 2026-10-25 之前还有 `delta` 事件（LLM 吐的**原始 JSON** 文本）。
@@ -242,16 +305,6 @@ Body: `{"ids": [3, 1, 2]}` —— 按数组顺序写 `sort_order`。
 
 ---
 
-## Quality（Phase 5）
-
-### `POST /novels/{id}/chapters/{cid}/quality`
-5 维度并行评分。返回 `QualityReport`（总分 + 维度分 + issues + suggestions）。
-
-### `POST /novels/{id}/chapters/{cid}/quality/stream`
-流式质检（NDJSON），逐维度出分。
-
----
-
 ## Scanner（Phase 6.3）
 
 ### `POST /scanner/scan`
@@ -264,12 +317,18 @@ Response: `{"novels": [DetectedNovel, ...]}`
 
 Response: `{"novel_id": int, "name": "...", "chapter_count": int}`
 
+> 作品名与已有作品撞车时**自动加序号**（`X` → `X 2`），不会覆盖已有作品。
+
 ---
 
 ## Export（Phase 4.7）
 
 ### `GET /novels/{id}/export?format=md|html|docx`
 多格式导出。返回 JSON: `{"filename", "mime", "content_b64"}`。
+
+**三种格式内容一致**，都包含：大纲 + 人物卡 + **章节正文**。
+正文按段落分隔（与编辑器里看到的段落一致），Word 导出同样按段落切分
+（不再把整章塞进一个段落）。
 
 ---
 

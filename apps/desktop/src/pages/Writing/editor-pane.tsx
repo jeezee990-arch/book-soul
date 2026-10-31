@@ -92,17 +92,6 @@ const EditorPane = forwardRef<NovelEditorHandle, Props>(function EditorPane(
             <Wand2 className="h-3.5 w-3.5" />
             重写
           </button>
-          <button
-            type="button"
-            onClick={() => onOpenTab("quality")}
-            className={cn(
-              "inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11.5px] transition-colors",
-              "border-indigo-500/40 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20",
-            )}
-          >
-            <Check className="h-3.5 w-3.5" />
-            质检
-          </button>
         </div>
       </header>
 

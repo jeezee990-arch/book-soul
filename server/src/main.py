@@ -231,7 +231,7 @@ def run_from_cli(argv: list[str] | None = None) -> None:
         "--parent-pid",
         type=int,
         default=None,
-        help="父进程 pid；桌面端传��，父进程消失时后端自动退出",
+        help="父进程 pid；桌面端传入，父进程消失时后端自动退出",
     )
     # ⚠️ 必须把 argv 传进去：parse_args() 不带参数时读的是 sys.argv[1:]，
     #    在测试里那会变成 pytest 的参数 → argparse 直接 SystemExit(2)。

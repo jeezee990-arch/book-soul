@@ -97,7 +97,19 @@ class MockHandler(BaseHTTPRequestHandler):
             payload = {}
 
         if not payload.get("stream"):
-            text = "非流式响应。" * 20
+            # ⚠️ 2026-10-30 修：非流式分支以前固定返回"非流式响应。"，
+            #    但**两阶段大纲的骨架阶段走的就是非流式调用**
+            #    （``outline_two_phase.py`` 里 ``llm.chat(...)`` 不带 stream=True）。
+            #    → 后端拿到一段没有 JSON 的文本 → "骨架 JSON 解析失败" → 500，
+            #    「开新书」在第 3 步直接失败。
+            #    现在非流式也走同一套内容选择（``pick_content``），
+            #    保证 mock 对两种调用方式给同样的内容。
+            fallback = "字" * min(CHARS_PER_CHUNK * CHUNK_COUNT, MAX_FALLBACK_CHARS)
+            text = pick_content(
+                extract_prompt_text(payload),
+                fallback=fallback,
+                variant=next(_VARIANT_COUNTER),
+            )
             self._json(
                 {
                     "choices": [{"message": {"content": text}, "finish_reason": "stop"}],

@@ -16,6 +16,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.prose_format import count_prose_words
 from ..core.versioning.diff import compute_unified_diff
 from ..models.chapter import CHAPTER_STATUSES, VERSION_TRIGGERS, Chapter, ChapterVersion
 from ..models.novel import Novel
@@ -27,8 +28,15 @@ from ..schemas.chapter import (
 
 
 def _word_count(content: str) -> int:
-    """v1 简单字数 = len(content)；后续可换中文分词。"""
-    return len(content)
+    """章节字数 = **非空白字符数**（含中文标点）。
+
+    ⚠️ 2026-10-30 修正：原来用 ``len(content)``，把换行符和空格全算进去了 →
+    界面显示的字数虚高（用户实测：正文 3309 字，界面显示 5338）。
+    现在的口径与 Word 导出底部的「字数」一致，也是网文平台通行口径。
+
+    详见 :func:`src.core.prose_format.count_prose_words`。
+    """
+    return count_prose_words(content)
 
 
 class ChapterServiceError(Exception):

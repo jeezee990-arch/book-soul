@@ -3,13 +3,18 @@
  *
  * 旧实现里「新建作品」是一个死按钮（点开只弹「敬请期待」toast），
  * 但后端 POST /novels 早就绪了 —— 这里接上它。
+ *
+ * 2026-10-30 补：重名检测。
+ * 素材库里不能有两本同名作品（用户靠名字区分书）→ 输入时**当场提示**，
+ * 并给一键改名按钮，别等提交了才报错（后端会返 409）。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { novelsApi } from "@/api/novels";
 import { ApiError } from "@/api";
 import { GENRE_PRIORITY } from "@/config/genres";
+import { duplicateHint, uniqueName } from "@/lib/novel-name";
 import {
   Dialog,
   DialogContent,
@@ -39,14 +44,32 @@ export default function CreateNovelDialog({
   const [genre, setGenre] = useState(GENRE_PRIORITY[0].name);
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
+  /** 素材库里已有的作品名（用来查重） */
+  const [existingNames, setExistingNames] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) {
       setName("");
       setGenre(GENRE_PRIORITY[0].name);
       setDescription("");
+      // 拉一次现有作品名用于查重（失败不阻塞创建）
+      void novelsApi
+        .list()
+        .then((list) => setExistingNames(list.map((n) => n.name)))
+        .catch(() => setExistingNames([]));
     }
   }, [open]);
+
+  /** 重名提示（为空 = 不重名）。 */
+  const hint = useMemo(
+    () => duplicateHint(name, existingNames),
+    [name, existingNames],
+  );
+  /** 自动避让后的名字（「用这个」按钮填它）。 */
+  const suggested = useMemo(
+    () => (name.trim() ? uniqueName(name, existingNames) : ""),
+    [name, existingNames],
+  );
 
   async function submit() {
     const trimmed = name.trim();
@@ -71,6 +94,12 @@ export default function CreateNovelDialog({
       onCreated(novel);
       onOpenChange(false);
     } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error("已有同名作品", {
+          description: `素材库里已经有《${trimmed}》，换个名字吧`,
+        });
+        return;
+      }
       const msg = e instanceof ApiError ? e.message : String(e);
       toast.error("创建失败", { description: msg });
     } finally {
@@ -99,6 +128,20 @@ export default function CreateNovelDialog({
               maxLength={120}
               autoFocus
             />
+            {hint ? (
+              <div className="flex items-center gap-2 text-[11.5px] text-amber-600 dark:text-amber-400">
+                <span className="flex-1">{hint}</span>
+                {suggested !== name.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => setName(suggested)}
+                    className="shrink-0 rounded-md border border-amber-500/40 px-1.5 py-0.5 transition-colors hover:bg-amber-500/10"
+                  >
+                    用「{suggested}」
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-1.5">

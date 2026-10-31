@@ -201,10 +201,11 @@ scene_limits:
 #
 # "@settings" = 跟随设置页的选择（用户在设置页选了 minimax，创作就真的用 minimax）
 # 写死具体 provider 名 = 该场景强制用那个
-#   例：本机跑了 Ollama，想让质检走本地不花钱 → 把 quality_check 改成 ollama
+#   例：本机跑了 Ollama，想让摘要走本地不花钱 → 把 summarize 改成 ollama
 #
 # 2026-10-22 改：原先全部写死 mimo，导致"设置页选了 minimax 也没用"；
 # 质检类场景写死 ollama，导致没装 Ollama 的机器质检直接失败。
+# 2026-10-30：质检模块整体移除，连带 quality_* 场景路由一并删除。
 routing:
   inspiration: "@settings"
   plot_generation: "@settings"
@@ -214,10 +215,4 @@ routing:
   character_generation: "@settings"
   chapter_generation: "@settings"
   chapter_rewrite: "@settings"
-  quality_check: "@settings"
   summarize: "@settings"
-  quality_writing: "@settings"
-  quality_logic: "@settings"
-  quality_pacing: "@settings"
-  quality_consistency: "@settings"
-  quality_genre: "@settings"

@@ -10,6 +10,7 @@
 - file_path 可选，本地文件路径
 - imported 默认 False（扫描接入标志）
 - read_only 默认 False
+- sort_order 手动排序序号（2026-10-30 素材库管理）：下标越小越靠前
 """
 
 from __future__ import annotations
@@ -51,6 +52,10 @@ class Novel(Base, TimestampMixin):
     read_only: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0", index=True
+    )
+    """手动排序序号（下标越小越靠前）。素材库「作品」Tab 用它持久化用户排的顺序。"""
 
     def __repr__(self) -> str:
         return f"<Novel id={self.id} name={self.name!r} status={self.status}>"

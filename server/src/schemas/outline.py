@@ -166,7 +166,10 @@ class OutlineGenerationRequest(BaseModel):
 
     - 必传 ``plot_summary``（来自 3.3 PlotGenerator 保存的 PLOT 卡 content.summary）
     - ``genre`` 用于 prompt 注入；``keywords`` 可选（让 LLM 知道强调什么）
-    - ``novel_name`` 可选（缺省用 "{genre}新作"）
+    - ``novel_name`` 可选（缺省用 "{genre}新作"；撞名会自动加序号）
+    - ``novel_id`` 可选（2026-10-30）：传了就**复用这一本**重写大纲，
+      不传就**新建一本**。靠 id 而不是名字区分"重生成"和"新建"，
+      否则名字撞上素材库里已有的书时，新书会被合并进旧书（大纲被冲掉）。
     - ``outline_type`` 取值 ``complete``（分卷/章，完整写到全书结束）、
       ``semi_open``（半开放式：只写前期并留悬念）或 ``freedom``（散文+节拍）
 
@@ -197,6 +200,14 @@ class OutlineGenerationRequest(BaseModel):
     plot_summary: str = Field(min_length=10, max_length=5000)
     keywords: list[str] = Field(default_factory=list, max_length=50)
     novel_name: str | None = Field(default=None, max_length=200)
+    novel_id: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "要复用哪本书（重生成同一本的大纲）。不传 = 新建一本。"
+            "名字撞车时靠它区分，不会把新书合并进旧书。"
+        ),
+    )
     outline_type: str = Field(
         default="complete",
         description=(

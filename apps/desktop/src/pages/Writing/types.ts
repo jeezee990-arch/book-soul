@@ -2,11 +2,10 @@
  * 写作页共享类型。
  */
 
-/** 右栏上下文面板的 6 个 Tab。 */
+/** 右栏上下文面板的 5 个 Tab。 */
 export type PanelTab =
   | "generate"
   | "rewrite"
-  | "quality"
   | "characters"
   | "outline"
   | "versions";
