@@ -4,6 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/jeezee990-arch/book-soul/actions/workflows/ci.yml/badge.svg)](https://github.com/jeezee990-arch/book-soul/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jeezee990-arch/book-soul?label=release)](https://github.com/jeezee990-arch/book-soul/releases/latest)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev/)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-blueviolet.svg)](https://tauri.app/)
@@ -59,7 +60,8 @@ Book Soul 是一款为网文作者和严肃文学作者设计的 **AI 辅助写�
 
 **系统要求**：Windows 10 / 11 x64。**不需要**装 Python / Node / Rust，**不需要**开终端，**不会**弹黑色控制台。
 
-1. 前往 [Releases](https://github.com/jeezee990-arch/book-soul/releases/latest) 下载最新的 `Book Soul_<版本>_x64-setup.exe`
+1. 前往 [Releases](https://github.com/jeezee990-arch/book-soul/releases/latest) 下载最新的 `*_x64-setup.exe`
+   （GitHub 会把文件名中的空格显示为 `.`，例如 `Book.Soul_0.1.1_x64-setup.exe`）
 2. 双击安装 → 开始菜单和桌面会出现 "Book Soul" 图标
 3. 启动后在 **设置 → LLM 与密钥** 填入 API Key（推荐 mimo，国内直连免 VPN）
 4. 进 **开新书** 页，走三步流程：种子 → 剧情 → 大纲与人物

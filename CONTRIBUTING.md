@@ -83,6 +83,7 @@ cd src-tauri && cargo check
    git push origin main --tags
    ```
 
-6. 等 Release workflow 完成，确认 Releases 页面有 `Book Soul_0.1.1_x64-setup.exe`。
+6. 等 Release workflow 完成，确认 Releases 页面有 `Book.Soul_0.1.1_x64-setup.exe`
+   （GitHub 会把上传文件名里的空格显示为 `.`）。
 
 > 不要在版本号没对齐时打 tag —— 安装包名、程序内版本、CHANGELOG 会对不上。
