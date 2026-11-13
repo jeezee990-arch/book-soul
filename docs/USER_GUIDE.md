@@ -96,11 +96,11 @@
 ```powershell
 # 1) 假段落 → 重新断段（丢掉被切碎的段落边界，按标点重排）
 & .\.venv\Scripts\python.exe scripts\repair_chapter_paragraphs.py `
-    --data-dir "C:\Users\JZ\Desktop\Book Soul\dist\Book Soul\data"
+    --data-dir "<仓库根>\dist\Book Soul\data"
 
 # 2) 段落划分不动，只把挤在一起的连续对白拆开
 & .\.venv\Scripts\python.exe scripts\repair_chapter_paragraphs.py `
-    --data-dir "C:\Users\JZ\Desktop\Book Soul\dist\Book Soul\data" --split-dialogue
+    --data-dir "<仓库根>\dist\Book Soul\data" --split-dialogue
 ```
 
 两种模式都会**新建一个版本**，原版本留在版本历史里，随时可回滚。

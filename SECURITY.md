@@ -17,7 +17,8 @@ Book Soul 是一款**本地优先**的桌面应用，**所有用户数据**（�
 1. **`.gitignore`** —— 严格排除上述文件
 2. **`.gitleaks.toml`** —— 提交前自动扫描密钥泄露
 3. **`.pre-commit-config.yaml`** —— 包含 `gitleaks` 钩子，泄露时阻断 commit
-4. **GitHub Actions** —— CI 二次验证
+4. **GitHub Actions** —— CI 跑 ruff / pytest / pnpm test / cargo check
+   （密钥扫描由 pre-commit 的 gitleaks 钩子负责，不在 CI 内重复跑）
 5. **AGENTS.md 强制规范** —— agent 不得硬编码 Key
 
 ### 如何正确管理 API Key
@@ -87,9 +88,10 @@ git commit -m "Remove .env from tracking"
 
 如发现 Book Soul 存在安全漏洞：
 
-- 优先开 **GitHub Issue** 并标记 `security`
-- 或走 GitHub 的 [Private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
-  （仓库 Settings → Security 需要先启用）
+- **优先**走 GitHub 的 [Private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
+  （仓库 **Security → Report a vulnerability**；维护者开启后即可用）
+- 如果该入口暂不可用，再开一个 **不含细节** 的 Issue，只说明"想报告安全问题"，
+  维护者会私信联系你
 
 **不要**在公开 Issue 中泄露漏洞细节（利用代码、影响范围、复现步骤）。
 

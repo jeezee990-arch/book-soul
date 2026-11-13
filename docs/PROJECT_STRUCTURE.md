@@ -307,7 +307,7 @@ config/
 ```
 
 > **venv 在仓库根，不在 `server/`** —— 根 `pyproject.toml` 是 uv workspace
-> （`[tool.uv.workspace] members = ["server"]`），`uv sync` 在**根目录**执行，
+> （`[tool.uv.workspace] members = ["server"]`），`uv sync --all-packages --extra dev` 在**根目录**执行，
 > venv 落在 `<仓库根>/.venv/`。`scripts\dev.ps1` 和 `build_standalone.ps1` 都硬编码
 > `<仓库根>\.venv\Scripts\python.exe`，所以这个位置不能改。
 
@@ -571,13 +571,15 @@ docs/
 └── screenshots/         # 真机截图（5 张，真实数据）
 ```
 
-根目录的三份：
+根目录的规范与治理文件：
 
 | 文件 | 定位 |
 |---|---|
 | `AGENTS.md` | **技术规范**（强制）—— 技术栈 / 分层铁律 / LLM 调用规范 / 打包 / 测试 / 提交流程 |
 | `DEVELOPMENT_CONSTRAINTS.md` | **行为约束** —— 沟通 / 流程 / 决策 / agent 工作流 |
 | `PROJECT_PLAN.md` | **历史快照 + 决策记录** —— 核心设计决策、明确不做的事、54 个模块的完成状态 |
+| `CONTRIBUTING.md` | 贡献与发布流程 —— 环境准备 / 测试 / commit 规范 / tag 发布 |
+| `CHANGELOG.md` | 版本变更记录（Keep a Changelog） |
 | `SECURITY.md` | 安全策略 —— 密钥存储 / 数据流向 / 备份路径 |
 
 **分三层，别混**：

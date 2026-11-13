@@ -44,7 +44,6 @@ ENV/
 .coverage
 .coverage.*
 htmlcov/
-.pytest_cache/
 *.egg-info/
 dist/
 build/
@@ -53,7 +52,6 @@ build/
 # ===== Node / pnpm =====
 node_modules/
 .pnpm-store/
-dist/
 .vite/
 .turbo
 *.tsbuildinfo
@@ -84,7 +82,6 @@ Thumbs.db
 *.exe
 *.dll
 *.dylib
-*.so
 *.dmg
 *.msi
 *.deb
@@ -99,8 +96,6 @@ Thumbs.db
 coverage/
 coverage.xml
 .server.coverage.xml
-htmlcov/
-.pytest_cache/
 *.nyc_output/
 
 # ===== 项目特定 =====

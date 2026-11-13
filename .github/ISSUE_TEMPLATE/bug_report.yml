@@ -1,0 +1,80 @@
+name: Bug 报告
+description: 报告可复现的问题（崩溃、生成异常、界面错误等）
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先看 [TROUBLESHOOTING](https://github.com/jeezee990-arch/book-soul/blob/main/docs/TROUBLESHOOTING.md)，
+        并确认问题在最新 Release 或最新 main 上仍能复现。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 现象、错误提示、截图（如果有）
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开...
+        2. 点击...
+        3. 看到...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Book Soul 版本
+      description: 设置页显示的版本，或 Release 文件名
+      placeholder: "0.1.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows 11
+        - Windows 10
+        - 其他（请注明）
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: 使用的 LLM Provider
+      options:
+        - mimo
+        - MiniMax
+        - OpenAI
+        - Ollama
+        - 未配置 / 与问题无关
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: |
+        `data/logs/desktop.log`、`server.log` 的相关片段。
+        **请先删除 API Key、作品正文等敏感内容。**
+      render: text
+    validations:
+      required: false

@@ -3,6 +3,7 @@
 > 小说 AI 写作桌面应用 · 人物卡驱动的本地优先创作工具
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/jeezee990-arch/book-soul/actions/workflows/ci.yml/badge.svg)](https://github.com/jeezee990-arch/book-soul/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev/)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-blueviolet.svg)](https://tauri.app/)
@@ -54,15 +55,18 @@ Book Soul 是一款为网文作者和严肃文学作者设计的 **AI 辅助写�
 
 ## 快速启动
 
-### 方式 A · 独立版（推荐给普通用户）
+### 方式 A · 安装包（推荐给普通用户）
 
-**不需要**装 Python / Node / Rust，**不需要**开终端，**不会**弹黑色控制台。
+**系统要求**：Windows 10 / 11 x64。**不需要**装 Python / Node / Rust，**不需要**开终端，**不会**弹黑色控制台。
 
-1. 前往 [Releases](https://github.com/jeezee990-arch/book-soul/releases) 下载 `Book Soul_0.1.0_x64-setup.exe`
+1. 前往 [Releases](https://github.com/jeezee990-arch/book-soul/releases/latest) 下载最新的 `Book Soul_<版本>_x64-setup.exe`
 2. 双击安装 → 开始菜单和桌面会出现 "Book Soul" 图标
 3. 启动后在 **设置 → LLM 与密钥** 填入 API Key（推荐 mimo，国内直连免 VPN）
 4. 进 **开新书** 页，走三步流程：种子 → 剧情 → 大纲与人物
 
+> 安装包暂未做代码签名，Windows SmartScreen 可能提示「未知发布者」——
+> 点「更多信息」→「仍要运行」即可。
+>
 > 安装模式是 `currentUser`，装到你的用户目录（不写 `Program Files`，避免只读导致数据写不进去）。
 
 ### 方式 B · 开发模式（改代码时用）
@@ -73,10 +77,13 @@ Book Soul 是一款为网文作者和严肃文学作者设计的 **AI 辅助写�
 |---|---|---|
 | Python | ≥ 3.11 | 后端运行时 |
 | [uv](https://docs.astral.sh/uv/) | ≥ 0.4 | Python 包管理（**不要用 pip / poetry**） |
-| Node.js | ≥ 20 | 前端构建 |
-| pnpm | ≥ 9 | Node 包管理（**不要用 npm / yarn**） |
+| Node.js | ≥ 22.13 | 前端构建（pnpm 11 的最低要求） |
+| pnpm | 11.x | Node 包管理（版本由 `packageManager` 锁定，**不要用 npm / yarn**） |
 | Rust | ≥ 1.74 | Tauri 2 壳 |
-| Tauri 系统依赖 | Linux 必需 | `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf` |
+| MSVC C++ Build Tools | 最新 | **Windows 编译 Rust 必需**：安装 Visual Studio Build Tools，勾选「使用 C++ 的桌面开发」 |
+| WebView2 | Windows 10/11 | 运行 Tauri 前端；Windows 11 通常已自带，Win10 缺了就装 [Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) |
+
+> 当前只提供 **Windows** 桌面版（NSIS 安装包）。macOS / Linux 需要先补齐对应平台的 sidecar 与打包脚本。
 
 **安装依赖**
 
@@ -85,15 +92,17 @@ git clone https://github.com/jeezee990-arch/book-soul.git
 cd book-soul
 
 # 后端 —— 根 pyproject.toml 是 uv workspace（members = ["server"]），
-# venv 统一落在**仓库根的 .venv/**，所以在根目录执行
-uv sync
+# venv 统一落在**仓库根的 .venv/**，所以在根目录执行。
+# 必须带 --all-packages --extra dev：pytest / ruff / pyinstaller 都在 dev extra 里，
+# 只跑 uv sync 会得到一个没有任何后端依赖的空环境。
+uv sync --all-packages --extra dev
 
 # 前端
 cd apps/desktop && pnpm install && cd ../..
 ```
 
 > `dev.ps1` / `build_standalone.ps1` 都硬编码用 `<仓库根>\.venv\Scripts\python.exe`，
-> 所以 venv 位置必须是仓库根 —— 这也是为什么要 `uv sync` 而不是在 `server/` 里单独建 venv。
+> 所以 venv 位置必须是仓库根 —— 这也是为什么要在根目录 `uv sync --all-packages --extra dev`，而不是在 `server/` 里单独建 venv。
 
 **启动**
 
@@ -116,6 +125,7 @@ cd apps/desktop && pnpm tauri dev
 ```
 
 > `pnpm tauri dev` 一条命令就够了 —— Tauri 的 `beforeDevCommand` 会先拉起 Python 后端并等 `/ping` 就绪，再起 Vite。
+> 首次运行要编译 Rust 依赖，通常需要 **5–10 分钟**；之后走缓存会快很多。
 > 端口不用手工管：Rust 侧优先复用 8765 上「本项目」的后端，没有就自己分配随机空闲端口并下发给前端。
 
 **常用命令**
@@ -175,7 +185,7 @@ book-soul/
 │   │   │   ├── layout/              # 应用外壳（52px 顶栏 / 56px 图标栏）
 │   │   │   ├── ui/                  # shadcn/ui 原子组件
 │   │   │   ├── novel-switcher.tsx   # 全局作品切换器（唯一入口）
-│   │   │   ├── model-status-pill.tsx# 顶栏模型状态灯
+│   │   │   ├── model-status-pill.tsx # 顶栏模型状态灯
 │   │   │   └── ...                  # DiffViewer / CharacterCard / ErrorBoundary ...
 │   │   ├── pages/                   # 4 个一级页面
 │   │   │   ├── Writing/             # 写作（index + 5 个右栏 Tab + 流式 hook）
@@ -249,7 +259,7 @@ book-soul/
 │   ├── install_shortcut.ps1 / uninstall_shortcut.ps1
 │   ├── mock_provider.py             # 无 API Key 也能走完「开新书」三步
 │   └── repair_chapter_paragraphs.py # 修复历史章节被假段落破坏的排版
-││
+│
 ├── docs/                            # 文档
 │   ├── DESIGN.md                    # 界面设计规范（信息架构 + 视觉规范）
 │   ├── PROJECT_STRUCTURE.md         # 项目结构详解（目录职责 + 数据流）
@@ -265,6 +275,8 @@ book-soul/
 ├── uv.lock                          # Python 依赖锁定
 ├── AGENTS.md                        # 技术规范（强制）
 ├── DEVELOPMENT_CONSTRAINTS.md       # 行为约束（沟通 / 流程 / 决策）
+├── CONTRIBUTING.md                  # 贡献与发布流程
+├── CHANGELOG.md                     # 版本变更记录
 ├── PROJECT_PLAN.md                  # 项目计划书（历史快照 + 决策记录）
 ├── SECURITY.md                      # 安全策略
 ├── data/                            # 运行时数据（不入 git）
@@ -318,6 +330,8 @@ book-soul/
 | [API 参考](docs/API.md) | 后端所有端点 |
 | [Skill 系统](docs/SKILLS.md) | 内置技能与自定义 Skill 写法 |
 | [项目计划书](PROJECT_PLAN.md) | 核心设计决策 + 模块完成状态（历史快照） |
+| [贡献指南](CONTRIBUTING.md) | 开发环境、测试命令、提交与发布流程 |
+| [变更日志](CHANGELOG.md) | 每个版本改了什么 |
 | [安全策略](SECURITY.md) | 密钥存储 / 数据流向 / 备份 |
 | [AGENTS.md](AGENTS.md) | 参与开发前必读的技术规范 |
 | [DEVELOPMENT_CONSTRAINTS.md](DEVELOPMENT_CONSTRAINTS.md) | 沟通 / 流程 / 决策约束 |
@@ -342,7 +356,14 @@ book-soul/
 
 ## 贡献
 
-欢迎 PR / Issue！提交前请确保：
+欢迎 PR / Issue！提交前请先装好依赖：
+
+```bash
+uv sync --all-packages --extra dev
+cd apps/desktop && pnpm install
+```
+
+然后确保：
 
 1. `cd server && uv run pytest` 全过（781 个）
 2. `cd server && uv run ruff check .` 无 error
@@ -351,7 +372,7 @@ book-soul/
 5. `cd apps/desktop/src-tauri && cargo check` 无 error
 6. commit message 说清改了什么、关联哪个模块
 
-详见 [AGENTS.md](./AGENTS.md) 和 [DEVELOPMENT_CONSTRAINTS.md](./DEVELOPMENT_CONSTRAINTS.md)。
+完整流程见 [CONTRIBUTING.md](./CONTRIBUTING.md)；技术规范见 [AGENTS.md](./AGENTS.md) 和 [DEVELOPMENT_CONSTRAINTS.md](./DEVELOPMENT_CONSTRAINTS.md)。
 
 ## 许可
 

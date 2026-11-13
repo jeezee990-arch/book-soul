@@ -50,7 +50,7 @@ Get-Content "dist\Book Soul\data\logs\desktop.log" -Tail 50 -Wait
 | `cargo not found` | Rust 没装或不在 PATH | 装 [rustup](https://rustup.rs/)，或确认 `~\.cargo\bin` 在 PATH |
 | `linker not found` | 缺 MSVC | 装 Visual Studio Build Tools + **C++ 工作负载** |
 | 窗口白屏 | WebView2 缺失（Windows 10） | 装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) |
-| 后端起不来 | `.venv` 缺失 | 仓库根执行 `uv sync` |
+| 后端起不来 | `.venv` 缺失 | 仓库根执行 `uv sync --all-packages --extra dev` |
 
 ### 2.3 端口 8765 被占用（开发模式）
 
@@ -233,7 +233,7 @@ Remove-Item -Recurse -Force apps\desktop\node_modules
 Remove-Item -Recurse -Force .venv
 
 # 然后重装
-uv sync                                    # 仓库根
+uv sync --all-packages --extra dev         # 仓库根
 cd apps\desktop; pnpm install; cd ..\..\  # 前端
 ```
 
@@ -246,7 +246,7 @@ cd apps\desktop; pnpm install; cd ..\..\  # 前端
 | `apps\desktop\src-tauri\target\` | **8.7 GB** | 重编译（debug 几分钟，release 20-40 分钟） |
 | `data\dev\_smoke\` | 371 MB | 无（Edge 走查残留的浏览器 profile） |
 | `server\build` + `server\dist` + `server\.mypy_cache` | 113 MB | PyInstaller 中间产物 + mypy 缓存 |
-| `.venv` | 154 MB | `uv sync` 重装 |
+| `.venv` | 154 MB | `uv sync --all-packages --extra dev` 重装 |
 | `apps\desktop\node_modules` | 184 MB | `pnpm install` 重装 |
 
 ```powershell

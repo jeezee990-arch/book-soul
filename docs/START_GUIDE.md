@@ -1,7 +1,7 @@
 # Book Soul 启动指南 + 人工验证清单
 
-> 对应版本：2026-10 重构版
-> 面向对象：项目所有者（JEE），单人使用
+> 对应版本：0.1.1（2026-11）
+> 面向：第一次从源码运行，或发布前做人工验收的人
 
 ---
 
@@ -12,7 +12,7 @@
 **你需要做什么**：双击一个 exe。
 
 ```
-C:\Users\JZ\Desktop\Book Soul\dist\Book Soul\Book Soul.exe
+<仓库根>\dist\Book Soul\Book Soul.exe
 ```
 
 - **不需要**装 Python / Node / Rust
@@ -23,18 +23,18 @@ C:\Users\JZ\Desktop\Book Soul\dist\Book Soul\Book Soul.exe
 如果 `dist\Book Soul\` 还不存在，先构建一次：
 
 ```powershell
-cd "C:\Users\JZ\Desktop\Book Soul"
+cd "<仓库根>"
 powershell -ExecutionPolicy Bypass -File scripts\build_standalone.ps1
 ```
 
-> 首次构建约 4-6 分钟（Rust release 编译最慢）；之后约 1.5 分钟。
+> 首次构建约 5-8 分钟（Rust release 编译最慢）；之后约 1-2 分钟。
 
 ### 方式 B：安装包
 
 构建时会同时产出 NSIS 安装包：
 
 ```
-apps\desktop\src-tauri\target\release\bundle\nsis\Book Soul_0.1.0_x64-setup.exe
+apps\desktop\src-tauri\target\release\bundle\nsis\Book Soul_<版本>_x64-setup.exe
 ```
 
 双击安装 → 开始菜单和桌面会出现 "Book Soul" 图标 → 点图标启动。
@@ -43,7 +43,7 @@ apps\desktop\src-tauri\target\release\bundle\nsis\Book Soul_0.1.0_x64-setup.exe
 ### 方式 C：开发模式（改代码时用）
 
 ```powershell
-cd "C:\Users\JZ\Desktop\Book Soul"
+cd "<仓库根>"
 powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 ```
 
@@ -66,7 +66,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install_shortcut.ps1
 
 ### ✅ 第 1 步：独立版能不能起来（最重要）
 
-**打开什么**：文件资源管理器 → `C:\Users\JZ\Desktop\Book Soul\dist\Book Soul\` → 双击 `Book Soul.exe`
+**打开什么**：文件资源管理器 → `<仓库根>\dist\Book Soul\` → 双击 `Book Soul.exe`
 
 **看什么**：
 1. 屏幕上出现一个标题为 **Book Soul** 的窗口（1400×900）
@@ -103,7 +103,7 @@ data\
 
 **怎么算通过**：`book-soul.db` 存在，且文件大小在增长
 
-**反证测试**：把整个 `dist\Book Soul\` 文件夹复制到桌面（比如 `C:\Users\JZ\Desktop\BS\`），
+**反证测试**：把整个 `dist\Book Soul\` 文件夹复制到桌面（比如 `<桌面>\BS\`），
 双击那里的 `Book Soul.exe` —— 依然能用，数据写在**新位置**的 `data\` 里。
 这证明它真的不依赖仓库、不依赖注册表。
 
@@ -261,11 +261,11 @@ README.txt             ← 简短说明
 ```powershell
 # 1) 假段落 → 重新断段
 & .\.venv\Scripts\python.exe scripts\repair_chapter_paragraphs.py `
-    --data-dir "C:\Users\JZ\Desktop\Book Soul\dist\Book Soul\data"
+    --data-dir "<仓库根>\dist\Book Soul\data"
 
 # 2) 段落划分不动，只拆挤在一起的连续对白
 & .\.venv\Scripts\python.exe scripts\repair_chapter_paragraphs.py `
-    --data-dir "C:\Users\JZ\Desktop\Book Soul\dist\Book Soul\data" --split-dialogue
+    --data-dir "<仓库根>\dist\Book Soul\data" --split-dialogue
 ```
 会**新建一个版本**，原版本保留在版本历史里，随时可回滚。加 `--dry-run` 先看不写库。
 
