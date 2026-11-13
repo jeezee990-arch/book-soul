@@ -1,6 +1,6 @@
 [package]
 name = "book-soul-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Book Soul - AI 辅助小说写作桌面应用"
 authors = ["JEE"]
 edition = "2021"

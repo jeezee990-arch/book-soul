@@ -1,8 +1,13 @@
 {
   "name": "book-soul-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22.13",
+    "pnpm": ">=11"
+  },
   "description": "Book Soul - AI 辅助小说写作桌面应用（前端）",
   "scripts": {
     "dev": "vite",
